@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ember and Ash</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- =============================================
+       HEADER
+  ============================================= -->
+  <header id="header">
+    <div id="header-left">
+      <span id="game-title">EMBER AND ASH</span>
+    </div>
+    <div id="header-center">
+      <span id="location-display">—</span>
+    </div>
+    <div id="header-right">
+      <button class="header-btn" id="btn-save"    title="Save Game">SAVE</button>
+      <button class="header-btn" id="btn-settings" title="Settings">⚙</button>
+    </div>
+  </header>
+
+
+  <!-- =============================================
+       MAIN LAYOUT — THREE PANELS
+  ============================================= -->
+  <main id="main-layout">
+
+    <!-- LEFT PANEL — Character -->
+    <aside id="panel-left">
+
+      <section class="panel-section" id="section-identity">
+        <div class="panel-label">CHARACTER</div>
+        <div id="char-level">Level 1</div>
+        <div id="char-background" class="dim">—</div>
+        <div id="char-description" class="dim small">—</div>
+      </section>
+
+      <section class="panel-section" id="section-resources">
+        <div class="resource-row">
+          <span class="res-label">HP</span>
+          <div class="bar-track"><div class="bar-fill bar-hp" id="bar-hp"></div></div>
+          <span class="res-value" id="val-hp">—</span>
+        </div>
+        <div class="resource-row">
+          <span class="res-label">MP</span>
+          <div class="bar-track"><div class="bar-fill bar-mp" id="bar-mp"></div></div>
+          <span class="res-value" id="val-mp">—</span>
+        </div>
+        <div class="resource-row">
+          <span class="res-label">ST</span>
+          <div class="bar-track"><div class="bar-fill bar-st" id="bar-st"></div></div>
+          <span class="res-value" id="val-st">—</span>
+        </div>
+      </section>
+
+      <section class="panel-section" id="section-stats">
+        <div class="panel-label">ATTRIBUTES</div>
+        <div class="stats-grid">
+          <div class="stat-cell"><span class="stat-name">STR</span><span class="stat-val" id="stat-str">—</span></div>
+          <div class="stat-cell"><span class="stat-name">DEX</span><span class="stat-val" id="stat-dex">—</span></div>
+          <div class="stat-cell"><span class="stat-name">VIT</span><span class="stat-val" id="stat-vit">—</span></div>
+          <div class="stat-cell"><span class="stat-name">INT</span><span class="stat-val" id="stat-int">—</span></div>
+          <div class="stat-cell"><span class="stat-name">WIS</span><span class="stat-val" id="stat-wis">—</span></div>
+          <div class="stat-cell"><span class="stat-name">CHA</span><span class="stat-val" id="stat-cha">—</span></div>
+        </div>
+        <div id="free-points-banner" class="hidden">
+          <span id="free-points-count">0</span> FREE POINT(S) — type "spend point on [stat]"
+        </div>
+      </section>
+
+      <section class="panel-section" id="section-progression">
+        <div class="panel-label">PROGRESSION</div>
+        <div id="xp-display" class="dim small">XP: 0</div>
+        <div id="class-display" class="dim">No class yet</div>
+        <div id="profession-display" class="dim">No profession yet</div>
+      </section>
+
+      <section class="panel-section" id="section-gear">
+        <div class="panel-label">GEAR</div>
+        <div id="gear-weapon" class="dim small">Unarmed</div>
+        <div id="gear-armor"  class="dim small">Unarmored</div>
+      </section>
+
+      <section class="panel-section" id="section-inventory">
+        <div class="panel-label">CARRYING</div>
+        <div id="inventory-list" class="dim small">Nothing.</div>
+      </section>
+
+      <section class="panel-section" id="section-economy">
+        <div class="panel-label">WEALTH</div>
+        <div id="coin-display" class="dim">0 copper</div>
+        <div id="reputation-display" class="dim small">Unknown</div>
+      </section>
+
+      <section class="panel-section" id="section-companions" class="hidden">
+        <div class="panel-label">COMPANIONS</div>
+        <div id="companions-list" class="dim small">None.</div>
+      </section>
+
+    </aside>
+
+
+    <!-- CENTER PANEL — Story -->
+    <section id="panel-center">
+
+      <div id="story-output">
+        <div id="story-content"></div>
+      </div>
+
+      <!-- =============================================
+           CHARACTER CREATION WIZARD
+           Shown during creation phases 1-4.
+           Hidden once creation is complete.
+      ============================================= -->
+      <div id="creation-wizard" class="hidden">
+
+        <!-- Step 1: Name / Age / Gender -->
+        <div id="cw-step-1" class="cw-step hidden">
+          <div class="cw-header">
+            <span class="cw-step-label">CHAPTER ONE</span>
+            <span class="cw-step-title">Who are you?</span>
+          </div>
+          <div class="cw-body">
+            <div class="cw-field">
+              <label class="cw-label">NAME <span class="cw-label-note">(optional — leave blank to remain nameless)</span></label>
+              <input type="text" id="cw-name" class="cw-text-input" placeholder="Enter a name..." maxlength="40" autocomplete="off" spellcheck="false" />
+            </div>
+            <div class="cw-field-row">
+              <div class="cw-field cw-field-age">
+                <label class="cw-label">AGE</label>
+                <div class="cw-scroll-list" id="cw-age-list" tabindex="0"></div>
+              </div>
+              <div class="cw-field cw-field-gender">
+                <label class="cw-label">GENDER</label>
+                <div class="cw-gender-btns">
+                  <button class="cw-gender-btn" data-value="male">MALE</button>
+                  <button class="cw-gender-btn" data-value="female">FEMALE</button>
+                  <button class="cw-gender-btn" data-value="other">OTHER</button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="cw-footer">
+            <div id="cw-step1-error" class="cw-error hidden">Please select an age and gender.</div>
+            <button class="cw-btn-next" id="cw-next-1">CONTINUE →</button>
+          </div>
+        </div>
+
+        <!-- Step 2: Physical Description -->
+        <div id="cw-step-2" class="cw-step hidden">
+          <div class="cw-header">
+            <span class="cw-step-label">CHAPTER TWO</span>
+            <span class="cw-step-title">Describe yourself</span>
+          </div>
+          <div class="cw-body">
+            <div class="cw-field-row">
+              <div class="cw-field cw-field-height">
+                <label class="cw-label">HEIGHT</label>
+                <div class="cw-scroll-list" id="cw-height-list" tabindex="0"></div>
+              </div>
+              <div class="cw-field cw-field-build">
+                <label class="cw-label">BUILD</label>
+                <div class="cw-scroll-list" id="cw-build-list" tabindex="0"></div>
+              </div>
+            </div>
+            <div class="cw-field">
+              <label class="cw-label">
+                DISTINGUISHING FEATURES
+                <span class="cw-label-note"> — scars, marks, hair, eyes, anything notable</span>
+              </label>
+              <textarea id="cw-features" class="cw-textarea" placeholder="Describe any defining features... or leave blank." rows="3" maxlength="300" spellcheck="true"></textarea>
+            </div>
+          </div>
+          <div class="cw-footer">
+            <button class="cw-btn-back" id="cw-back-2">← BACK</button>
+            <button class="cw-btn-next" id="cw-next-2">CONTINUE →</button>
+          </div>
+        </div>
+
+        <!-- Step 3: Background -->
+        <div id="cw-step-3" class="cw-step hidden">
+          <div class="cw-header">
+            <span class="cw-step-label">CHAPTER THREE</span>
+            <span class="cw-step-title">Where did you come from?</span>
+          </div>
+          <div class="cw-body">
+            <div class="cw-field">
+              <label class="cw-label">
+                BACKGROUND
+                <span class="cw-label-note"> — or describe your history in the box below</span>
+              </label>
+              <div class="cw-scroll-list cw-scroll-list-tall" id="cw-background-list" tabindex="0"></div>
+            </div>
+            <div class="cw-field">
+              <label class="cw-label">OR DESCRIBE YOUR HISTORY <span class="cw-label-note">(overrides selection above)</span></label>
+              <textarea id="cw-bg-freeform" class="cw-textarea" placeholder='e.g. "I spent years hunting game in the forest..." or "I served in the army for a decade..."' rows="2" maxlength="300" spellcheck="true"></textarea>
+            </div>
+          </div>
+          <div class="cw-footer">
+            <div id="cw-step3-error" class="cw-error hidden">Select a background or describe your history.</div>
+            <button class="cw-btn-back" id="cw-back-3">← BACK</button>
+            <button class="cw-btn-next" id="cw-next-3">CONTINUE →</button>
+          </div>
+        </div>
+
+        <!-- Step 4: Starting Environment -->
+        <div id="cw-step-4" class="cw-step hidden">
+          <div class="cw-header">
+            <span class="cw-step-label">CHAPTER FOUR</span>
+            <span class="cw-step-title">Where does your story begin?</span>
+          </div>
+          <div class="cw-body">
+            <div class="cw-env-grid" id="cw-env-grid"></div>
+          </div>
+          <div class="cw-footer">
+            <div id="cw-step4-error" class="cw-error hidden">Choose a starting environment.</div>
+            <button class="cw-btn-back" id="cw-back-4">← BACK</button>
+            <button class="cw-btn-next" id="cw-next-4">BEGIN →</button>
+          </div>
+        </div>
+
+      </div><!-- /#creation-wizard -->
+
+      <div id="input-area" class="hidden">
+        <div id="input-wrapper">
+          <textarea
+            id="player-input"
+            placeholder="What do you do?"
+            rows="3"
+            maxlength="500"
+            autocomplete="off"
+            spellcheck="true"
+          ></textarea>
+          <button id="btn-submit">▶</button>
+        </div>
+        <div id="input-meta">
+          <span id="char-count">0 / 500</span>
+          <span id="action-hint" class="dim">Enter to submit · Shift+Enter for new line</span>
+        </div>
+      </div>
+
+    </section>
+
+
+    <!-- RIGHT PANEL — World -->
+    <aside id="panel-right">
+
+      <section class="panel-section" id="section-threat">
+        <div class="panel-label" id="threat-label">SURROUNDINGS</div>
+
+        <!-- Enemy display — shown during combat -->
+        <div id="enemy-display" class="hidden">
+          <div id="enemy-name" class="threat-name">—</div>
+          <div id="enemy-desc" class="dim small">—</div>
+          <div class="resource-row" style="margin-top:8px">
+            <span class="res-label">HP</span>
+            <div class="bar-track"><div class="bar-fill bar-enemy" id="bar-enemy"></div></div>
+            <span class="res-value" id="enemy-hp-label">—</span>
+          </div>
+          <div id="enemy-behavior" class="dim small">—</div>
+        </div>
+
+        <!-- NPC display — shown during social scenes -->
+        <div id="npc-display" class="hidden">
+          <div id="npc-name" class="threat-name">—</div>
+          <div id="npc-rapport" class="dim small">—</div>
+        </div>
+
+        <!-- Neutral — no combat, no NPC -->
+        <div id="neutral-display">
+          <div id="scene-context-display" class="dim small">Exploring</div>
+          <div id="ambient-threats" class="dim small" style="margin-top:6px">—</div>
+        </div>
+
+      </section>
+
+      <section class="panel-section" id="section-location">
+        <div class="panel-label">LOCATION</div>
+        <div id="location-name" class="dim">—</div>
+        <div id="location-desc" class="dim small">—</div>
+      </section>
+
+      <section class="panel-section" id="section-summary">
+        <div class="panel-label">STORY SO FAR</div>
+        <div id="story-summary" class="dim small">Your story has just begun.</div>
+      </section>
+
+      <section class="panel-section" id="section-deathgear" class="hidden">
+        <div class="panel-label">⚠ GEAR AT DEATH SITE</div>
+        <div id="death-gear-location" class="dim small">—</div>
+        <div class="dim small">Type "recover gear" to retrieve it.</div>
+      </section>
+
+    </aside>
+
+  </main>
+
+
+  <!-- =============================================
+       SETTINGS MODAL
+  ============================================= -->
+  <div id="modal-settings" class="modal hidden">
+    <div class="modal-box">
+      <div class="modal-title">SETTINGS</div>
+
+      <div class="modal-row">
+        <span>Adult content (NSFW)</span>
+        <label class="toggle">
+          <input type="checkbox" id="toggle-nsfw" />
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div class="modal-note dim small">
+        When enabled, intimate scenes play out fully when earned through rapport and charisma.
+        When disabled, scenes fade to black.
+      </div>
+
+      <div class="modal-divider"></div>
+
+      <div class="modal-row">
+        <span>Account</span>
+        <div id="auth-status" class="dim small">Guest session</div>
+      </div>
+
+      <div id="auth-forms">
+        <div id="form-login" class="auth-form">
+          <input type="text"     id="input-username" placeholder="Username" autocomplete="username" />
+          <input type="password" id="input-password" placeholder="Password" autocomplete="current-password" />
+          <div class="auth-buttons">
+            <button class="modal-btn" id="btn-login">LOG IN</button>
+            <button class="modal-btn secondary" id="btn-show-register">REGISTER</button>
+          </div>
+          <div id="auth-error" class="error-msg hidden">—</div>
+        </div>
+
+        <div id="form-register" class="auth-form hidden">
+          <input type="text"     id="input-reg-username" placeholder="Username (3-20 chars)" />
+          <input type="password" id="input-reg-password" placeholder="Password (min 6 chars)" />
+          <input type="email"    id="input-reg-email"    placeholder="Email (optional)" />
+          <div class="auth-buttons">
+            <button class="modal-btn" id="btn-register">CREATE ACCOUNT</button>
+            <button class="modal-btn secondary" id="btn-show-login">BACK</button>
+          </div>
+          <div id="reg-error" class="error-msg hidden">—</div>
+        </div>
+      </div>
+
+      <div class="modal-divider"></div>
+      <button class="modal-btn secondary" id="btn-close-settings">CLOSE</button>
+    </div>
+  </div>
+
+
+  <!-- =============================================
+       LOADING OVERLAY
+  ============================================= -->
+  <div id="loading-overlay" class="hidden">
+    <div id="loading-inner">
+      <div id="loading-spinner"></div>
+      <div id="loading-text">The world turns...</div>
+    </div>
+  </div>
+
+
+  <script src="game.js"></script>
+</body>
+</html>
