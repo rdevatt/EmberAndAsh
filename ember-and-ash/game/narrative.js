@@ -62,8 +62,15 @@ STRICT RULES:
 - NEVER use phrases like "your stats", "your inventory", "you have gained XP"
 - DO reflect physical state through description — a wounded character moves differently, breathes harder
 - DO use the character's appearance, background, and gear in your descriptions naturally
-- Keep responses between 80 and 200 words unless a scene genuinely demands more
-- End on a beat that invites the next action — not a cliffhanger, just an open moment
+- Response length should match the scene. Quiet moments can breathe. Action can be punchy. Rich scenes deserve rich prose. Do not artificially cap length.
+- End on an open beat — describe the world settling into stillness, waiting. Never write the player's next action or decision for them.
+
+PLAYER AGENCY — THIS IS ABSOLUTE:
+- NEVER write dialogue spoken by the player character. If the player says "follow her", narrate the following — not words spoken.
+- NEVER put words in the player's mouth. NEVER have the player character say something the player did not explicitly write.
+- NEVER restate or echo back what the player just typed. Begin the response with what happens next, not a recap.
+- NEVER decide what the player does after the current action. End the scene in a moment of stillness. Leave the next move entirely to the player.
+- If the player types an action, narrate ONLY that action and its consequences. Nothing more.
 
 INTIMATE SCENES:
 - If instructed to write an intimate scene, treat it as one story beat among many
@@ -222,7 +229,7 @@ function buildFullPrompt(state, playerInput) {
 // Single responsibility: call the API and return text.
 // All error handling lives here.
 // =============================================
-async function callGroq(prompt, systemOverride = null) {
+async function callGroq(prompt, systemOverride = null, history = []) {
   try {
     const response = await getGroqClient().chat.completions.create({
       model:       MODEL,
@@ -233,6 +240,7 @@ async function callGroq(prompt, systemOverride = null) {
           role:    'system',
           content: systemOverride || SYSTEM_PROMPT
         },
+        ...history,
         {
           role:    'user',
           content: prompt
@@ -485,9 +493,20 @@ async function processNarrative(state, playerInput, events = []) {
     };
   }
 
-  // Build prompt and call Groq
+  // Build prompt and call Groq with rolling conversation history
   const prompt   = buildFullPrompt(state, playerInput);
-  const aiResult = await callGroq(prompt);
+  const history  = (state.conversationHistory || []).slice(-20);
+  const aiResult = await callGroq(prompt, null, history);
+
+  // Store this exchange in history for next turn
+  if (aiResult.success) {
+    if (!state.conversationHistory) state.conversationHistory = [];
+    state.conversationHistory.push({ role: 'user',      content: prompt });
+    state.conversationHistory.push({ role: 'assistant', content: aiResult.text });
+    if (state.conversationHistory.length > 20) {
+      state.conversationHistory = state.conversationHistory.slice(-20);
+    }
+  }
 
   // Build event announcements
   const announcements = buildEventAnnouncements(events);
