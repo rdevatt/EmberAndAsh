@@ -198,11 +198,12 @@ app.post('/api/auth/guest', (req, res) => {
     if (existing) {
       setSession(existingId, { state: existing.state, playerId: null, saveSlot: null, saveId: null });
       return res.json({
-        success:    true,
-        sessionId:  existingId,
-        resumed:    true,
-        inCreation: isInCreation(existing.state),
-        isReady:    isReady(existing.state)
+        success:      true,
+        sessionId:    existingId,
+        resumed:      true,
+        inCreation:   isInCreation(existing.state),
+        isReady:      isReady(existing.state),
+        storySummary: existing.state.storySummary || ''
       });
     }
   }
@@ -243,9 +244,10 @@ app.post('/api/saves/load', requireSession, (req, res) => {
   setSession(req.sessionId, req.session);
 
   res.json({
-    success:   true,
-    character: buildCharacterPanelData(save.state),
-    rightPanel:buildRightPanelData(save.state)
+    success:      true,
+    character:    buildCharacterPanelData(save.state),
+    rightPanel:   buildRightPanelData(save.state),
+    storySummary: save.state.storySummary || ''
   });
 });
 

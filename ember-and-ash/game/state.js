@@ -126,7 +126,11 @@ function createFreshState() {
     // --- Story Summary ---
     // Rolling summary updated by narrative module every N turns
     storySummary:     '',
-    summaryUpdatedAt: 0    // actionCount when summary was last updated
+    summaryUpdatedAt: 0,
+
+    // --- Conversation History ---
+    // Rolling last 10 exchanges passed to Groq for continuity
+    conversationHistory: []
   };
 }
 

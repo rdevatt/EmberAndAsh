@@ -17,6 +17,7 @@ const client = {
   isLoading:     false,
   inCreation:    true,
   creationStep:  1,   // 1-4 wizard steps
+  lastInput:     null, // tracks last player action for retry
   // Gathered creation data
   creation: {
     name:       '',
@@ -200,7 +201,10 @@ async function initSession() {
       // Fully created character — jump straight into the game
       client.inCreation = false;
       await refreshPanels();
-      appendStory(null, 'Your story continues...', false);
+      const resumeMsg = data.storySummary
+        ? `— Your story so far —\n\n${data.storySummary}\n\n— — —`
+        : 'Your story continues...';
+      appendStory(null, resumeMsg, false);
       el.creationWizard.classList.add('hidden');
       el.inputArea.classList.remove('hidden');
       el.playerInput.focus();
@@ -235,6 +239,9 @@ async function submitAction() {
 
   const input = el.playerInput.value.trim();
   if (!input || client.isLoading) return;
+
+  // Track for retry
+  client.lastInput = input;
 
   setLoading(true);
   el.playerInput.value = '';
@@ -278,6 +285,52 @@ async function submitAction() {
   client.inCreation = data.inCreation || false;
 
   // Update all panels
+  if (data.character)   updateCharacterPanel(data.character);
+  if (data.progression) updateProgressionPanel(data.progression);
+  if (data.economy)     updateEconomyPanel(data.economy);
+  if (data.rightPanel)  updateRightPanel(data.rightPanel);
+}
+
+
+// =============================================
+// RETRY LAST ACTION
+// Regenerates the AI response for the last player input.
+// Replaces the existing story entry in-place.
+// =============================================
+async function retryLastAction(entryToReplace) {
+  if (!client.lastInput || client.isLoading) return;
+
+  setLoading(true);
+
+  const { ok, data } = await apiCall('POST', '/action', { input: client.lastInput });
+
+  setLoading(false);
+
+  if (!ok) {
+    appendStory(null, data.error || 'Something went wrong.', false);
+    return;
+  }
+
+  if (data.output && entryToReplace) {
+    const parts = splitNarrativeAndAnnouncements(data.output);
+    let html = '';
+    if (parts.narrative) {
+      html += `<div class="ai-response">${escapeHtml(parts.narrative)}</div>`;
+    }
+    if (parts.announcements) {
+      html += `<div class="announcement">${escapeHtml(parts.announcements.trim())}</div>`;
+    }
+    entryToReplace.innerHTML = html;
+
+    // Re-attach retry button
+    const retryBtn = document.createElement('button');
+    retryBtn.className = 'retry-btn';
+    retryBtn.textContent = '↺ Retry';
+    retryBtn.title = 'Regenerate this response';
+    retryBtn.addEventListener('click', () => retryLastAction(entryToReplace));
+    entryToReplace.appendChild(retryBtn);
+  }
+
   if (data.character)   updateCharacterPanel(data.character);
   if (data.progression) updateProgressionPanel(data.progression);
   if (data.economy)     updateEconomyPanel(data.economy);
@@ -487,8 +540,8 @@ function appendStory(playerAction, text, isCreation = false) {
   entry.className = 'story-entry';
 
   // Split narrative from announcements (announcements start with \n[)
-  const parts     = splitNarrativeAndAnnouncements(text);
-  let html        = '';
+  const parts = splitNarrativeAndAnnouncements(text);
+  let html    = '';
 
   if (parts.narrative) {
     const cssClass = isCreation ? 'creation-text' : 'ai-response';
@@ -500,13 +553,24 @@ function appendStory(playerAction, text, isCreation = false) {
   }
 
   entry.innerHTML = html;
+
+  // Add retry button for non-creation AI responses only
+  if (!isCreation && parts.narrative) {
+    const retryBtn = document.createElement('button');
+    retryBtn.className = 'retry-btn';
+    retryBtn.textContent = '↺ Retry';
+    retryBtn.title = 'Regenerate this response';
+    retryBtn.addEventListener('click', () => retryLastAction(entry));
+    entry.appendChild(retryBtn);
+  }
+
   el.storyContent.appendChild(entry);
   scrollToBottom();
 }
 
 function splitNarrativeAndAnnouncements(text) {
   // Announcements are lines starting with [ that follow the main narrative
-  const lines        = text.split('\n');
+  const lines             = text.split('\n');
   const narrativeLines    = [];
   const announcementLines = [];
   let inAnnouncements     = false;
@@ -776,7 +840,7 @@ function cwBuildScrollList(container, items, onSelect) {
 
   // Keyboard nav
   container.addEventListener('keydown', e => {
-    const opts  = [...container.querySelectorAll('.cw-option:not(.cw-option-cat)')];
+    const opts   = [...container.querySelectorAll('.cw-option:not(.cw-option-cat)')];
     const curIdx = selectedEl ? opts.indexOf(selectedEl) : -1;
     if (e.key === 'ArrowDown') {
       e.preventDefault();
@@ -977,13 +1041,8 @@ function cwBuildStep4() {
 // The server currently sends background lists as numbered text lines.
 // We parse them to build the UI list. Falls back to empty if parse fails.
 function cwParseBgFromServerPrompt(promptText) {
-  // Static full list embedded here — mirrors BACKGROUNDS + magical ones in constants.js
-  // Hardcoded to avoid a round-trip. Filtered by age/gender happens server-side anyway.
-  // We use the response's list structure to know which are available.
-  // Simple approach: the server's phase-3 prompt contains lines like "1. Farmboy — ..."
   const lines  = promptText.split('\n');
   const result = [];
-  let idx      = 1;
 
   for (const line of lines) {
     // Match "1. Label — desc" or "1. Label *(Mana Bolt)* — desc"
@@ -1028,6 +1087,22 @@ function cwDismiss() {
   el.creationWizard.classList.add('hidden');
   el.inputArea.classList.remove('hidden');
   el.playerInput.focus();
+}
+
+// ---- Safety valve — if creation dismissal somehow fails, show a manual button ----
+function showCreationFallback() {
+  if (document.getElementById('cw-fallback-btn')) return;
+  const btn = document.createElement('button');
+  btn.id = 'cw-fallback-btn';
+  btn.textContent = 'BEGIN YOUR STORY →';
+  btn.style.cssText = 'margin: 20px auto; display: block; padding: 10px 24px; background: #8b6914; color: #f0e6c8; border: none; cursor: pointer; font-size: 13px; letter-spacing: 2px;';
+  btn.onclick = () => {
+    client.inCreation = false;
+    cwDismiss();
+    btn.remove();
+  };
+  el.storyContent.appendChild(btn);
+  btn.scrollIntoView({ behavior: 'smooth' });
 }
 
 
@@ -1114,7 +1189,15 @@ async function cwSubmitStep4() {
 async function cwSendAndAdvance(text, onSuccess) {
   setLoading(true);
 
-  const { ok, data } = await apiCall('POST', '/action', { input: text });
+  let ok, data;
+  try {
+    ({ ok, data } = await apiCall('POST', '/action', { input: text }));
+  } catch (e) {
+    setLoading(false);
+    appendStory(null, 'Connection error. Please try again.', true);
+    return;
+  }
+
   setLoading(false);
 
   if (!ok) {
@@ -1122,6 +1205,8 @@ async function cwSendAndAdvance(text, onSuccess) {
       ? `${data.error || 'Something went wrong.'} [${data.detail}]`
       : (data.error || 'Something went wrong.');
     appendStory(null, errMsg, true);
+    // Show a manual dismiss button so the player can't get permanently stuck
+    showCreationFallback();
     return;
   }
 
@@ -1129,13 +1214,17 @@ async function cwSendAndAdvance(text, onSuccess) {
     appendStory(null, data.output, true);
   }
 
-  if (data.character)   updateCharacterPanel(data.character);
-  if (data.progression) updateProgressionPanel(data.progression);
-  if (data.economy)     updateEconomyPanel(data.economy);
-  if (data.rightPanel)  updateRightPanel(data.rightPanel);
+  try {
+    if (data.character)   updateCharacterPanel(data.character);
+    if (data.progression) updateProgressionPanel(data.progression);
+    if (data.economy)     updateEconomyPanel(data.economy);
+    if (data.rightPanel)  updateRightPanel(data.rightPanel);
+  } catch (e) {
+    console.warn('[CW] Panel update error (non-fatal):', e);
+  }
 
   if (!data.inCreation) {
-    // Creation complete — dismiss wizard
+    // Creation complete — dismiss wizard and reveal the input area
     client.inCreation = false;
     cwDismiss();
     return;
@@ -1148,12 +1237,12 @@ async function cwSendAndAdvance(text, onSuccess) {
 // ---- Fallback background list (minimal) if server parse fails ----
 function cwFallbackBgList() {
   return [
-    { key:'peasant',   label:'Peasant',   desc:'The lowest rung of society.', isMagical:false, index:1 },
-    { key:'villager',  label:'Villager',  desc:'Community life and modest horizons.', isMagical:false, index:2 },
-    { key:'wanderer',  label:'Wanderer',  desc:'The road has been your home.', isMagical:false, index:3 },
-    { key:'soldier',   label:'Soldier',   desc:'Drilled in combat and discipline.', isMagical:false, index:4 },
-    { key:'hunter',    label:'Hunter',    desc:'The wild is your domain.', isMagical:false, index:5 },
-    { key:'mageapprentice', label:"Mage's Apprentice", desc:'You learned the basics of spellwork.', isMagical:true, startingSpell:'mana_bolt', index:6 },
+    { key:'peasant',        label:'Peasant',           desc:'The lowest rung of society.',            isMagical:false, index:1 },
+    { key:'villager',       label:'Villager',          desc:'Community life and modest horizons.',    isMagical:false, index:2 },
+    { key:'wanderer',       label:'Wanderer',          desc:'The road has been your home.',           isMagical:false, index:3 },
+    { key:'soldier',        label:'Soldier',           desc:'Drilled in combat and discipline.',      isMagical:false, index:4 },
+    { key:'hunter',         label:'Hunter',            desc:'The wild is your domain.',               isMagical:false, index:5 },
+    { key:'mageapprentice', label:"Mage's Apprentice", desc:'You learned the basics of spellwork.',  isMagical:true,  startingSpell:'mana_bolt', index:6 },
   ];
 }
 
