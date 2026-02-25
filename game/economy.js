@@ -15,7 +15,8 @@ const {
 const {
   getPlayerLevel,
   getReputationLabel,
-  buildGearItem
+  buildGearItem,
+  recalculateResources
 } = require('./character');
 
 
@@ -123,7 +124,109 @@ function equipArmor(state, armorSrc) {
   return { success: true, item, message: `Equipped: ${item.name} (${item.quality})` };
 }
 
-function getWeaponDisplay(state) {
+// =============================================
+// CRAFTED GEAR — EQUIP / SELL
+// Crafted items live in state.craftedGear[] and have
+// full gear stats + optional stat mods.
+// =============================================
+function getCraftedGearInventory(state) {
+  return state.craftedGear || [];
+}
+
+function equipCraftedItem(state, nameFragment) {
+  if (!state.craftedGear || state.craftedGear.length === 0) {
+    return { success: false, message: 'No crafted gear in your inventory.' };
+  }
+
+  const frag = nameFragment.toLowerCase();
+  const idx  = state.craftedGear.findIndex(g =>
+    g.name && g.name.toLowerCase().includes(frag)
+  );
+
+  if (idx === -1) {
+    return { success: false, message: `No crafted item matching "${nameFragment}" found.` };
+  }
+
+  const item     = state.craftedGear[idx];
+  const isArmor  = item.armorLevel > 0 && item.weaponBonus === 0;
+  const slot     = isArmor ? 'armor' : 'weapon';
+
+  // Remove old gear stat mods if any
+  const oldGear = state.gear[slot];
+  if (oldGear && oldGear.statMods) {
+    for (const [stat, val] of Object.entries(oldGear.statMods)) {
+      state.stats[stat] = (state.stats[stat] || 5) - val;
+    }
+    recalculateResources(state);
+  }
+
+  // Equip new item
+  state.gear[slot] = item;
+
+  // Apply new stat mods
+  if (item.statMods) {
+    for (const [stat, val] of Object.entries(item.statMods)) {
+      state.stats[stat] = (state.stats[stat] || 5) + val;
+    }
+    recalculateResources(state);
+  }
+
+  // Remove from crafted gear inventory
+  state.craftedGear.splice(idx, 1);
+
+  const modStr = item.statMods
+    ? ' [' + Object.entries(item.statMods).map(([s,v]) => `+${v} ${s.toUpperCase()}`).join(', ') + ']'
+    : '';
+
+  return {
+    success: true,
+    item,
+    slot,
+    message: `Equipped crafted ${slot}: ${item.name} (${item.quality})${modStr}`
+  };
+}
+
+function sellCraftedItem(state, nameFragment) {
+  if (!state.craftedGear || state.craftedGear.length === 0) {
+    return { success: false, message: 'No crafted gear to sell.' };
+  }
+
+  const frag = nameFragment.toLowerCase();
+  const idx  = state.craftedGear.findIndex(g =>
+    g.name && g.name.toLowerCase().includes(frag)
+  );
+
+  if (idx === -1) {
+    return { success: false, message: `No crafted item matching "${nameFragment}" found.` };
+  }
+
+  const item      = state.craftedGear[idx];
+  const baseValue = item.weaponBonus > 0 ? item.weaponBonus * 10 : item.armorLevel * 15;
+  const total     = baseValue + (item.sellBonus || 0);
+
+  addCoin(state, total);
+  state.craftedGear.splice(idx, 1);
+
+  return {
+    success: true,
+    amount:  total,
+    display: formatCoin(total),
+    message: `Sold "${item.name}" (${item.quality}) for ${formatCoin(total)}.`
+  };
+}
+
+// =============================================
+// Gear stat mod description helper for UI
+// =============================================
+function formatStatMods(statMods) {
+  if (!statMods || Object.keys(statMods).length === 0) return '';
+  return Object.entries(statMods)
+    .map(([s, v]) => `+${v} ${s.toUpperCase()}`)
+    .join(' / ');
+}
+
+
+ function getWeaponDisplay(state) {
   const w = state.gear && state.gear.weapon;
   if (!w) return { equipped: false, label: 'None' };
 
@@ -137,8 +240,11 @@ function getWeaponDisplay(state) {
     tier:        w.tier,
     levelReq:    w.levelReq,
     weaponBonus: w.weaponBonus,
+    statMods:    w.statMods  || null,
+    isCrafted:   w.isCrafted || false,
     canUse,
-    label:       `${w.name} (${w.quality})${canUse ? '' : ' [Level ' + w.levelReq + ' required]'}`
+    label:       `${w.name} (${w.quality})${canUse ? '' : ' [Level ' + w.levelReq + ' required]'}`,
+    modDisplay:  formatStatMods(w.statMods)
   };
 }
 
@@ -156,8 +262,11 @@ function getArmorDisplay(state) {
     tier:        a.tier,
     levelReq:    a.levelReq,
     armorLevel:  a.armorLevel,
+    statMods:    a.statMods  || null,
+    isCrafted:   a.isCrafted || false,
     canUse,
-    label:       `${a.name} (${a.quality})${canUse ? '' : ' [Level ' + a.levelReq + ' required]'}`
+    label:       `${a.name} (${a.quality})${canUse ? '' : ' [Level ' + a.levelReq + ' required]'}`,
+    modDisplay:  formatStatMods(a.statMods)
   };
 }
 
@@ -412,6 +521,19 @@ function buildEconomyPanelData(state) {
     inventory:    [...(state.inventory || [])],
     inventoryDisplay: getInventoryDisplay(state),
 
+    // Crafted gear (equippable from inventory)
+    craftedGear: (state.craftedGear || []).map(g => ({
+      id:          g.id,
+      name:        g.name,
+      quality:     g.quality,
+      weaponBonus: g.weaponBonus,
+      armorLevel:  g.armorLevel,
+      statMods:    g.statMods,
+      sellBonus:   g.sellBonus,
+      modDisplay:  formatStatMods(g.statMods),
+      isArmor:     g.armorLevel > 0 && g.weaponBonus === 0
+    })),
+
     // Shop
     shopOpen:     state.shopOpen || false,
 
@@ -447,6 +569,10 @@ module.exports = {
   // Gear
   equipWeapon,
   equipArmor,
+  equipCraftedItem,
+  sellCraftedItem,
+  getCraftedGearInventory,
+  formatStatMods,
   getWeaponDisplay,
   getArmorDisplay,
   getAvailableGearTiers,

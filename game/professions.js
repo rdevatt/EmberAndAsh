@@ -18,7 +18,9 @@ const {
   getProfessionLevel,
   processClassLevelUp,
   processProfessionLevelUp,
-  recalculateResources
+  recalculateResources,
+  buildCraftedGearItem,
+  detectCraftingIntent
 } = require('./character');
 
 
@@ -278,6 +280,29 @@ function calculateProfessionTaskXP(taskLevel, professionLevel) {
 
 
 // =============================================
+// CRAFTED ITEM GENERATOR (internal)
+// Tries to produce a gear item from a crafting action.
+// Returns null if the input is not a crafting attempt
+// or if the profession doesn't produce equippable gear.
+// =============================================
+const CRAFTING_PROFESSIONS = new Set(['blacksmith','alchemist','woodsman','hunter','scholar','cook','scout','merchant']);
+
+function _tryGenerateCraftedItem(state, input, profLvl) {
+  if (!state.profession) return null;
+  if (!CRAFTING_PROFESSIONS.has(state.profession)) return null;
+
+  const craftedItem = buildCraftedGearItem(state.profession, profLvl, input);
+  if (!craftedItem) return null;
+
+  // Add to crafted gear inventory (separate from string inventory)
+  if (!state.craftedGear) state.craftedGear = [];
+  state.craftedGear.push({ ...craftedItem, id: `cg_${Date.now()}_${Math.random().toString(36).slice(2,7)}` });
+
+  return craftedItem;
+}
+
+
+// =============================================
 // PROFESSION TASK RESOLUTION
 // Returns result object with XP, success flag, and narrative hint.
 // =============================================
@@ -326,6 +351,20 @@ function resolveProfessionTask(state, input) {
     const bonusXP         = Math.round(taskXP * bonusMultiplier);
     state.pendingProfXP   = (state.pendingProfXP || 0) + bonusXP;
 
+    const craftedItemBonus = _tryGenerateCraftedItem(state, input, profLvl);
+    if (craftedItemBonus) {
+      return {
+        success:    true,
+        impossible: false,
+        xp:         bonusXP,
+        taskLevel,
+        taskGap,
+        bonus:      true,
+        craftedItem: craftedItemBonus,
+        hint: `[PROFESSION TASK ABOVE SKILL — succeeded against the odds! Crafted: "${craftedItemBonus.name}" (${craftedItemBonus.quality})${craftedItemBonus.statMods ? ' with exceptional stat modifiers' : ''}. Narrate the difficulty and the satisfying result. +${bonusXP} bonus XP. Item now in inventory — can be equipped or sold for premium.]`
+      };
+    }
+
     return {
       success:    true,
       impossible: false,
@@ -339,6 +378,21 @@ function resolveProfessionTask(state, input) {
 
   // Normal task within skill range
   state.pendingProfXP = (state.pendingProfXP || 0) + taskXP;
+
+  // Check if this was a crafting action — generate a gear item if so
+  const craftedItem = _tryGenerateCraftedItem(state, input, profLvl);
+  if (craftedItem) {
+    return {
+      success:    true,
+      impossible: false,
+      xp:         taskXP,
+      taskLevel,
+      taskGap:    0,
+      bonus:      false,
+      craftedItem,
+      hint: `[PROFESSION TASK — within skill range. Crafted: "${craftedItem.name}" (${craftedItem.quality})${craftedItem.statMods ? ' with stat modifiers' : ''}. +${taskXP} profession XP. The item is now in their inventory — it can be equipped or sold for a premium.]`
+    };
+  }
 
   return {
     success:    true,

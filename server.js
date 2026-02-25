@@ -19,8 +19,9 @@ const { createFreshState, validateState, isInCreation, isReady, isDead } = requi
 const { processCreationInput, buildCharacterPanelData, getPlayerLevel, spendFreePoint, recalculateResources } = require('./game/character');
 const { detectCombatIntent, detectFleeIntent, isPassiveAction, applyCombatRound, applyFleeAttempt, checkAmbientEncounter, spawnEnemy, buildEnemyInspectData, updateActionProgress } = require('./game/combat');
 const { resolveProfessionTask, processPendingProgressEvents, processClassOfferResponse, processProfessionOfferResponse, buildProgressionPanelData } = require('./game/professions');
-const { detectCoinIntent, processPendingCoinEvents, tryOpenShop, tryCloseShop, checkShopCustomerEvent, recoverGear, saveGearAtDeath, buildEconomyPanelData, checkIntimacyAvailable, changeReputation, formatCoin } = require('./game/economy');
+const { detectCoinIntent, processPendingCoinEvents, tryOpenShop, tryCloseShop, checkShopCustomerEvent, recoverGear, saveGearAtDeath, buildEconomyPanelData, checkIntimacyAvailable, changeReputation, formatCoin, equipCraftedItem, sellCraftedItem } = require('./game/economy');
 const { processNarrative, buildRightPanelData, buildEventAnnouncements } = require('./game/narrative');
+const { detectBoardIntent, detectQuestAccept, refreshBoard, getBoardQuests, acceptQuestByIndex, acceptQuest, buildBoardDisplayData, buildBoardInspectHint, checkQuestProgress, processQuestCompletions, buildActiveQuestContext } = require('./game/quests');
 const { calculateEnemyXP } = require('./game/combat');
 
 // Database
@@ -265,6 +266,154 @@ app.post('/api/saves/save', requireSession, async (req, res) => {
 
   await persistSession(req.sessionId);
   res.json({ success: true });
+});
+
+
+// POST /api/saves/save-to-slot
+// Save current game to a specific slot (1-3)
+app.post('/api/saves/save-to-slot', requireSession, async (req, res) => {
+  if (!req.session.playerId) return res.status(401).json({ error: 'Must be logged in.' });
+
+  const { slot } = req.body;
+  const slotNum  = parseInt(slot);
+  if (!slotNum || slotNum < 1 || slotNum > 3) {
+    return res.status(400).json({ error: 'Slot must be 1, 2, or 3.' });
+  }
+
+  db.saveGame(req.session.playerId, slotNum, req.session.state);
+  req.session.saveSlot = slotNum;
+  setSession(req.sessionId, req.session);
+
+  res.json({ success: true, slot: slotNum });
+});
+
+
+// GET /api/saves/all
+// Returns all 3 save slots with character preview data
+app.get('/api/saves/all', requireSession, (req, res) => {
+  if (!req.session.playerId) {
+    return res.json({ success: true, slots: [], isGuest: true });
+  }
+
+  const slots = [];
+  for (let i = 1; i <= 3; i++) {
+    const save = db.loadGame(req.session.playerId, i);
+    if (save && save.state) {
+      const s   = save.state;
+      const c   = s.character || {};
+      const lvl = s.totalXP ? Math.floor(Math.sqrt(s.totalXP / 10)) + 1 : 1;
+      slots.push({
+        slot:       i,
+        empty:      false,
+        name:       c.name || 'Unnamed',
+        background: c.background || '—',
+        level:      Math.min(lvl, 100),
+        region:     c.region || '—',
+        saveId:     save.saveId,
+        updatedAt:  save.updatedAt || null
+      });
+    } else {
+      slots.push({ slot: i, empty: true });
+    }
+  }
+
+  res.json({ success: true, slots, currentSlot: req.session.saveSlot || 1 });
+});
+
+
+// POST /api/game/reset
+// Wipes the current session and starts a fresh character
+app.post('/api/game/reset', requireSession, async (req, res) => {
+  const freshState      = createFreshState();
+  freshState.creation.phase = 1;
+  freshState.creationPrompt = buildOpeningPrompt();
+
+  req.session.state    = freshState;
+  req.session.saveSlot = req.session.saveSlot || 1;
+  req.session.saveId   = null;
+  setSession(req.sessionId, req.session);
+
+  // Persist the wipe
+  if (req.session.playerId && req.session.saveSlot) {
+    db.saveGame(req.session.playerId, req.session.saveSlot, freshState);
+  } else {
+    db.saveGuestSession(req.sessionId, freshState);
+  }
+
+  res.json({ success: true, output: buildOpeningPrompt() });
+});
+
+
+// POST /api/game/equip-crafted
+// Equip a crafted item from the crafted gear inventory
+app.post('/api/game/equip-crafted', requireSession, (req, res) => {
+  const { itemName } = req.body;
+  if (!itemName) return res.status(400).json({ error: 'itemName required.' });
+
+  const state  = req.session.state;
+  const result = equipCraftedItem(state, itemName);
+  setSession(req.sessionId, req.session);
+
+  res.json({
+    success:  result.success,
+    message:  result.message,
+    economy:  buildEconomyPanelData(state),
+    character: buildCharacterPanelData(state)
+  });
+});
+
+
+// POST /api/game/sell-crafted
+// Sell a crafted item for coins
+app.post('/api/game/sell-crafted', requireSession, (req, res) => {
+  const { itemName } = req.body;
+  if (!itemName) return res.status(400).json({ error: 'itemName required.' });
+
+  const state  = req.session.state;
+  const result = sellCraftedItem(state, itemName);
+  setSession(req.sessionId, req.session);
+
+  res.json({
+    success:  result.success,
+    message:  result.message,
+    amount:   result.amount,
+    display:  result.display,
+    economy:  buildEconomyPanelData(state),
+    character: buildCharacterPanelData(state)
+  });
+});
+
+
+// =============================================
+// ROUTES — QUESTS
+// =============================================
+
+app.get('/api/quests/board', requireSession, (req, res) => {
+  res.json({ success: true, board: buildBoardDisplayData(req.session.state) });
+});
+
+app.post('/api/quests/refresh', requireSession, (req, res) => {
+  refreshBoard(req.session.state);
+  setSession(req.sessionId, req.session);
+  res.json({ success: true, board: buildBoardDisplayData(req.session.state) });
+});
+
+app.post('/api/quests/accept', requireSession, (req, res) => {
+  const state = req.session.state;
+  const { questIndex, questId } = req.body;
+  const result = questId ? acceptQuest(state, questId) : acceptQuestByIndex(state, parseInt(questIndex));
+  setSession(req.sessionId, req.session);
+  res.json({ success: result.success, message: result.message, quest: result.quest, board: buildBoardDisplayData(state) });
+});
+
+app.post('/api/quests/abandon', requireSession, (req, res) => {
+  const state = req.session.state;
+  const { questId } = req.body;
+  if (!questId || !state.activeQuests) return res.json({ success: false });
+  const idx = state.activeQuests.findIndex(q => q.id === questId);
+  if (idx !== -1) state.activeQuests.splice(idx, 1);
+  setSession(req.sessionId, req.session);
+  res.json({ success: true, board: buildBoardDisplayData(state) });
 });
 
 
@@ -651,6 +800,64 @@ app.post('/api/action', requireSession, async (req, res) => {
     }
 
     // --------------------------------------------------------
+    // BOUNTY BOARD CHECK
+    // --------------------------------------------------------
+    if (!state.inCombat && detectBoardIntent(cleanInput)) {
+      state.pendingContextHint = buildBoardInspectHint(state);
+    }
+
+    // --------------------------------------------------------
+    // QUEST ACCEPT via natural language
+    // --------------------------------------------------------
+    if (!state.inCombat && detectQuestAccept(cleanInput) && state.boardQuests && state.boardQuests.length > 0) {
+      const numMatch = cleanInput.match(/\b([1-9])\b/);
+      if (numMatch) {
+        const result = acceptQuestByIndex(state, parseInt(numMatch[1]));
+        if (result.success) {
+          events.push({ type: 'questAccepted', quest: result.quest });
+          state.pendingContextHint = result.hint || `[QUEST ACCEPTED: "${result.quest.label}" — narrate naturally.]`;
+        }
+      } else {
+        const t2 = cleanInput.toLowerCase();
+        const quests = getBoardQuests(state);
+        for (let i = 0; i < quests.length; i++) {
+          const q = quests[i];
+          if (
+            (t2.includes('hunt') && q.type === 'hunt') ||
+            (t2.includes('escort') && q.type === 'escort') ||
+            (t2.includes('patrol') && q.type === 'patrol') ||
+            (t2.includes('retrieve') && q.type === 'retrieve') ||
+            (t2.includes('scout') && q.type === 'scout') ||
+            (t2.includes('advance') && q.type === 'advance') ||
+            (t2.includes('move on') && q.type === 'advance')
+          ) {
+            const result = acceptQuest(state, q.id);
+            if (result.success) {
+              events.push({ type: 'questAccepted', quest: result.quest });
+              state.pendingContextHint = result.hint;
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    // --------------------------------------------------------
+    // QUEST PROGRESS
+    // --------------------------------------------------------
+    if (state.activeQuests && state.activeQuests.length > 0) {
+      const killEvents = events.filter(e => e.type === 'enemyKill').map(e => ({ type:'enemyDefeated', enemyLabel: e.label || '' }));
+      const questUpdates = checkQuestProgress(state, cleanInput, killEvents);
+      if (questUpdates.length > 0) events.push(...questUpdates.map(u => ({ type:'questProgress', ...u })));
+
+      const completions = processQuestCompletions(state);
+      for (const c of completions) {
+        events.push({ type:'questComplete', quest:c.quest, reward:c.reward, hint:c.hint });
+        state.pendingContextHint = (state.pendingContextHint ? state.pendingContextHint + '\n\n' : '') + c.hint;
+      }
+    }
+
+    // --------------------------------------------------------
     // SPAWN ENEMY ON COMBAT INTENT
     // --------------------------------------------------------
     if (detectCombatIntent(cleanInput) && state.character && !state.inCombat) {
@@ -751,6 +958,14 @@ app.post('/api/action', requireSession, async (req, res) => {
     // --------------------------------------------------------
     // NARRATIVE
     // --------------------------------------------------------
+    // Inject active quest context
+    const activeQuestCtx = buildActiveQuestContext(state);
+    if (activeQuestCtx) {
+      state.pendingContextHint = state.pendingContextHint
+        ? state.pendingContextHint + '\n\n' + activeQuestCtx
+        : activeQuestCtx;
+    }
+
     const narrative = await processNarrative(state, cleanInput, events);
 
     // --------------------------------------------------------
@@ -778,6 +993,7 @@ app.post('/api/action', requireSession, async (req, res) => {
       progression: buildProgressionPanelData(state),
       economy:     buildEconomyPanelData(state),
       rightPanel:  narrative.rightPanel,
+      board:       buildBoardDisplayData(state),
       inCreation:  isInCreation(state)
     });
 

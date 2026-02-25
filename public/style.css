@@ -1066,6 +1066,28 @@ aside {
 
 
 /* =============================================
+   BOUNTY BOARD & QUESTS
+============================================= */
+.quest-row { padding:6px 0; border-bottom:1px solid var(--border); }
+.quest-row:last-child { border-bottom:none; }
+.quest-label { font-family:var(--font-ui); font-size:10px; letter-spacing:1px; color:var(--text); line-height:1.4; }
+.quest-label.advance-quest { color:var(--gold); }
+.quest-giver { font-family:var(--font-ui); font-size:9px; color:var(--text-dim); letter-spacing:0.5px; margin-top:2px; }
+.quest-reward { font-family:var(--font-ui); font-size:9px; color:#8fbc8f; letter-spacing:0.5px; margin-top:1px; }
+.quest-difficulty-easy { color:#8fbc8f; }
+.quest-difficulty-normal { color:var(--text-dim); }
+.quest-difficulty-hard { color:#c8a45a; }
+.quest-difficulty-brutal { color:#c85a5a; }
+.active-quest-row { padding:5px 0; border-bottom:1px solid var(--border); }
+.active-quest-row:last-child { border-bottom:none; }
+.active-quest-label { font-family:var(--font-ui); font-size:10px; letter-spacing:1px; color:var(--gold); }
+.active-quest-progress { font-family:var(--font-ui); font-size:9px; color:var(--text-dim); margin-top:2px; }
+.quest-progress-bar { height:3px; background:var(--border); border-radius:2px; margin-top:3px; overflow:hidden; }
+.quest-progress-fill { height:100%; background:var(--gold); border-radius:2px; transition:width 0.3s ease; }
+.quest-complete-indicator { color:#8fbc8f; font-size:9px; font-family:var(--font-ui); letter-spacing:1px; }
+
+
+/* =============================================
    UTILITY
 ============================================= */
 .hidden { display: none !important; }
@@ -1075,3 +1097,229 @@ aside {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); }
 ::-webkit-scrollbar-thumb:hover { background: var(--border-bright); }
+
+/* =============================================
+   SAVES MODAL
+============================================= */
+.modal-box-wide {
+  max-width: 480px;
+  width: 95%;
+}
+
+#save-slots-container {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 12px 0;
+}
+
+.save-slot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: rgba(255,255,255,0.02);
+}
+
+.save-slot.active-slot {
+  border-color: var(--text-gold);
+  background: rgba(212,175,55,0.05);
+}
+
+.save-slot-num {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  letter-spacing: 2px;
+  color: var(--text-gold);
+  min-width: 40px;
+}
+
+.save-slot-info {
+  flex: 1;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.save-slot-btns {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.save-slot-btns .modal-btn {
+  font-size: 10px;
+  padding: 4px 10px;
+}
+
+/* Danger button */
+.modal-btn.danger {
+  border-color: #c0392b;
+  color: #e74c3c;
+}
+.modal-btn.danger:hover {
+  background: rgba(231,76,60,0.1);
+}
+
+
+/* =============================================
+   CRAFTED GEAR PANEL
+============================================= */
+#section-crafted-gear {
+  border-top: 1px solid var(--border);
+}
+
+.crafted-item-row {
+  display: flex;
+  flex-direction: column;
+  padding: 4px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+
+.crafted-item-name {
+  font-size: 11px;
+  color: var(--text-main);
+}
+
+.crafted-item-quality {
+  font-size: 10px;
+  color: var(--text-gold);
+}
+
+.crafted-item-mods {
+  font-size: 10px;
+  color: #7ec8a0;
+  letter-spacing: 1px;
+}
+
+
+/* =============================================
+   GEAR STAT MODS DISPLAY
+============================================= */
+.stat-mod-display {
+  font-size: 10px;
+  color: #7ec8a0;
+  letter-spacing: 0.5px;
+  margin-top: 2px;
+}
+
+
+/* =============================================
+   MOBILE NAV BAR
+   Hidden on desktop, visible on mobile.
+============================================= */
+#mobile-nav {
+  display: none;
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 52px;
+  background: var(--bg-panel);
+  border-top: 1px solid var(--border);
+  z-index: 200;
+  flex-direction: row;
+  align-items: stretch;
+}
+
+.mobile-nav-btn {
+  flex: 1;
+  background: transparent;
+  border: none;
+  border-right: 1px solid var(--border);
+  color: var(--text-dim);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  letter-spacing: 2px;
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+  padding: 0;
+}
+
+.mobile-nav-btn:last-child { border-right: none; }
+
+.mobile-nav-btn.active {
+  color: var(--text-gold);
+  background: rgba(212,175,55,0.07);
+}
+
+
+/* =============================================
+   MOBILE LAYOUT
+============================================= */
+@media (max-width: 768px) {
+  /* Show mobile nav */
+  #mobile-nav { display: flex; }
+
+  /* Header compresses */
+  #header { padding: 0 10px; }
+  #game-title { font-size: 13px; letter-spacing: 3px; }
+  #header-center { display: none; }
+  .header-btn { font-size: 9px; padding: 6px 8px; letter-spacing: 1px; }
+
+  /* Three panels stack and only one shows at a time */
+  #main-layout {
+    display: block;
+    height: calc(100vh - 42px - 52px);
+    overflow: hidden;
+    position: relative;
+  }
+
+  #panel-left,
+  #panel-center,
+  #panel-right {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    width: 100%;
+    height: 100%;
+    overflow-y: auto;
+    display: none;
+    padding: 12px;
+    box-sizing: border-box;
+  }
+
+  /* STORY panel: adjust input area */
+  #panel-center {
+    display: flex;
+    flex-direction: column;
+  }
+
+  #story-output {
+    flex: 1;
+    overflow-y: auto;
+  }
+
+  #input-area {
+    position: relative;
+    padding: 8px 0 0;
+  }
+
+  #player-input {
+    font-size: 14px;
+  }
+
+  /* Active panel visibility */
+  #panel-left.mobile-active,
+  #panel-center.mobile-active,
+  #panel-right.mobile-active {
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Story panel default active */
+  #panel-center { display: flex; }
+
+  /* Add spacing for mobile nav */
+  body { padding-bottom: 52px; }
+
+  /* Creation wizard on mobile */
+  .cw-step { padding: 12px; }
+  .cw-field-row { flex-direction: column; gap: 10px; }
+  .cw-scroll-list { height: 120px; }
+}
+
+@media (max-width: 480px) {
+  #game-title { font-size: 11px; letter-spacing: 2px; }
+  .header-btn { padding: 5px 6px; font-size: 9px; }
+}

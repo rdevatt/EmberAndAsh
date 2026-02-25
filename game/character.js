@@ -233,7 +233,151 @@ function buildGearItem(src, isArmor) {
     tier:        q.tier,
     levelReq:    q.levelReq,
     weaponBonus: isArmor ? 0 : q.weaponBonus,
-    armorLevel:  isArmor ? q.armorLevel : 0
+    armorLevel:  isArmor ? q.armorLevel : 0,
+    statMods:    src.statMods  || null,
+    isCrafted:   src.isCrafted || false,
+    sellBonus:   src.sellBonus || 0,
+    craftedBy:   src.craftedBy || null
+  };
+}
+
+// =============================================
+// CRAFTED GEAR ITEM BUILDER
+// Generates an equippable gear item from a profession
+// crafting attempt, with stat modifiers driven by
+// player-described goals and profession type.
+// =============================================
+const CRAFT_GOAL_KEYWORDS = {
+  str: ['sharp','deadly','powerful','heavy','strong','brutal','crushing','mighty','fierce','vicious','hard-hitting','penetrating'],
+  dex: ['quick','swift','fast','light','nimble','agile','precise','balanced','elegant','graceful','accurate','responsive'],
+  vit: ['tough','durable','sturdy','solid','thick','reinforced','protective','resilient','heavy-duty','unbreakable','enduring'],
+  int: ['enchanted','arcane','runed','magical','inscribed','imbued','scholarly','focused','channeling','sigil'],
+  wis: ['warding','blessed','sacred','wise','insightful','protective','woven','spiritual','meditative'],
+  cha: ['beautiful','ornate','elegant','impressive','decorative','polished','ceremonial','noble','prestigious','refined']
+};
+
+const PROFESSION_STAT_AFFINITY = {
+  blacksmith: { str:2, vit:1 },
+  alchemist:  { int:2, wis:1 },
+  scout:      { dex:2, wis:1 },
+  merchant:   { cha:2, int:1 },
+  cook:       { vit:2, wis:1 },
+  hunter:     { dex:2, str:1 },
+  scholar:    { int:2, wis:1 },
+  woodsman:   { str:2, vit:1 }
+};
+
+const CRAFTING_DETECT_KEYWORDS = [
+  'forge','craft','make','create','smith','brew','sew','weave','carve','fashion','construct',
+  'build','assemble','prepare','mix','compound','distil','stitch','hammer','shape','work',
+  'whittle','knap','bind','inscribe','enchant'
+];
+
+const CRAFTABLE_WEAPONS = {
+  blacksmith: ['sword','blade','dagger','axe','hammer','mace','spear','shield'],
+  alchemist:  ['staff','wand','focus','rod'],
+  woodsman:   ['staff','club','bow','arrow','spear','shaft'],
+  hunter:     ['bow','spear','javelin','arrow'],
+  scholar:    ['staff','tome','focus','rod'],
+  merchant:   ['shortsword','dagger','club'],
+  cook:       ['knife','cleaver','skillet'],
+  scout:      ['shortbow','dagger','shortsword','sling']
+};
+
+const CRAFTABLE_ARMOR = {
+  blacksmith: ['armor','chainmail','plate','helm','gauntlets','greaves','shield'],
+  alchemist:  ['cloak','robe','gloves','band','ring'],
+  woodsman:   ['shield','hide armor','bark armor'],
+  hunter:     ['leather armor','hide armor','cloak'],
+  scholar:    ['robe','cloak','cap'],
+  merchant:   ['vest','coat'],
+  cook:       ['apron','gloves'],
+  scout:      ['leather armor','cloak','hood']
+};
+
+function detectCraftingIntent(input, profKey) {
+  const t = input.toLowerCase();
+  const hasCraftVerb = CRAFTING_DETECT_KEYWORDS.some(k => t.includes(k));
+  if (!hasCraftVerb) return null;
+
+  // Determine if weapon or armor
+  const weaponList = CRAFTABLE_WEAPONS[profKey] || [];
+  const armorList  = CRAFTABLE_ARMOR[profKey]   || [];
+
+  const isWeapon = weaponList.some(w => t.includes(w));
+  const isArmor  = armorList.some(a => t.includes(a));
+
+  if (!isWeapon && !isArmor) return null;
+
+  // Try to extract item name from input (up to 4 words after craft verb)
+  let itemName = null;
+  for (const verb of CRAFTING_DETECT_KEYWORDS) {
+    const idx = t.indexOf(verb);
+    if (idx !== -1) {
+      // Grab up to 5 words after verb
+      const after = t.slice(idx + verb.length).trim().split(/\s+/).slice(0, 5).join(' ');
+      // Strip articles
+      itemName = after.replace(/^(a|an|the)\s+/i,'').trim();
+      break;
+    }
+  }
+
+  return {
+    isArmor: isArmor && !isWeapon,
+    itemName: itemName || (isArmor ? 'armor piece' : 'weapon')
+  };
+}
+
+function buildCraftedGearItem(profKey, profLevel, input) {
+  const intent = detectCraftingIntent(input, profKey);
+  if (!intent) return null;
+
+  // Tier is driven by profession level (0–9, capped)
+  // profLevel 1→tier 0, 2→1, 3→2, 4→3, 5→5
+  const tierMap   = [0, 0, 1, 2, 3, 5];
+  const rawTier   = tierMap[Math.min(profLevel, tierMap.length - 1)];
+  const tier      = Math.min(rawTier, GEAR_QUALITIES.length - 1);
+  const quality   = GEAR_QUALITIES[tier];
+
+  // Parse goal keywords from input
+  const t    = input.toLowerCase();
+  const mods = {};
+  for (const [stat, keywords] of Object.entries(CRAFT_GOAL_KEYWORDS)) {
+    if (keywords.some(k => t.includes(k))) {
+      mods[stat] = (mods[stat] || 0) + 1;
+    }
+  }
+
+  // Blend in profession affinity (lower weight)
+  const affinity = PROFESSION_STAT_AFFINITY[profKey] || {};
+  for (const [stat, weight] of Object.entries(affinity)) {
+    // Only add affinity mod if no conflicting goal keyword was found
+    if (!mods[stat]) mods[stat] = weight > 1 ? 1 : 0;
+  }
+
+  // Cap each individual mod at 3, total mods at 3 entries
+  const finalMods = {};
+  let count = 0;
+  for (const [stat, val] of Object.entries(mods).sort((a,b) => b[1]-a[1])) {
+    if (count >= 3 || val <= 0) continue;
+    finalMods[stat] = Math.min(3, val);
+    count++;
+  }
+
+  // Sell bonus: crafted items sell for 25–100% more copper than found equivalent
+  const sellBonus = Math.round(quality.weaponBonus * (1 + profLevel * 0.2) * 10);
+
+  return {
+    name:        intent.itemName,
+    quality:     quality.label,
+    tier,
+    levelReq:    quality.levelReq,
+    weaponBonus: intent.isArmor ? 0 : quality.weaponBonus,
+    armorLevel:  intent.isArmor ? quality.armorLevel : 0,
+    statMods:    Object.keys(finalMods).length > 0 ? finalMods : null,
+    isCrafted:   true,
+    craftedBy:   profKey,
+    sellBonus
   };
 }
 
@@ -916,6 +1060,8 @@ module.exports = {
 
   // Gear
   buildGearItem,
+  buildCraftedGearItem,
+  detectCraftingIntent,
   getStartingGear,
   getStartingSpell,
   getActiveWeapon,
