@@ -250,6 +250,41 @@ async function submitAction() {
   // Show player input in story
   appendPlayerAction(input);
 
+  // --- Crafted gear commands ---
+  const lInput = input.toLowerCase().trim();
+  if (lInput.startsWith('equip ')) {
+    const itemName = input.slice(6).trim();
+    const { ok, data } = await apiCall('POST', '/game/equip-crafted', { itemName });
+    setLoading(false);
+    if (ok && data.success) {
+      if (data.character) updateCharacterPanel(data.character);
+      if (data.economy)   updateEconomyPanel(data.economy);
+      appendStory(null, data.message, false);
+    } else if (ok) {
+      // Not a crafted item — let it fall through as normal action
+      await _doNormalAction(input);
+    }
+    return;
+  }
+
+  if (lInput.startsWith('sell ')) {
+    const itemName = input.slice(5).trim();
+    const { ok, data } = await apiCall('POST', '/game/sell-crafted', { itemName });
+    setLoading(false);
+    if (ok && data.success) {
+      if (data.economy)   updateEconomyPanel(data.economy);
+      appendStory(null, data.message, false);
+    } else if (ok) {
+      // Not a crafted item — pass through as normal action
+      await _doNormalAction(input);
+    }
+    return;
+  }
+
+  await _doNormalAction(input);
+}
+
+async function _doNormalAction(input) {
   const { ok, data } = await apiCall('POST', '/action', { input });
 
   setLoading(false);
@@ -289,6 +324,7 @@ async function submitAction() {
   if (data.progression) updateProgressionPanel(data.progression);
   if (data.economy)     updateEconomyPanel(data.economy);
   if (data.rightPanel)  updateRightPanel(data.rightPanel);
+  if (data.board)       updateBoardPanel(data.board);
 }
 
 
@@ -335,6 +371,7 @@ async function retryLastAction(entryToReplace) {
   if (data.progression) updateProgressionPanel(data.progression);
   if (data.economy)     updateEconomyPanel(data.economy);
   if (data.rightPanel)  updateRightPanel(data.rightPanel);
+  if (data.board)       updateBoardPanel(data.board);
 }
 
 
@@ -418,19 +455,45 @@ function updateProgressionPanel(p) {
 function updateEconomyPanel(e) {
   if (!e) return;
 
-  // Gear
+  // Gear — show stat mods if present
   if (e.weapon) {
-    el.gearWeapon.textContent = e.weapon.equipped
-      ? e.weapon.label
-      : 'Unarmed';
+    if (e.weapon.equipped) {
+      const mods = e.weapon.modDisplay ? ` [${e.weapon.modDisplay}]` : '';
+      el.gearWeapon.innerHTML = escHtml(e.weapon.label) + (mods ? `<div class="stat-mod-display">${escHtml(mods)}</div>` : '');
+    } else {
+      el.gearWeapon.textContent = 'Unarmed';
+    }
     el.gearWeapon.classList.toggle('dim', !e.weapon.equipped);
   }
 
   if (e.armor) {
-    el.gearArmor.textContent = e.armor.equipped
-      ? e.armor.label
-      : 'Unarmored';
+    if (e.armor.equipped) {
+      const mods = e.armor.modDisplay ? ` [${e.armor.modDisplay}]` : '';
+      el.gearArmor.innerHTML = escHtml(e.armor.label) + (mods ? `<div class="stat-mod-display">${escHtml(mods)}</div>` : '');
+    } else {
+      el.gearArmor.textContent = 'Unarmored';
+    }
     el.gearArmor.classList.toggle('dim', !e.armor.equipped);
+  }
+
+  // Crafted gear inventory
+  const craftedSection = document.getElementById('section-crafted-gear');
+  const craftedList    = document.getElementById('crafted-gear-list');
+  if (craftedSection && craftedList) {
+    if (e.craftedGear && e.craftedGear.length > 0) {
+      craftedSection.classList.remove('hidden');
+      craftedList.innerHTML = e.craftedGear.map(g => {
+        const typeLabel = g.isArmor ? 'Armor' : 'Weapon';
+        const mods      = g.modDisplay ? `<div class="crafted-item-mods">${escHtml(g.modDisplay)}</div>` : '';
+        return `<div class="crafted-item-row">
+          <div class="crafted-item-name">${escHtml(g.name)}</div>
+          <div class="crafted-item-quality">${escHtml(g.quality)} ${typeLabel}</div>
+          ${mods}
+        </div>`;
+      }).join('');
+    } else {
+      craftedSection.classList.add('hidden');
+    }
   }
 
   // Inventory
@@ -455,6 +518,12 @@ function updateEconomyPanel(e) {
   } else {
     el.sectionDeathGear.classList.add('hidden');
   }
+}
+
+// Simple HTML escaping helper
+function escHtml(s) {
+  if (!s) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
 function updateRightPanel(r) {
@@ -509,6 +578,52 @@ function updateRightPanel(r) {
   }
 }
 
+
+function updateBoardPanel(board) {
+  if (!board) return;
+  const section    = document.getElementById('section-board');
+  const label      = document.getElementById('board-label');
+  const boardList  = document.getElementById('board-quests-list');
+  const activeList = document.getElementById('active-quests-list');
+  const activeWrap = document.getElementById('active-quests-wrap');
+  if (!section || !boardList || !activeList) return;
+
+  if (!board.available) { section.classList.add('hidden'); return; }
+  section.classList.remove('hidden');
+
+  if (label && board.boardLabel) label.textContent = board.boardLabel.toUpperCase();
+
+  // Available quests
+  boardList.innerHTML = '';
+  (board.quests || []).forEach(q => {
+    const row = document.createElement('div');
+    row.className = 'quest-row';
+    row.innerHTML = `
+      <div class="quest-label ${q.isAdvance ? 'advance-quest' : ''}">[${q.index}] ${q.label}</div>
+      <div class="quest-giver dim">${q.giver} — <span class="quest-difficulty-${q.difficulty || 'normal'}">${(q.difficulty||'normal').toUpperCase()}</span></div>
+      <div class="quest-reward">${q.coinDisplay} + XP</div>`;
+    boardList.appendChild(row);
+  });
+
+  // Active quests
+  if (!board.activeQuests || board.activeQuests.length === 0) {
+    activeWrap.classList.add('hidden');
+  } else {
+    activeWrap.classList.remove('hidden');
+    activeList.innerHTML = '';
+    board.activeQuests.forEach(q => {
+      const row = document.createElement('div');
+      row.className = 'active-quest-row';
+      const pct = q.targetCount > 1 ? Math.round((q.progress / q.targetCount) * 100) : (q.isComplete ? 100 : 0);
+      const progressHtml = q.targetCount > 1
+        ? `<div class="quest-progress-bar"><div class="quest-progress-fill" style="width:${pct}%"></div></div><div class="active-quest-progress">${q.progress}/${q.targetCount}</div>`
+        : q.isComplete ? `<div class="quest-complete-indicator">✓ READY TO COMPLETE</div>` : '';
+      row.innerHTML = `<div class="active-quest-label">${q.label}</div>${progressHtml}<div class="active-quest-progress">${q.coinDisplay}</div>`;
+      activeList.appendChild(row);
+    });
+  }
+}
+
 async function refreshPanels() {
   const { ok, data } = await apiCall('GET', '/state');
   if (!ok) return;
@@ -517,6 +632,7 @@ async function refreshPanels() {
   if (data.progression) updateProgressionPanel(data.progression);
   if (data.economy)     updateEconomyPanel(data.economy);
   if (data.rightPanel)  updateRightPanel(data.rightPanel);
+  if (data.board)       updateBoardPanel(data.board);
 
   client.inCreation = data.inCreation || false;
 }
@@ -1219,6 +1335,7 @@ async function cwSendAndAdvance(text, onSuccess) {
     if (data.progression) updateProgressionPanel(data.progression);
     if (data.economy)     updateEconomyPanel(data.economy);
     if (data.rightPanel)  updateRightPanel(data.rightPanel);
+  if (data.board)       updateBoardPanel(data.board);
   } catch (e) {
     console.warn('[CW] Panel update error (non-fatal):', e);
   }
@@ -1314,6 +1431,189 @@ el.btnSave.addEventListener('click', handleSave);
 el.inputPassword.addEventListener('keydown', e => {
   if (e.key === 'Enter') handleLogin();
 });
+
+
+// =============================================
+// SAVES MODAL
+// =============================================
+const elSavesModal    = document.getElementById('modal-saves');
+const elBtnSaves      = document.getElementById('btn-saves');
+const elBtnCloseSaves = document.getElementById('btn-close-saves');
+const elSavesGuestNote = document.getElementById('saves-guest-note');
+
+async function openSavesModal() {
+  elSavesModal.classList.remove('hidden');
+  await refreshSaveSlots();
+}
+
+function closeSavesModal() {
+  elSavesModal.classList.add('hidden');
+}
+
+async function refreshSaveSlots() {
+  const { ok, data } = await apiCall('GET', '/saves/all');
+  if (!ok) return;
+
+  if (data.isGuest) {
+    elSavesGuestNote.style.display = '';
+    for (let i = 1; i <= 3; i++) {
+      const infoEl = document.querySelector(`#save-slot-${i} .save-slot-info`);
+      const loadBtn = document.querySelector(`#save-slot-${i} .save-slot-load`);
+      const saveBtn = document.querySelector(`#save-slot-${i} .save-slot-save`);
+      if (infoEl) infoEl.textContent = i === 1 ? 'Guest auto-save slot' : 'Requires account';
+      if (loadBtn) loadBtn.disabled = i !== 1;
+      if (saveBtn) saveBtn.disabled = i !== 1;
+    }
+    return;
+  }
+
+  elSavesGuestNote.style.display = 'none';
+
+  for (const slot of data.slots) {
+    const slotEl  = document.getElementById(`save-slot-${slot.slot}`);
+    const infoEl  = slotEl && slotEl.querySelector('.save-slot-info');
+    if (!infoEl) continue;
+
+    if (slot.empty) {
+      infoEl.textContent = 'Empty';
+    } else {
+      const updated = slot.updatedAt ? new Date(slot.updatedAt).toLocaleDateString() : '';
+      infoEl.innerHTML = `<strong>${escHtml(slot.name)}</strong> — Level ${slot.level}<br>
+        <span style="font-size:10px;color:var(--text-dim)">${escHtml(slot.background)} · ${escHtml(slot.region)}${updated ? ' · ' + updated : ''}</span>`;
+    }
+
+    if (slot.slot === data.currentSlot) {
+      slotEl.classList.add('active-slot');
+    } else {
+      slotEl.classList.remove('active-slot');
+    }
+  }
+}
+
+elBtnSaves.addEventListener('click', openSavesModal);
+elBtnCloseSaves.addEventListener('click', closeSavesModal);
+elSavesModal.addEventListener('click', e => {
+  if (e.target === elSavesModal) closeSavesModal();
+});
+
+// Save to a specific slot
+document.querySelectorAll('.save-slot-save').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    if (!client.isLoggedIn) { openSettings(); return; }
+    const slot = parseInt(btn.dataset.slot);
+    const { ok } = await apiCall('POST', '/saves/save-to-slot', { slot });
+    if (ok) {
+      btn.textContent = 'SAVED!';
+      setTimeout(() => { btn.textContent = 'SAVE HERE'; }, 1500);
+      await refreshSaveSlots();
+    }
+  });
+});
+
+// Load from a specific slot
+document.querySelectorAll('.save-slot-load').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    if (!client.isLoggedIn) { openSettings(); return; }
+    const slot = parseInt(btn.dataset.slot);
+    const { ok, data } = await apiCall('POST', '/saves/load', { slot });
+    if (ok && data.success) {
+      closeSavesModal();
+      if (data.character)   updateCharacterPanel(data.character);
+      if (data.rightPanel)  updateRightPanel(data.rightPanel);
+  if (data.board)       updateBoardPanel(data.board);
+      const resume = data.storySummary
+        ? `— Loaded slot ${slot} —\n\n${data.storySummary}`
+        : `Save slot ${slot} loaded.`;
+      appendStory(null, resume, false);
+      client.inCreation = false;
+      document.getElementById('creation-wizard').classList.add('hidden');
+      document.getElementById('input-area').classList.remove('hidden');
+      el.playerInput.focus();
+    }
+  });
+});
+
+
+// =============================================
+// RESET / NEW GAME
+// =============================================
+const elModalReset      = document.getElementById('modal-reset');
+const elBtnResetGame    = document.getElementById('btn-reset-game');
+const elBtnConfirmReset = document.getElementById('btn-confirm-reset');
+const elBtnCancelReset  = document.getElementById('btn-cancel-reset');
+
+function openResetModal() {
+  closeSettings();
+  elModalReset.classList.remove('hidden');
+}
+
+function closeResetModal() {
+  elModalReset.classList.add('hidden');
+}
+
+async function handleReset() {
+  closeResetModal();
+  setLoading(true);
+
+  const { ok, data } = await apiCall('POST', '/game/reset');
+  setLoading(false);
+
+  if (!ok) {
+    appendStory(null, '[Reset failed. Try again.]', false);
+    return;
+  }
+
+  // Clear story
+  el.storyContent.innerHTML = '';
+  localStorage.removeItem('sessionId');
+
+  // Reinitialize
+  client.inCreation  = true;
+  client.creationStep = 1;
+  client.creation    = { name:'', age:null, gender:null, heightText:'', buildKey:'', features:'', bgKey:null, bgIndex:null, bgFreeform:'', envKey:null, envIndex:null };
+
+  appendStory(null, data.output || '', true);
+  document.getElementById('creation-wizard').classList.remove('hidden');
+  document.getElementById('input-area').classList.add('hidden');
+  cwInit();
+}
+
+elBtnResetGame.addEventListener('click', openResetModal);
+elBtnConfirmReset.addEventListener('click', handleReset);
+elBtnCancelReset.addEventListener('click', closeResetModal);
+elModalReset.addEventListener('click', e => {
+  if (e.target === elModalReset) closeResetModal();
+});
+
+
+// =============================================
+// MOBILE NAV
+// =============================================
+const mobileNavBtns = document.querySelectorAll('.mobile-nav-btn');
+const panels = {
+  left:   document.getElementById('panel-left'),
+  center: document.getElementById('panel-center'),
+  right:  document.getElementById('panel-right')
+};
+
+function setMobilePanel(active) {
+  mobileNavBtns.forEach(b => b.classList.toggle('active', b.dataset.panel === active));
+  Object.entries(panels).forEach(([key, el]) => {
+    if (el) el.classList.toggle('mobile-active', key === active);
+  });
+}
+
+// On mobile, story is the default active panel
+if (window.innerWidth <= 768) {
+  setMobilePanel('center');
+}
+
+mobileNavBtns.forEach(btn => {
+  btn.addEventListener('click', () => setMobilePanel(btn.dataset.panel));
+});
+
+// When AI responds on mobile, auto-switch to story panel
+const _origAppendStory = appendStory;
 
 
 // =============================================

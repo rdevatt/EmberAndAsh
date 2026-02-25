@@ -62,17 +62,502 @@ const BACKGROUNDS = {
 
 
 // =============================================
-// REGIONS
+// =============================================
+// WORLD TIERS
+// The world is a bullseye. Outer rim = starter.
+// Dead center = endgame. Players move inward.
+// Each tier covers ~10 levels.
+// =============================================
+const WORLD_TIERS = [
+  { tier:1,  levelRange:[1,10],  label:'Outer Rim',            desc:'The starting lands. Modest danger, forgiving mistakes.' },
+  { tier:2,  levelRange:[11,20], label:'Outer Ring',           desc:'Harder lands beyond the familiar. Old threats and new ones.' },
+  { tier:3,  levelRange:[21,30], label:'Mid-Outer Ring',       desc:'The frontier. Settlements become sparse. Things get strange.' },
+  { tier:4,  levelRange:[31,40], label:'Mid Ring',             desc:'Few travel here without purpose. Fewer return without scars.' },
+  { tier:5,  levelRange:[41,50], label:'Mid-Inner Ring',       desc:'The known world ends here. Beyond this, only the desperate go.' },
+  { tier:6,  levelRange:[51,60], label:'Inner Ring',           desc:'Ancient places. Broken kingdoms. Power untethered from reason.' },
+  { tier:7,  levelRange:[61,70], label:'Inner Core Approach',  desc:'Reality frays at the edges here. Old wars never stopped.' },
+  { tier:8,  levelRange:[71,80], label:'Core Ring',            desc:'Even the air is wrong here. You can feel the center pulling.' },
+  { tier:9,  levelRange:[81,90], label:'The Core',             desc:'Legend made real. Few names survive to become history.' },
+  { tier:10, levelRange:[91,100],label:'The Shattered Throne', desc:'The dead center. Where everything the world feared was born.' }
+];
+
+
+// =============================================
+// REGIONS — Full 32-region world map
+// Geography: concentric rings around a dead center.
+// Starter zones at the OUTER RIM (far from center).
+// Endgame at DEAD CENTER.
+// Each region connects to adjacent regions in same/neighboring tiers.
+//
+// Map direction notation:
+//   NW=northwest, NE=northeast, SW=southwest, SE=southeast
+//   N/S/E/W = cardinal edges
+//   C = center direction (inward), O = outward
 // =============================================
 const REGIONS = {
-  thornwick:   { label:'Thornwick Valley',     desc:'A quiet farming valley hemmed by dark forest. Trouble is modest — but growing.',                          monsterLevel:[1,4],   cityPresent:false, monsters:['Timber Wolves','Road Bandits','Forest Goblins','Cave Rat Swarms','Goblin Shamans'],          rareMonsters:['Cave Troll','Dire Boar','Bandit Captain'],              flavor:'rolling farmland, muddy roads, and treelines that feel closer every year',                          beastOpening:"A road wolf the size of a pony crashes into the mud at your feet — brought down by someone else's arrow before it could reach you" },
-  ironport:    { label:'Ironport City',        desc:'A sprawling harbor city of trade and crime. Wealth and rot in equal measure.',                             monsterLevel:[3,7],   cityPresent:true,  monsters:['City Thugs','Corrupt Watchmen','Dockside Cutthroats','Smugglers','Harbour Beasts'],          rareMonsters:['Crime Lord Enforcer','Sea Serpent','Assassin Guild Member'], flavor:'salt-stained cobblestones, crowded markets, and shadows that watch you back',                        beastOpening:"A bloated harbour beast — part eel, part nightmare — stops thrashing as the man beside you wrenches his blade free from its skull" },
-  ashwood:     { label:'The Ashwood',          desc:'An ancient forest where old magic lingers and the wildlife has gone wrong.',                               monsterLevel:[4,8],   cityPresent:false, monsters:['Feral Druids','Twisted Stags','Ash Hounds','Corrupted Dryads','Wood Wraiths'],             rareMonsters:['Elder Treant','Fae Knight','Dire Wolf Pack'],            flavor:'silver bark trees, eerie silence, and light that bends at wrong angles',                            beastOpening:"A corrupted stag — its antlers fused into bone blades, its eyes black and burning — drops mid-charge at the hand of a stranger who doesn't stay to explain" },
-  dustfall:    { label:'Dustfall Plains',      desc:'Endless windswept grassland crossed by war bands and desperate travelers.',                                monsterLevel:[2,5],   cityPresent:false, monsters:['Plains Orcs','Dust Bandits','Giant Scorpions','Hyena Packs','Orc Raiders'],                rareMonsters:['Orc Warchief','Plains Basilisk','Dust Elemental'],      flavor:'amber grass, open sky, and the wind carrying the smell of something dead',                         beastOpening:"An orc raider twice your size crumples face-first into the dust — the crossbow bolt through its eye placed by a hooded figure already disappearing into the grass" },
-  blackstone:  { label:'Blackstone Mountains', desc:'Jagged peaks riddled with old mines and new monsters. Danger at every altitude.',                         monsterLevel:[5,10],  cityPresent:false, monsters:['Mountain Trolls','Stone Goblins','Wyvern Hatchlings','Cave Giants','Rock Golems'],          rareMonsters:['Wyvern','Frost Giant','Mountain Dragon Whelp'],         flavor:'black granite walls, howling wind, and the screaming of things in the deep dark',                  beastOpening:"A wyvern hatchling the size of a horse plunges from the cliff face dead — the warrior who brought it down is already climbing back toward the peak" },
-  sunkenfen:   { label:'The Sunken Fens',      desc:'A vast swampland haunted by the restless dead and the cults who worship them.',                           monsterLevel:[4,9],   cityPresent:false, monsters:['Bog Zombies','Fen Witches','Swamp Serpents','Cultist Acolytes','Marsh Ghouls'],           rareMonsters:['Lich Cultist','Bog Giant','Ancient Crocodilian'],        flavor:'black water, hanging moss, and a smell like old graves after rain',                                 beastOpening:"A bog horror — half-man, half-rot, completely wrong — finally stops moving in the black water as a runic blade dissolves through its chest at the hand of a robed stranger" },
-  veldrath:    { label:'The Veldrath Desert',  desc:'A scorched wasteland of ruined cities and ancient things that should not still breathe.',                  monsterLevel:[7,13],  cityPresent:false, monsters:['Sand Wraiths','Desert Scorpion Lords','Mummy Guardians','Djinn Fragments','Sand Worms'], rareMonsters:['Elder Mummy','Bound Djinn','Sand Dragon'],               flavor:'red dunes, crumbling stone empires, and a sun that wants you dead',                                 beastOpening:"A sand wraith — ancient, screaming, trailing centuries of hate — dissolves mid-lunge into blowing grit, unraveled by a ward carved in the air by a figure you barely glimpse" },
-  frozennorth: { label:'The Frozen North',     desc:'A killing land of endless winter. The cold alone has ended many stories here.',                           monsterLevel:[6,12],  cityPresent:false, monsters:['Frost Wolves','Ice Wraiths','Frozen Trolls','Northern Raiders','Snow Leopards'],          rareMonsters:['Frost Giant','Ice Drake','Glacial Elemental'],          flavor:'white silence, breath turning to fog, and trees that crack like bones in the cold',                beastOpening:"A frost wolf larger than a horse collapses into the snow beside you, ice-blue blood spreading wide — killed by a spear thrown from somewhere behind you by a face you won't see again" }
+
+  // ============================================================
+  // TIER 1 — OUTER RIM (Levels 1–10)
+  // Starter zones. Three distant corners of the world.
+  // ============================================================
+  thornwick: {
+    label:'Thornwick Valley', tier:1, levelRange:[1,10],
+    position:'NW-outer',
+    desc:'A quiet farming valley hemmed by dark forest. Trouble is modest — but growing.',
+    flavor:'rolling farmland, muddy roads, and treelines that feel closer every year',
+    cityPresent:false, hasBountyBoard:true,
+    boardLabel:'Notice Board outside the miller\'s',
+    monsters:['Road Wolves','Road Bandits','Forest Goblins','Cave Rat Swarms','Goblin Shamans'],
+    rareMonsters:['Cave Troll','Dire Boar','Bandit Captain'],
+    connections:{ same:['dustfall','ironport'], next:['greymere','ashwood_shallow'] },
+    beastOpening:"A road wolf the size of a pony crashes into the mud at your feet — brought down by someone else's arrow before it could reach you"
+  },
+  dustfall: {
+    label:'Dustfall Plains', tier:1, levelRange:[1,10],
+    position:'SE-outer',
+    desc:'Endless windswept grassland crossed by war bands and desperate travelers.',
+    flavor:'amber grass, open sky, and the wind carrying the smell of something dead',
+    cityPresent:false, hasBountyBoard:true,
+    boardLabel:'Wanted board at the crossroads waypost',
+    monsters:['Plains Orcs','Dust Bandits','Giant Scorpions','Hyena Packs','Orc Raiders'],
+    rareMonsters:['Orc Warchief','Plains Basilisk','Dust Elemental'],
+    connections:{ same:['thornwick','ironport'], next:['oakhaven','saltenbay'] },
+    beastOpening:"An orc raider twice your size crumples face-first into the dust — the crossbow bolt through its eye placed by a hooded figure already disappearing into the grass"
+  },
+  ironport: {
+    label:'Ironport City', tier:1, levelRange:[3,10],
+    position:'E-outer',
+    desc:'A sprawling harbor city of trade and crime. Wealth and rot in equal measure.',
+    flavor:'salt-stained cobblestones, crowded markets, and shadows that watch you back',
+    cityPresent:true, hasBountyBoard:true,
+    boardLabel:'City Watch bounty board at the gatehouse',
+    monsters:['City Thugs','Corrupt Watchmen','Dockside Cutthroats','Smugglers','Harbour Beasts'],
+    rareMonsters:['Crime Lord Enforcer','Sea Serpent','Assassin Guild Member'],
+    connections:{ same:['thornwick','dustfall'], next:['saltenbay','greymere'] },
+    beastOpening:"A bloated harbour beast — part eel, part nightmare — stops thrashing as the man beside you wrenches his blade free from its skull"
+  },
+
+  // ============================================================
+  // TIER 2 — OUTER RING (Levels 11–20)
+  // ============================================================
+  greymere: {
+    label:'Greymere Moors', tier:2, levelRange:[11,20],
+    position:'NE-outer',
+    desc:'Fog-soaked moorland haunted by howling spirits and desperate soldiers who never came home.',
+    flavor:'grey heather, sinking peat, distant drumming, and something watching from the fog',
+    cityPresent:false, hasBountyBoard:true,
+    boardLabel:'Outpost bounty board, nailed to the garrison door',
+    monsters:['Moor Wraiths','Barrow Goblins','Bog Hounds','Deserter Gangs','Restless Shades'],
+    rareMonsters:['Barrow Knight','Ancient Spectre','Dire Bog Hound'],
+    connections:{ same:['ashwood_shallow','oakhaven'], prev:['thornwick','ironport'], next:['blackstone_foothills','sunkenfen_edge'] },
+  },
+  ashwood_shallow: {
+    label:'Ashwood Fringe', tier:2, levelRange:[11,20],
+    position:'W-outer',
+    desc:'The edge of the great corrupted forest. Magic leaks from the bark of every tree.',
+    flavor:'silver-white bark glowing faintly, fallen leaves that never rot, silence that follows you',
+    cityPresent:false, hasBountyBoard:true,
+    boardLabel:'Hunter\'s post — a corkboard beside the last safe fire',
+    monsters:['Ash Sprites','Corrupted Deer','Feral Druids','Thorn Wolves','Ashwood Imps'],
+    rareMonsters:['Corrupted Dryad','Ashwood Troll','Fae Scout'],
+    connections:{ same:['greymere','oakhaven'], prev:['thornwick'], next:['ashwood_deep','wyrmwood'] },
+  },
+  oakhaven: {
+    label:'Oakhaven Crossing', tier:2, levelRange:[11,20],
+    position:'S-outer',
+    desc:'A trade town built on an old battleground. The soil grows dark crops and darker rumors.',
+    flavor:'cobbled streets, a three-way crossroads, scarred stonework, merchants selling things they shouldn\'t',
+    cityPresent:true, hasBountyBoard:true,
+    boardLabel:'Bounty board at the Three Roads Inn',
+    monsters:['Road Cutthroats','Grave Robbers','Feral War Beasts','Mercenary Thugs','Tomb Ghouls'],
+    rareMonsters:['Tomb Guardian','Veteran Mercenary Captain','Graveborn Warrior'],
+    connections:{ same:['greymere','saltenbay'], prev:['dustfall','thornwick'], next:['sunkenfen_edge','bleached_flats'] },
+  },
+  saltenbay: {
+    label:'Salten Bay', tier:2, levelRange:[11,20],
+    position:'E-inner',
+    desc:'A jagged coastline with wrecked ships and something living in the tide pools that shouldn\'t be.',
+    flavor:'salt-scoured cliffs, wrecked hulls, tidal caves, a lighthouse that no one lights',
+    cityPresent:false, hasBountyBoard:true,
+    boardLabel:'Fisherman\'s notice board at the broken pier',
+    monsters:['Shipwreck Raiders','Coastal Serpents','Tidal Crabs','Deep Ones','Salt Wraiths'],
+    rareMonsters:['Sea Witch','Ancient Kraken Spawn','Drowned Captain'],
+    connections:{ same:['greymere','oakhaven'], prev:['ironport','dustfall'], next:['ember_coast','ruinwatch'] },
+  },
+
+  // ============================================================
+  // TIER 3 — MID-OUTER RING (Levels 21–30)
+  // ============================================================
+  blackstone_foothills: {
+    label:'Blackstone Foothills', tier:3, levelRange:[21,30],
+    position:'N-mid',
+    desc:'The approach to the great mountains. Old mine shafts lead somewhere the miners never came back from.',
+    flavor:'black granite scree, mine cart tracks leading into darkness, cold wind that smells like iron',
+    cityPresent:false, hasBountyBoard:true,
+    boardLabel:'Miner\'s union board at the base camp',
+    monsters:['Stone Goblins','Mountain Trolls','Cave Bears','Rockfall Elementals','Bandit Miners'],
+    rareMonsters:['Cave Giant','Wyvern Hatchling','Stone Golem'],
+    connections:{ same:['ashwood_shallow','sunkenfen_edge'], prev:['greymere'], next:['blackstone_peaks','coldsnap_pass'] },
+  },
+  sunkenfen_edge: {
+    label:'Sunken Fen Approach', tier:3, levelRange:[21,30],
+    position:'SW-mid',
+    desc:'The first true swampland. The dead here are restless. The living are unwelcome.',
+    flavor:'black water between cypress roots, hanging moss, bones half-submerged in the silt',
+    cityPresent:false, hasBountyBoard:true,
+    boardLabel:'Cult hunter\'s board at Dryshod Camp',
+    monsters:['Bog Zombies','Fen Witches','Swamp Serpents','Cultist Acolytes','Marsh Ghouls'],
+    rareMonsters:['Lich Cultist','Bog Giant','Ancient Crocodilian'],
+    connections:{ same:['blackstone_foothills','bleached_flats'], prev:['greymere','oakhaven'], next:['sunkenfen_deep','wyrmwood'] },
+  },
+  ember_coast: {
+    label:'Ember Coast', tier:3, levelRange:[21,30],
+    position:'SE-mid',
+    desc:'Ancient shore ruins where old empire towers still burn without fuel.',
+    flavor:'crumbling towers with eternal flames inside, black sand beaches, salt and smoke',
+    cityPresent:false, hasBountyBoard:true,
+    boardLabel:'Ruin-diver\'s post at the shore camp',
+    monsters:['Ruin Sentinels','Empire Shades','Corrupted Golems','Sea Stalkers','Flame Elementals'],
+    rareMonsters:['Empire Wraith Captain','Ancient Golem','Ember Drake'],
+    connections:{ same:['saltenbay','ruinwatch'], prev:['saltenbay'], next:['ruinwatch','veldrath_border'] },
+  },
+  bleached_flats: {
+    label:'The Bleached Flats', tier:3, levelRange:[21,30],
+    position:'S-mid',
+    desc:'A salt flat wasteland where armies came to die and some of them never stopped.',
+    flavor:'blinding white salt, crushed bone underfoot, heat shimmer, a distant ruined keep',
+    cityPresent:false, hasBountyBoard:true,
+    boardLabel:'Scavenger board at the Salt Gate fort',
+    monsters:['Salt Husks','Bleached Skeletons','Desert Wraiths','Dune Scorpions','Sand Bandits'],
+    rareMonsters:['Bleached Giant','Salt Basilisk','Tomb Lord'],
+    connections:{ same:['sunkenfen_edge','ember_coast'], prev:['oakhaven','dustfall'], next:['veldrath_border','ruinwatch'] },
+  },
+  wyrmwood: {
+    label:'Wyrmwood', tier:3, levelRange:[21,30],
+    position:'W-mid',
+    desc:'Forest so old it has its own weather. Something vast moves beneath the root systems.',
+    flavor:'trees wider than houses, bioluminescent mushrooms, the ground trembling faintly',
+    cityPresent:false, hasBountyBoard:true,
+    boardLabel:'Wood-warden\'s post carved into a living tree',
+    monsters:['Bark Golems','Wyrmwood Stalkers','Ancient Spiders','Corrupted Treants','Root Fiends'],
+    rareMonsters:['Elder Treant','Wyrmwood Drake','Fae Lord'],
+    connections:{ same:['ashwood_shallow','sunkenfen_edge'], prev:['ashwood_shallow'], next:['ashwood_deep','deepmark'] },
+  },
+  ruinwatch: {
+    label:'Ruinwatch', tier:3, levelRange:[21,30],
+    position:'E-mid',
+    desc:'A city that fell overnight. Whatever killed it is still in the rubble.',
+    flavor:'toppled columns, fires still burning in buried cellars, crows on every surface',
+    cityPresent:false, hasBountyBoard:true,
+    boardLabel:'Survivor board at the outer gatehouse',
+    monsters:['City Wraiths','Ruined Constructs','Looter Gangs','Rubble Golems','Collapsed Guard Shades'],
+    rareMonsters:['City Lord Specter','Ruin Titan','Death Knight Remnant'],
+    connections:{ same:['ember_coast','bleached_flats'], prev:['saltenbay'], next:['veldrath_border','pale_city_approach'] },
+  },
+
+  // ============================================================
+  // TIER 4 — MID RING (Levels 31–40)
+  // ============================================================
+  ashwood_deep: {
+    label:'The Deep Ashwood', tier:4, levelRange:[31,40],
+    position:'W-mid-inner',
+    desc:'The heart of the corrupted forest. The trees here remember names they have no right to know.',
+    flavor:'total silence, bark that pulses, roots that move when unwatched, a light with no source',
+    cityPresent:false, hasBountyBoard:false,
+    boardLabel:null,
+    monsters:['Deep Ash Horrors','Corrupted Forest Lords','Ancient Dryads','Fae Hunters','Root Terrors'],
+    rareMonsters:['Grand Treant','Fae King','Ancient Forest Horror'],
+    connections:{ same:['wyrmwood','deepmark'], prev:['wyrmwood','ashwood_shallow'], next:['deepmark','crucible_approach'] },
+  },
+  blackstone_peaks: {
+    label:'Blackstone Peaks', tier:4, levelRange:[31,40],
+    position:'N-mid-inner',
+    desc:'The true mountains. Abandoned fortresses cling to cliffsides here. Their banners still fly.',
+    flavor:'howling wind, permanent overcast, distant fortress lights, paths that vanish in snowfall',
+    cityPresent:false, hasBountyBoard:true,
+    boardLabel:'Mountain Watch board at High Camp',
+    monsters:['Rock Giants','Mountain Wyverns','Ice Trolls','Storm Elementals','Peak Bandits'],
+    rareMonsters:['Frost Giant','Wyvern','Stone Dragon Whelp'],
+    connections:{ same:['coldsnap_pass','ashwood_deep'], prev:['blackstone_foothills'], next:['frozennorth_reaches','void_fringe'] },
+  },
+  coldsnap_pass: {
+    label:'Coldsnap Pass', tier:4, levelRange:[31,40],
+    position:'N-mid',
+    desc:'The only route north through the mountains. Three armies have tried to hold it. None still do.',
+    flavor:'narrow ice-slick path, rusted armor frozen into the walls, breath visible at noon',
+    cityPresent:false, hasBountyBoard:true,
+    boardLabel:'Fort remnant notice board, mostly legible',
+    monsters:['Ice Bandits','Frozen Shades','Storm Wraiths','Mountain Giants','Glacial Wolves'],
+    rareMonsters:['Blizzard Elemental','Frozen Knight','Ice Drake'],
+    connections:{ same:['blackstone_peaks','ruinwatch'], prev:['blackstone_foothills'], next:['frozennorth_reaches','scar_vale'] },
+  },
+  sunkenfen_deep: {
+    label:'The Deep Fens', tier:4, levelRange:[31,40],
+    position:'SW-mid-inner',
+    desc:'The sunken heart of the swamp. Lich cults have had centuries here undisturbed.',
+    flavor:'green fire on the water, ancient stone altars, a drumming sound beneath everything',
+    cityPresent:false, hasBountyBoard:false,
+    boardLabel:null,
+    monsters:['Lich Thralls','Swamp Horrors','Death Cultists','Bog Terrors','Drowned Shades'],
+    rareMonsters:['Lich Cultist Priest','Ancient Bog Dragon','Death Knight'],
+    connections:{ same:['bleached_flats','ashwood_deep'], prev:['sunkenfen_edge'], next:['ashen_vale','crucible_approach'] },
+  },
+  veldrath_border: {
+    label:'Veldrath Borderlands', tier:4, levelRange:[31,40],
+    position:'SE-mid-inner',
+    desc:'Where the old empire left off and something older picked back up.',
+    flavor:'half-buried spires, sand that hisses, a hot wind that speaks in dead languages',
+    cityPresent:false, hasBountyBoard:true,
+    boardLabel:'Expedition board at the Border Outpost',
+    monsters:['Sand Wraiths','Mummy Warriors','Djinn Scouts','Desert Stalkers','Sand Worms'],
+    rareMonsters:['Elder Mummy','Bound Djinn','Sand Drake'],
+    connections:{ same:['bleached_flats','ruinwatch'], prev:['ember_coast','bleached_flats'], next:['old_veldrath','pale_city_approach'] },
+  },
+
+  // ============================================================
+  // TIER 5 — MID-INNER RING (Levels 41–50)
+  // ============================================================
+  frozennorth_reaches: {
+    label:'Frozennorth Reaches', tier:5, levelRange:[41,50],
+    position:'N-inner',
+    desc:'Tundra that kills the unprepared within hours. Ancient things sleep under the permafrost.',
+    flavor:'endless white, bones of things larger than buildings half-exposed in the ice, absolute silence',
+    cityPresent:false, hasBountyBoard:false,
+    boardLabel:null,
+    monsters:['Frost Giants','Ice Wraiths','Glacial Terrors','Frozen Trolls','Arctic Horrors'],
+    rareMonsters:['Ancient Frost Giant','Ice Drake','Glacial Titan'],
+    connections:{ same:['scar_vale','void_fringe'], prev:['blackstone_peaks','coldsnap_pass'], next:['blighted_reaches','crucible_approach'] },
+  },
+  deepmark: {
+    label:'The Deepmark', tier:5, levelRange:[41,50],
+    position:'W-inner',
+    desc:'An ancient forest so dense the sky is never visible. Something lives in the canopy and never comes down.',
+    flavor:'roots the size of buildings, total darkness at ground level, bioluminescent everything',
+    cityPresent:false, hasBountyBoard:false,
+    boardLabel:null,
+    monsters:['Canopy Horrors','Root Terrors','Ancient Bark Golems','Deep Fae','Forest Titans'],
+    rareMonsters:['Ancient Treant','Deep Fae Lord','Root Titan'],
+    connections:{ same:['ashwood_deep','ashen_vale'], prev:['wyrmwood','ashwood_deep'], next:['ashen_vale','hollowed_kingdom'] },
+  },
+  scar_vale: {
+    label:'The Scar Vale', tier:5, levelRange:[41,50],
+    position:'N-inner-mid',
+    desc:'A valley-sized battlefield where a war ended so badly that the land never healed.',
+    flavor:'churned red earth, steel shards everywhere, weapon-shaped clouds, a constant distant thunder',
+    cityPresent:false, hasBountyBoard:true,
+    boardLabel:'War hunter board at the Scar Gate camp',
+    monsters:['Battle Shades','War Constructs','Undead Siege Engines','Specter Knights','Warchief Ghosts'],
+    rareMonsters:['Dead General','Ancient War Golem','Battle Titan'],
+    connections:{ same:['frozennorth_reaches','void_fringe'], prev:['coldsnap_pass','blackstone_peaks'], next:['blighted_reaches','crucible_gate'] },
+  },
+  void_fringe: {
+    label:'The Void Fringe', tier:5, levelRange:[41,50],
+    position:'E-inner',
+    desc:'Reality is visibly wrong here. Edges of things do not quite line up.',
+    flavor:'doubled shadows, sounds arriving before their source, a wrongness you can almost see',
+    cityPresent:false, hasBountyBoard:false,
+    boardLabel:null,
+    monsters:['Void Wraiths','Reality Fragments','Phase Hunters','Dimensional Horrors','Echo Shades'],
+    rareMonsters:['Void Lord','Reality Breach Horror','Phase Dragon'],
+    connections:{ same:['scar_vale','old_veldrath'], prev:['blackstone_peaks','veldrath_border'], next:['sunken_citadel','blighted_reaches'] },
+  },
+  ashen_vale: {
+    label:'The Ashen Vale', tier:5, levelRange:[41,50],
+    position:'SW-inner',
+    desc:'A land scorched by something old that is still warm. The ash never fully settles.',
+    flavor:'grey ash dunes, glass-fused rock, the crunching of your steps, heat from below',
+    cityPresent:false, hasBountyBoard:false,
+    boardLabel:null,
+    monsters:['Ash Elementals','Fire Wraiths','Lava Golems','Cinder Wolves','Ember Horrors'],
+    rareMonsters:['Ash Titan','Ancient Ember Drake','Lava Golem Lord'],
+    connections:{ same:['deepmark','sunkenfen_deep'], prev:['sunkenfen_deep','wyrmwood'], next:['hollowed_kingdom','crucible_approach'] },
+  },
+  old_veldrath: {
+    label:'Old Veldrath', tier:5, levelRange:[41,50],
+    position:'S-inner',
+    desc:'The deep desert where the original empire stood. Its monuments still function.',
+    flavor:'red dunes between temple complexes, stars visible in daylight, sand that sings at noon',
+    cityPresent:false, hasBountyBoard:true,
+    boardLabel:'Expedition board at the Last Well outpost',
+    monsters:['Elder Sand Wraiths','Empire Guardians','Djinn Lords','Mummy Generals','Ancient Scarabs'],
+    rareMonsters:['Bound Djinn Lord','Ancient Mummy Pharaoh','Sand Dragon'],
+    connections:{ same:['void_fringe','ashen_vale'], prev:['veldrath_border'], next:['bone_desert','pale_city'] },
+  },
+  pale_city_approach: {
+    label:'The Pale City Approach', tier:5, levelRange:[41,50],
+    position:'E-mid-inner',
+    desc:'The road to a city that died and kept moving. You can see its spires from here.',
+    flavor:'white stone roads worn smooth, empty market stalls still arranged neatly, impossible cleanliness',
+    cityPresent:false, hasBountyBoard:false,
+    boardLabel:null,
+    monsters:['Pale Guards','City Wraith Soldiers','Ancient Constructs','Marble Horrors','Glass Shades'],
+    rareMonsters:['Pale Captain','City Golem','Ancient City Horror'],
+    connections:{ same:['void_fringe','old_veldrath'], prev:['ruinwatch','veldrath_border'], next:['pale_city','sunken_citadel'] },
+  },
+
+  // ============================================================
+  // TIER 6 — INNER RING (Levels 51–60)
+  // ============================================================
+  blighted_reaches: {
+    label:'The Blighted Reaches', tier:6, levelRange:[51,60],
+    position:'N-core-approach',
+    desc:'Corruption bleeding out from the center, visible as a purple haze on the horizon.',
+    flavor:'twisted metal that was once cities, purple blight spreading through rock, nothing living that hasn\'t changed',
+    cityPresent:false, hasBountyBoard:false,
+    boardLabel:null,
+    monsters:['Blight Horrors','Corrupted Giants','Plague Elementals','Blight Constructs','Tainted Warlords'],
+    rareMonsters:['Blight Titan','Corruption Lord','Ancient Plague Horror'],
+    connections:{ same:['crucible_approach','sunken_citadel'], prev:['frozennorth_reaches','scar_vale','void_fringe'], next:['crucible_gate','sunken_citadel'] },
+  },
+  crucible_approach: {
+    label:'Crucible Approach', tier:6, levelRange:[51,60],
+    position:'NW-core',
+    desc:'Volcanic terrain that predates any map. The rocks here have never cooled.',
+    flavor:'obsidian spires, lava channels, steam vents, the ground too hot for most boots',
+    cityPresent:false, hasBountyBoard:false,
+    boardLabel:null,
+    monsters:['Magma Horrors','Fire Titans','Volcanic Golems','Ember Lords','Lava Terrors'],
+    rareMonsters:['Magma Titan','Ancient Fire Drake','Volcanic Colossus'],
+    connections:{ same:['blighted_reaches','hollowed_kingdom'], prev:['frozennorth_reaches','ashen_vale','deepmark'], next:['crucible_gate','hollowed_kingdom'] },
+  },
+  hollowed_kingdom: {
+    label:'The Hollowed Kingdom', tier:6, levelRange:[51,60],
+    position:'W-core',
+    desc:'A complete nation that was emptied in a single night. The buildings are still furnished.',
+    flavor:'intact cities with no people, tables still set for meals, fires still burning in hearths',
+    cityPresent:false, hasBountyBoard:false,
+    boardLabel:null,
+    monsters:['Kingdom Shades','Empty Lords','Hollow Soldiers','Forgotten Generals','Void Wraiths'],
+    rareMonsters:['Hollow King','Ancient Kingdom Horror','Void Lord'],
+    connections:{ same:['crucible_approach','ashen_vale'], prev:['deepmark','ashen_vale'], next:['crucible_gate','bone_desert'] },
+  },
+  sunken_citadel: {
+    label:'The Sunken Citadel', tier:6, levelRange:[51,60],
+    position:'E-core',
+    desc:'A fortress half-submerged in dark water. The water glows. The fortress walls move.',
+    flavor:'black water lapping stone walls, portcullises still rising and falling, lights below the waterline',
+    cityPresent:false, hasBountyBoard:false,
+    boardLabel:null,
+    monsters:['Citadel Shades','Drowned Knights','Water Horrors','Submerged Golems','Dark Tides'],
+    rareMonsters:['Citadel Lord','Ancient Drowned Titan','Water Wraith Lord'],
+    connections:{ same:['blighted_reaches','void_fringe'], prev:['void_fringe','pale_city_approach'], next:['pale_city','bone_desert'] },
+  },
+  pale_city: {
+    label:'The Pale City', tier:6, levelRange:[51,60],
+    position:'SE-core',
+    desc:'The white city is occupied. By what is the question no one has answered and survived.',
+    flavor:'perfect white stone, unblinking inhabitants that move too smoothly, silence that is wrong',
+    cityPresent:true, hasBountyBoard:false,
+    boardLabel:null,
+    monsters:['Pale Inhabitants','City Horrors','White Constructs','Glass Lords','Pale Hunters'],
+    rareMonsters:['Pale City Sovereign','Ancient White Horror','Glass Titan'],
+    connections:{ same:['sunken_citadel','old_veldrath'], prev:['pale_city_approach','old_veldrath'], next:['bone_desert','void_marches'] },
+  },
+  bone_desert: {
+    label:'The Bone Desert', tier:6, levelRange:[51,60],
+    position:'S-core',
+    desc:'Nothing dies here — it transforms. Old bones become new predators.',
+    flavor:'sun-bleached skulls half-buried everywhere, old chains still wrapped around nothing, heat that distorts vision',
+    cityPresent:false, hasBountyBoard:false,
+    boardLabel:null,
+    monsters:['Bone Terrors','Ancient Skeletons','Desert Death Lords','Transformed Undead','Marrow Elementals'],
+    rareMonsters:['Bone Colossus','Ancient Pharaoh','Marrow Titan'],
+    connections:{ same:['pale_city','hollowed_kingdom'], prev:['old_veldrath','sunken_citadel'], next:['void_marches','eternal_breach'] },
+  },
+
+  // ============================================================
+  // TIER 7 — INNER CORE APPROACH (Levels 61–70)
+  // ============================================================
+  crucible_gate: {
+    label:'The Crucible Gate', tier:7, levelRange:[61,70],
+    position:'NW-core-inner',
+    desc:'The entrance to the dead volcanic heart. The gate itself is alive and hostile.',
+    flavor:'living obsidian walls that shift, heat that warps the air, a sound like screaming metal',
+    cityPresent:false, hasBountyBoard:false,
+    boardLabel:null,
+    monsters:['Gate Guardians','Lava Titans','Fire Archons','Volcanic Horrors','Ember Lords'],
+    rareMonsters:['Gate Colossus','Ancient Fire Titan','Lava Dragon'],
+    connections:{ same:['blighted_reaches','crucible_approach'], prev:['crucible_approach'], next:['the_crucible','void_marches'] },
+  },
+  shattered_march: {
+    label:'The Shattered March', tier:7, levelRange:[61,70],
+    position:'W-core-inner',
+    desc:'A battlefield that extends for a hundred miles in every direction. The combatants are still fighting.',
+    flavor:'trenches carved into bedrock, siege towers still operational, the dead rising to fight again',
+    cityPresent:false, hasBountyBoard:false,
+    boardLabel:null,
+    monsters:['Eternal Soldiers','Undead Siege Crews','War Titans','Battle Horrors','Ancient Generals'],
+    rareMonsters:['War Colossus','Eternal General','Battle Dragon'],
+    connections:{ same:['crucible_gate','eternal_breach'], prev:['hollowed_kingdom'], next:['the_crucible','eternal_breach'] },
+  },
+  void_marches: {
+    label:'The Void Marches', tier:7, levelRange:[61,70],
+    position:'NE-core-inner',
+    desc:'Where the void broke through. Reality is optional here.',
+    flavor:'inverted landscapes, objects with no shadows, gravity changing without warning',
+    cityPresent:false, hasBountyBoard:false,
+    boardLabel:null,
+    monsters:['Void Titans','Reality Shredders','Dimensional Lords','Phase Horrors','Void Dragons'],
+    rareMonsters:['Void Titan Alpha','Ancient Reality Horror','Dimensional Dragon'],
+    connections:{ same:['blighted_reaches','bone_desert'], prev:['blighted_reaches','pale_city'], next:['the_crucible','eternal_breach'] },
+  },
+  eternal_breach: {
+    label:'The Eternal Breach', tier:7, levelRange:[61,70],
+    position:'S-core-inner',
+    desc:'A wound in the world that has been bleeding power for ten thousand years.',
+    flavor:'a crack in the earth stretching to the horizon, light spilling up from below, unnatural heat',
+    cityPresent:false, hasBountyBoard:false,
+    boardLabel:null,
+    monsters:['Breach Horrors','Power Elementals','Ancient Demons','Rift Guardians','Breach Titans'],
+    rareMonsters:['Breach Lord','Ancient Rift Horror','Breach Dragon'],
+    connections:{ same:['shattered_march','bone_desert'], prev:['bone_desert','void_marches'], next:['the_crucible','shattered_throne'] },
+  },
+
+  // ============================================================
+  // TIER 8 — CORE RING (Levels 71–80)
+  // ============================================================
+  the_crucible: {
+    label:'The Crucible', tier:8, levelRange:[71,80],
+    position:'core-NW',
+    desc:'Active volcanic heart of the world. Ancient things were made here and never left.',
+    flavor:'rivers of lava visible from everywhere, air thick with ash, impossible heat, total silence beneath it',
+    cityPresent:false, hasBountyBoard:false,
+    boardLabel:null,
+    monsters:['Lava Leviathans','Fire Ancients','Volcanic Dragons','Crucible Titans','Flame Archons'],
+    rareMonsters:['Ancient Lava Dragon','Crucible Colossus','Fire Ancient Alpha'],
+    connections:{ same:['void_marches','eternal_breach'], prev:['crucible_gate','shattered_march'], next:['shattered_throne'] },
+  },
+
+  // ============================================================
+  // TIER 9 — THE CORE (Levels 81–90)
+  // ============================================================
+  the_core_wastes: {
+    label:'The Core Wastes', tier:9, levelRange:[81,90],
+    position:'core',
+    desc:'Everything that the world\'s monsters feared has gathered here. Even the air has given up.',
+    flavor:'a sky with no color, ground that moves like breathing, the sound of a heartbeat that isn\'t yours',
+    cityPresent:false, hasBountyBoard:false,
+    boardLabel:null,
+    monsters:['World Horrors','Ancient Archons','Titan Dragons','Reality Eaters','Core Leviathans'],
+    rareMonsters:['Ancient Dragon','Elder Lich','Archlich'],
+    connections:{ same:[], prev:['the_crucible','eternal_breach'], next:['shattered_throne'] },
+  },
+
+  // ============================================================
+  // TIER 10 — THE SHATTERED THRONE (Levels 91–100)
+  // Dead center of the world.
+  // ============================================================
+  shattered_throne: {
+    label:'The Shattered Throne', tier:10, levelRange:[91,100],
+    position:'dead-center',
+    desc:'The broken seat of whatever ruled this world before people existed. It is not empty.',
+    flavor:'a throne larger than cities, cracked down the middle, things moving in the crack, total silence',
+    cityPresent:false, hasBountyBoard:false,
+    boardLabel:null,
+    monsters:['Ancient Dragons','Archliches','World Titans','Throne Guardians','Primordial Horrors'],
+    rareMonsters:['Ancient Dragon (Elder)','Archlich (Grand)','World Serpent'],
+    connections:{ same:[], prev:['the_core_wastes','the_crucible'], next:[] },
+  }
 };
 
 
@@ -597,10 +1082,157 @@ const FREEFORM_SKILL_CONFIG = {
 };
 
 
+// =============================================
+// BOUNTY BOARD QUEST TEMPLATES
+// Deterministic quest skeletons. AI narrates the flavor.
+// Each template has: type, difficulty, coinReward,
+// xpMultiplier, and a hint injected into the AI prompt.
+// =============================================
+
+const QUEST_TYPES = {
+  HUNT:    'hunt',    // Kill N of a specific enemy type
+  CLEAR:   'clear',   // Kill a named boss variant — single hard target
+  PATROL:  'patrol',  // Guard an area / escort NPC within region
+  ESCORT:  'escort',  // Take NPC to another region  
+  RETRIEVE:'retrieve',// Fetch a specific item from a dangerous location
+  SCOUT:   'scout',   // Explore a named location in the next region
+  ADVANCE: 'advance'  // Move-on quest — fires at level+1 over area cap
+};
+
+// Quest reward scaling by tier
+// Base multipliers — final reward = base * tier * difficulty
+const QUEST_REWARD_BASE = {
+  coin: 80,   // copper — scales by tier and difficulty
+  xp:   15    // xp — scales same way
+};
+
+const QUEST_DIFFICULTY = {
+  easy:   { label:'Easy',   coinMult:0.8, xpMult:0.7, levelOffset:-3 },
+  normal: { label:'Normal', coinMult:1.0, xpMult:1.0, levelOffset:0  },
+  hard:   { label:'Hard',   coinMult:1.5, xpMult:1.4, levelOffset:3  },
+  brutal: { label:'Brutal', coinMult:2.5, xpMult:2.0, levelOffset:6  }
+};
+
+// Hunt quest templates per region tier
+const HUNT_TEMPLATES = [
+  // Tier 1
+  { tier:1, targets:['wolves','bandits','goblins'], counts:[3,5,8], givers:['Miller','Inn Keeper','Village Elder','Farmer','Merchant'] },
+  { tier:1, targets:['rats','imps','wild dogs'],    counts:[5,8,12], givers:['Dockmaster','Innkeeper','Town Watch'] },
+  // Tier 2
+  { tier:2, targets:['wraiths','cultists','bog hounds'], counts:[3,5,8], givers:['Garrison Captain','Outpost Commander','Warden'] },
+  { tier:2, targets:['corrupted animals','barrow dead'], counts:[3,4,6], givers:['Scholar','Priest','Hedge Witch'] },
+  // Tier 3
+  { tier:3, targets:['trolls','golems','shambling dead'], counts:[2,3,5], givers:['Expedition Leader','Mine Foreman','Witch Hunter'] },
+  // Tier 4+
+  { tier:4, targets:['death cultists','void fragments','ancient horrors'], counts:[2,3,4], givers:['Archmage','War Council','Ancient Order'] },
+];
+
+const PATROL_TEMPLATES = [
+  { tier:1, task:'guard the north road',     duration:'one night',      giver:'Town Watch Captain'   },
+  { tier:1, task:'protect the market',       duration:'a day',          giver:'Merchant Guild'        },
+  { tier:2, task:'secure the outpost',       duration:'three days',     giver:'Garrison Commander'   },
+  { tier:2, task:'walk the perimeter',       duration:'one full round', giver:'Fort Warden'           },
+  { tier:3, task:'hold the mine entrance',   duration:'a week',         giver:'Expedition Foreman'   },
+  { tier:4, task:'guard the ritual site',    duration:'until complete', giver:'Ancient Order Keeper' },
+];
+
+const ESCORT_TEMPLATES = [
+  { tier:1, npc:'injured soldier',      to:'ironport',            giver:'Local Healer'          },
+  { tier:1, npc:'merchant\'s daughter', to:'dustfall',            giver:'Desperate Merchant'    },
+  { tier:2, npc:'captured scholar',     to:'oakhaven',            giver:'Academy Envoy'         },
+  { tier:2, npc:'wounded ranger',       to:'ashwood_shallow',     giver:'Ranger Guild'          },
+  { tier:3, npc:'expedition survivor',  to:'blackstone_foothills',giver:'Mining Company'        },
+  { tier:4, npc:'sealed relic carrier', to:null,                   giver:'Ancient Order'         },
+];
+
+const RETRIEVE_TEMPLATES = [
+  { tier:1, item:'stolen ledger',        location:'bandit camp',         giver:'Desperate Merchant'    },
+  { tier:1, item:'missing child\'s toy', location:'goblin warrens',      giver:'Grieving Parent'       },
+  { tier:2, item:'garrison seal',        location:'barrow ruins',        giver:'Garrison Commander'    },
+  { tier:2, item:'alchemist\'s notes',   location:'fog-swallowed tower', giver:'Guild Alchemist'       },
+  { tier:3, item:'ancient map fragment', location:'old mine depths',     giver:'Expedition Scholar'    },
+  { tier:4, item:'void-touched artifact',location:'rift site',           giver:'Arcane Council'        },
+];
+
+const SCOUT_TEMPLATES = [
+  { tier:1, location:'the treeline north of the valley',  reward:'map and coin',         giver:'Cartographer\'s Guild' },
+  { tier:2, location:'the ruins on the eastern shore',    reward:'expedition funding',   giver:'Scholar Circle'        },
+  { tier:3, location:'the upper mine levels',             reward:'mining contract',      giver:'Trade Commission'      },
+  { tier:4, location:'the outer fen structures',          reward:'arcane materials',     giver:'Ancient Order'         },
+];
+
+// Advance quest templates — fire when player is 1+ level over area cap
+// Key = current region tier (0-indexed by tier number)
+const ADVANCE_QUESTS = {
+  1: [
+    { label:'A Letter for the Commander',   dest:'greymere',        task:'Deliver a sealed letter to the Greymere Garrison Commander. The content is above your rank. The fee is not.',   reward:'triple coin + guaranteed entry to Greymere' },
+    { label:'The Missing Scout',            dest:'ashwood_shallow', task:'A ranger went into the Ashwood Fringe a week ago and hasn\'t returned. Find what happened to them.',            reward:'triple coin + ranger guild contact' },
+    { label:'Trade Route Survey',           dest:'saltenbay',       task:'The merchant guild needs someone to survey the coastal trade roads. Dangerous work. Good pay.',                  reward:'triple coin + merchant guild favor' },
+  ],
+  2: [
+    { label:'The Foothills Report',         dest:'blackstone_foothills', task:'The mining company\'s survey team hasn\'t reported back. Find them or what happened to them.',             reward:'triple coin + mountain pass knowledge' },
+    { label:'Fen Cult Activity',            dest:'sunkenfen_edge',       task:'Something is organizing the cult activity deeper in the fens. The witch hunters need a scout.',            reward:'triple coin + witch hunter contact' },
+    { label:'Wreck Investigation',          dest:'ember_coast',          task:'Three ships went silent near the Ember Coast. Someone needs to find out why. It probably involves fire.',  reward:'triple coin + naval chart' },
+  ],
+  3: [
+    { label:'The Deep Forest Survey',       dest:'ashwood_deep',    task:'Nothing comes back from the deep forest the same. The Arcane Council will pay well to know what\'s there.',     reward:'triple coin + arcane council favor' },
+    { label:'Mountain Peak Reconnaissance', dest:'blackstone_peaks', task:'The garrison at High Camp needs to know the state of the upper fortresses. Get up there and come back.',       reward:'triple coin + mountain fortress key' },
+    { label:'The Fen Altar',                dest:'sunkenfen_deep',  task:'The witch hunters found ruins they can\'t enter alone. Three experienced fighters needed. You qualify.',         reward:'triple coin + powerful amulet' },
+  ],
+  4: [
+    { label:'The Northern Approach',        dest:'frozennorth_reaches', task:'Something in the north is sending things south. An expedition is forming. They need capable fighters.',     reward:'triple coin + frost-touched gear' },
+    { label:'Void Survey Team',             dest:'void_fringe',         task:'Reality is breaking down east of the Scar Vale. The Arcane Council needs witnesses to file a report.',      reward:'triple coin + void-warded equipment' },
+    { label:'Ashen Vale Expedition',        dest:'ashen_vale',          task:'The order wants a relic retrieved from a location that\'s been on fire for nine hundred years. Easy money.', reward:'triple coin + fire-resistant gear' },
+  ],
+  5: [
+    { label:'Crucible Survey',              dest:'crucible_approach',   task:'The volcanic heart is destabilizing. A survey team needs protection while they take readings.',             reward:'triple coin + lava-resistant armor' },
+    { label:'Kingdom Ghost Report',         dest:'hollowed_kingdom',    task:'The kingdom went silent two months ago. The council wants eyes on the inside. Survival is optional.',       reward:'triple coin + powerful relic' },
+  ],
+  6: [
+    { label:'Gate Assault',                 dest:'crucible_gate',       task:'The expedition is trying to breach the Crucible Gate. They need one more fighter. You look capable enough.', reward:'triple coin + legendary gear token' },
+    { label:'Void March Recon',             dest:'void_marches',        task:'The void is spreading faster. Someone needs to map the breach sites. The pay assumes you might not return.', reward:'triple coin + void-touched power' },
+  ],
+  7: [
+    { label:'The Crucible Run',             dest:'the_crucible',        task:'The ancient forge is operational. An artificer needs protection while he retrieves something from inside.',  reward:'triple coin + ancient artifice item' },
+  ],
+  8: [
+    { label:'Core Waste Expedition',        dest:'the_core_wastes',     task:'An ancient order believes something in the Core Wastes predates all the current threats. They want proof.',  reward:'triple coin + world-class gear' },
+  ],
+  9: [
+    { label:'The Shattered Throne',         dest:'shattered_throne',    task:'The oldest evil. The seat of whatever broke this world. Some things must be faced. This is one of them.',   reward:'Everything and nothing. The end of one story.' },
+  ]
+};
+
+
+// =============================================
+// WORLD MAP CONNECTIONS SUMMARY
+// Helper structure for generating travel/scout quests.
+// Maps region key -> neighboring region keys
+// =============================================
+function getRegionConnections(regionKey) {
+  const r = REGIONS[regionKey];
+  if (!r || !r.connections) return [];
+  const all = [
+    ...(r.connections.same || []),
+    ...(r.connections.prev || []),
+    ...(r.connections.next || [])
+  ];
+  return [...new Set(all)].filter(k => REGIONS[k]);
+}
+
+function getNextTierRegions(regionKey) {
+  const r = REGIONS[regionKey];
+  if (!r || !r.connections) return [];
+  return (r.connections.next || []).filter(k => REGIONS[k]);
+}
+
+
+
 module.exports = {
   BACKGROUNDS,
   MAGICAL_BACKGROUNDS,
   REGIONS,
+  WORLD_TIERS,
   STARTING_ENVIRONMENTS,
   ENEMIES,
   BODY_PARTS,
@@ -614,7 +1246,6 @@ module.exports = {
   INTIMACY_CONDITIONS,
   MAX_LEVEL,
   CLASS_LEVEL_XP,
-  // New character creation systems
   BUILD_MODS,
   BUILD_KEYWORDS,
   AGE_BANDS,
@@ -622,4 +1253,15 @@ module.exports = {
   BACKGROUND_KEYWORDS,
   STARTING_SPELLS,
   FREEFORM_SKILL_CONFIG,
+  QUEST_TYPES,
+  QUEST_REWARD_BASE,
+  QUEST_DIFFICULTY,
+  HUNT_TEMPLATES,
+  PATROL_TEMPLATES,
+  ESCORT_TEMPLATES,
+  RETRIEVE_TEMPLATES,
+  SCOUT_TEMPLATES,
+  ADVANCE_QUESTS,
+  getRegionConnections,
+  getNextTierRegions,
 };

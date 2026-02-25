@@ -10,7 +10,7 @@
 
 const Groq = require('groq-sdk');
 
-const { BACKGROUNDS, REGIONS, CLASSES, PROFESSIONS } = require('./constants');
+const { BACKGROUNDS, REGIONS, WORLD_TIERS, CLASSES, PROFESSIONS } = require('./constants');
 
 const {
   getPlayerLevel,
@@ -143,14 +143,26 @@ function buildRegionContext(state) {
   if (!r) return '';
 
   const playerLevel  = getPlayerLevel(state.totalXP || 0);
-  const [mn, mx]     = r.monsterLevel;
+  const [mn, mx]     = r.levelRange || r.monsterLevel || [1, 10];
+  const tier         = r.tier || 1;
+  const tierData     = WORLD_TIERS[tier - 1] || WORLD_TIERS[0];
+
+  // Level gap indicators
+  const overLevel    = playerLevel >= mx + 1;
+  const underLevel   = playerLevel < mn;
+  const gapNote      = overLevel
+    ? `[PLAYER IS OVER-LEVELED FOR THIS AREA — they have mastered this region. Enemies should feel less threatening. The advance quest on the bounty board points them toward ${r.connections && r.connections.next && r.connections.next[0] ? REGIONS[r.connections.next[0]] ? REGIONS[r.connections.next[0]].label : r.connections.next[0] : 'the next region'}.]`
+    : underLevel
+    ? `[PLAYER IS UNDER-LEVELED — this area is dangerous to them. Enemies should feel overwhelming. Survival is uncertain.]`
+    : '';
 
   return [
-    `[REGION: ${r.label} | Danger Lv${mn}–${mx} | Player Lv${playerLevel}]`,
+    `[REGION: ${r.label} | Tier ${tier}: ${tierData.label} | Danger Lv${mn}–${mx} | Player Lv${playerLevel}]`,
     `Setting: ${r.flavor}.`,
     `Common threats: ${r.monsters.slice(0, 3).join(', ')}.`,
+    gapNote,
     `[Introduce only enemies appropriate to this region. Do not narrate this block directly.]`
-  ].join('\n');
+  ].filter(Boolean).join('\n');
 }
 
 function buildCombatContext(state) {
@@ -380,6 +392,25 @@ function buildEventAnnouncements(events) {
 
       case 'inspect':
         lines.push(`\n${evt.content}`);
+        break;
+
+      case 'questAccepted':
+        lines.push(`\n[QUEST ACCEPTED — "${evt.quest.label}". Reward on completion: ${evt.quest.reward ? evt.quest.reward.coin + 'c + ' + evt.quest.reward.xp + ' XP' : 'coin + XP'}.]`);
+        break;
+
+      case 'questProgress':
+        if (evt.total > 1) {
+          lines.push(`\n[Quest progress: ${evt.progress}/${evt.total}]`);
+        }
+        break;
+
+      case 'questComplete':
+        const r = evt.reward || {};
+        lines.push(`\n\n— QUEST COMPLETE — "${evt.quest.label}"`);
+        lines.push(`Reward: ${r.coin || 0} coins, +${r.xp || 0} XP.`);
+        if (evt.quest.type === 'advance') {
+          lines.push(`[The road ahead is open. A new region awaits.]`);
+        }
         break;
     }
   }
