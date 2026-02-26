@@ -342,8 +342,9 @@ function applyCombatRound(state, input) {
     }
   }
 
-  // Build narrative hint
-  const hint = buildCombatNarrativeHint(result, enemy, state.hp, state.maxHp, state.stamina, state.maxStamina, enemyKilled);
+  // Build narrative hint (AI guidance) and player-visible combat log
+  const hint       = buildCombatNarrativeHint(result, enemy, state.hp, state.maxHp, state.stamina, state.maxStamina, enemyKilled);
+  const combatLog  = buildCombatLog(result, enemy, state.hp, state.maxHp, state.stamina, state.maxStamina, enemyKilled, score.quality);
 
   return {
     score,
@@ -351,6 +352,7 @@ function applyCombatRound(state, input) {
     unbeatable:  false,
     enemyKilled,
     xpAwarded,
+    combatLog,
     hint:        score.hint + '\n' + hint
   };
 }
@@ -487,43 +489,111 @@ function buildEnemyInspectData(state) {
 
 
 // =============================================
+// COMBAT LOG BUILDER (player-visible)
+// Returns a formatted mechanical combat log that
+// appears BELOW the narrative in the story output.
+// Players see exact numbers here — narrative is prose only.
+// =============================================
+function buildCombatLog(result, enemy, playerHP, maxHP, playerStamina, maxStamina, enemyKilled, actionQuality) {
+  if (!result) return null;
+
+  const sep   = '─'.repeat(36);
+  const lines = [`\n${sep}`];
+
+  // Player action
+  if (result.playerHit) {
+    const crit = result.playerCrit ? ' ⚡ CRITICAL HIT' : '';
+    lines.push(`▶ You strike the ${enemy.label}'s ${result.bodyPart}${crit}`);
+    lines.push(`  Damage dealt: ${result.playerDamage}`);
+    const ePct = enemy.currentHP / enemy.maxHP;
+    const eLabel = ePct <= 0 ? 'DEAD' :
+                   ePct < 0.15 ? 'Near Death' :
+                   ePct < 0.35 ? 'Critically Wounded' :
+                   ePct < 0.60 ? 'Seriously Wounded' :
+                   ePct < 0.80 ? 'Wounded' : 'Mostly Unharmed';
+    lines.push(`  ${enemy.label}: ${eLabel}`);
+  } else {
+    lines.push(`▶ You miss — ${result.hitChance}% hit chance, attack goes wide`);
+  }
+
+  // Enemy retaliation
+  if (result.enemyHit) {
+    lines.push(`◀ ${enemy.label} strikes back`);
+    lines.push(`  Damage taken: ${result.enemyDamage}`);
+  } else {
+    lines.push(`◀ ${enemy.label} misses you`);
+  }
+
+  // Player status after the exchange
+  const hpPct   = maxHP > 0 ? playerHP / maxHP : 1;
+  const hpBar   = buildMiniBar(hpPct, 12);
+  const stPct   = maxStamina > 0 ? playerStamina / maxStamina : 1;
+  const stBar   = buildMiniBar(stPct, 12);
+  const hpLabel = hpPct <= 0 ? 'DEAD' :
+                  hpPct < 0.15 ? 'Critical' :
+                  hpPct < 0.35 ? 'Badly Hurt' :
+                  hpPct < 0.60 ? 'Wounded' :
+                  hpPct < 0.80 ? 'Hurt' : 'OK';
+
+  lines.push(`  HP  ${hpBar} ${playerHP}/${maxHP} [${hpLabel}]`);
+  lines.push(`  STA ${stBar} ${playerStamina}/${maxStamina}`);
+  lines.push(`  Action quality: ${actionQuality || 'basic'}`);
+
+  if (enemyKilled) {
+    lines.push(`✦ ${enemy.label} is dead.`);
+  }
+
+  lines.push(sep);
+  return lines.join('\n');
+}
+
+function buildMiniBar(pct, width) {
+  const filled = Math.round(Math.max(0, Math.min(1, pct)) * width);
+  return '[' + '█'.repeat(filled) + '░'.repeat(width - filled) + ']';
+}
+
+
+// =============================================
 // NARRATIVE HINT BUILDER
 // Produces the bracketed instruction block
 // passed to the AI as authorsNote guidance.
 // Never shown to the player directly.
 // =============================================
 function buildCombatNarrativeHint(result, enemy, playerHP, maxHP, stamina, maxStamina, enemyKilled) {
-  const lines = ['[COMBAT STATE — narrate from these facts only, never state numbers directly]'];
+  const lines = ['[COMBAT NARRATIVE INSTRUCTIONS — write visceral, present-tense prose. Do NOT repeat numbers; those appear in the combat log the player already sees.]'];
 
   if (result) {
     if (result.playerHit) {
-      lines.push(`[PLAYER HIT ${enemy.label} in the ${result.bodyPart}${result.playerCrit ? ' — CRITICAL STRIKE' : ''}. Enemy HP: ${enemy.currentHP}/${enemy.maxHP}.]`);
+      const critNote = result.playerCrit ? ' — a CRITICAL strike, devastating impact' : '';
+      lines.push(`[Player HIT the ${enemy.label} in the ${result.bodyPart}${critNote}. Describe the physical impact, the sound, the enemy's reaction. Enemy is ${result.enemyDamage > 0 ? 'hurt' : 'barely affected'}.]`);
     } else {
-      lines.push(`[PLAYER MISSED targeting ${result.bodyPart} (${result.hitChance}% chance). Describe the swing going wide or being deflected.]`);
+      lines.push(`[Player MISSED. The swing went wide or was deflected. Describe the overextension, the stumble, the opening it creates. This felt bad.]`);
     }
 
     if (result.enemyHit) {
-      lines.push(`[${enemy.label} HIT the player for ${result.enemyDamage} damage. Player HP: ${playerHP}/${maxHP}. Describe the physical impact.]`);
+      const heavy = result.enemyDamage >= 15 ? 'a punishing blow' :
+                    result.enemyDamage >= 8  ? 'a solid hit' : 'a glancing strike';
+      lines.push(`[${enemy.label} landed ${heavy} on the player. Describe WHERE it connected — arms, ribs, head — and what it feels like. Don't say how much damage.]`);
     } else {
-      lines.push(`[${enemy.label} MISSED. Describe the player avoiding — dodge, sidestep, attack grazing past.]`);
+      lines.push(`[${enemy.label} attacked but missed. Describe the player's dodge, sidestep, parry, or the enemy overreaching.]`);
     }
   }
 
   const hpLabel    = getHPLabel(playerHP, maxHP);
   const stamLabel  = getStaminaLabel(stamina, maxStamina);
-  lines.push(`[Player: ${hpLabel}. Stamina: ${stamLabel}. Reflect this in movement and description.]`);
+  lines.push(`[Player condition: ${hpLabel}. Stamina: ${stamLabel}. Reflect this in their movement — a badly hurt player moves slower, breathes harder, their grip falters.]`);
 
   if (enemyKilled || (enemy && enemy.currentHP <= 0)) {
-    lines.push(`[${enemy.label} IS DEAD. Describe it with finality.]`);
+    lines.push(`[${enemy.label} IS DEAD. End the fight. Describe the killing blow, the body going still, the sudden silence. Make it feel earned.]`);
   } else if (enemy) {
     const ePct = enemy.currentHP / enemy.maxHP;
-    if      (ePct < 0.15) lines.push(`[${enemy.label} NEARLY DEAD — staggering, barely standing.]`);
-    else if (ePct < 0.35) lines.push(`[${enemy.label} BADLY WOUNDED — clearly losing.]`);
-    else if (ePct < 0.60) lines.push(`[${enemy.label} WOUNDED — showing the toll.]`);
-    else                  lines.push(`[${enemy.label} mostly unharmed so far.]`);
+    if      (ePct < 0.15) lines.push(`[${enemy.label} is NEARLY DEAD — staggering, barely upright, desperate.]`);
+    else if (ePct < 0.35) lines.push(`[${enemy.label} is BADLY WOUNDED — clearly losing, movements ragged.]`);
+    else if (ePct < 0.60) lines.push(`[${enemy.label} is WOUNDED — showing the toll, fighting more cautiously.]`);
+    else                  lines.push(`[${enemy.label} is mostly unscathed — still dangerous, still confident.]`);
   }
 
-  lines.push('[Never mention HP numbers, damage values, levels, or stat names in narrative.]');
+  lines.push('[Write 3–5 sentences of combat prose. Keep it tight, immediate, physical. Do not use stat names, damage numbers, or HP values in the narrative — those are in the combat log below.]');
   return lines.join('\n');
 }
 
@@ -581,6 +651,8 @@ module.exports = {
 
   // Narrative
   buildCombatNarrativeHint,
+  buildCombatLog,
+  buildMiniBar,
 
   // UI
   buildEnemyPanelData
