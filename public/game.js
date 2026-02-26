@@ -113,6 +113,7 @@ const el = {
   btnRegister:     document.getElementById('btn-register'),
   btnShowRegister: document.getElementById('btn-show-register'),
   btnShowLogin:    document.getElementById('btn-show-login'),
+  checkRememberMe: document.getElementById('check-remember-me'),
   authError:       document.getElementById('auth-error'),
   regError:        document.getElementById('reg-error'),
 
@@ -180,7 +181,40 @@ async function apiCall(method, path, body = null) {
 // SESSION INIT
 // =============================================
 async function initSession() {
-  // Try to resume existing guest session
+  // --- Auto-login via remember-me token ---
+  const rememberToken = localStorage.getItem('rememberToken');
+  if (rememberToken) {
+    const { ok, data } = await apiCall('POST', '/auth/auto-login', { rememberToken });
+    if (ok && data.success) {
+      client.sessionId = data.sessionId;
+      client.isLoggedIn = true;
+      client.username   = data.username;
+      localStorage.setItem('sessionId', data.sessionId);
+      localStorage.setItem('rememberToken', data.rememberToken); // rolling refresh
+      updateAuthUI();
+
+      if (data.hasCharacter) {
+        client.inCreation = false;
+        await refreshPanels();
+        const resumeMsg = data.storySummary
+          ? `Welcome back, ${data.username}.\n\n— Your story so far —\n\n${data.storySummary}\n\n— — —`
+          : `Welcome back, ${data.username}. Your story continues...`;
+        appendStory(null, resumeMsg, false);
+        el.creationWizard.classList.add('hidden');
+        el.inputArea.classList.remove('hidden');
+        el.playerInput.focus();
+      } else {
+        appendStory(null, `Welcome back, ${data.username}.`, false);
+        cwInit();
+      }
+      return;
+    } else {
+      // Token expired — clear it
+      localStorage.removeItem('rememberToken');
+    }
+  }
+
+  // --- Try to resume existing guest session ---
   const { ok, data } = await apiCall('POST', '/auth/guest', {
     sessionId: client.sessionId
   });
@@ -201,10 +235,14 @@ async function initSession() {
       // Fully created character — jump straight into the game
       client.inCreation = false;
       await refreshPanels();
-      const resumeMsg = data.storySummary
-        ? `— Your story so far —\n\n${data.storySummary}\n\n— — —`
-        : 'Your story continues...';
-      appendStory(null, resumeMsg, false);
+      // Try to restore the last session's story from local cache
+      const hadHistory = loadStoryHistoryFromLocal();
+      if (!hadHistory) {
+        const resumeMsg = data.storySummary
+          ? `— Your story so far —\n\n${data.storySummary}\n\n— — —`
+          : 'Your story continues...';
+        appendStory(null, resumeMsg, false);
+      }
       el.creationWizard.classList.add('hidden');
       el.inputArea.classList.remove('hidden');
       el.playerInput.focus();
@@ -213,7 +251,6 @@ async function initSession() {
       // Drop the old session and start fresh.
       localStorage.removeItem('sessionId');
       client.sessionId = null;
-      // Re-call with no sessionId — server will create a new one
       const { ok: ok2, data: data2 } = await apiCall('POST', '/auth/guest', {});
       if (ok2) {
         client.sessionId = data2.sessionId;
@@ -649,8 +686,53 @@ function appendPlayerAction(text) {
   scrollToBottom();
 }
 
-function appendStory(playerAction, text, isCreation = false) {
+// Rolling story history — last 30 entries persisted locally for resume
+const MAX_LOCAL_HISTORY = 30;
+
+function saveStoryEntryLocally(playerAction, text) {
   if (!text) return;
+  try {
+    const history = JSON.parse(localStorage.getItem('storyHistory') || '[]');
+    history.push({ playerAction, text, ts: Date.now() });
+    while (history.length > MAX_LOCAL_HISTORY) history.shift();
+    localStorage.setItem('storyHistory', JSON.stringify(history));
+  } catch (e) { /* ignore storage errors */ }
+}
+
+function loadStoryHistoryFromLocal() {
+  try {
+    const history = JSON.parse(localStorage.getItem('storyHistory') || '[]');
+    if (!history.length) return false;
+
+    // Render a divider then replay entries
+    const divider = document.createElement('div');
+    divider.className = 'story-entry';
+    divider.innerHTML = '<div class="ai-response history-divider">— Previous session —</div>';
+    el.storyContent.appendChild(divider);
+
+    for (const entry of history) {
+      if (entry.playerAction) appendPlayerAction(entry.playerAction, true);
+      if (entry.text) appendStory(null, entry.text, false, true); // skipSave=true
+    }
+
+    const endDivider = document.createElement('div');
+    endDivider.className = 'story-entry';
+    endDivider.innerHTML = '<div class="ai-response history-divider">— Continuing —</div>';
+    el.storyContent.appendChild(endDivider);
+    scrollToBottom();
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+function appendStory(playerAction, text, isCreation = false, skipSave = false) {
+  if (!text) return;
+
+  // Persist to local rolling history (skip for history replay and creation text)
+  if (!skipSave && !isCreation) {
+    saveStoryEntryLocally(playerAction, text);
+  }
 
   const entry = document.createElement('div');
   entry.className = 'story-entry';
@@ -773,8 +855,9 @@ function showRegError(msg) {
 }
 
 async function handleLogin() {
-  const username = el.inputUsername.value.trim();
-  const password = el.inputPassword.value;
+  const username   = el.inputUsername.value.trim();
+  const password   = el.inputPassword.value;
+  const rememberMe = el.checkRememberMe ? el.checkRememberMe.checked : false;
 
   if (!username || !password) {
     showAuthError('Username and password required.');
@@ -782,7 +865,7 @@ async function handleLogin() {
   }
 
   const { ok, data } = await apiCall('POST', '/auth/login', {
-    username, password, sessionId: client.sessionId
+    username, password, sessionId: client.sessionId, rememberMe
   });
 
   if (!ok) {
@@ -794,6 +877,11 @@ async function handleLogin() {
   client.isLoggedIn = true;
   client.username   = data.username;
   localStorage.setItem('sessionId', data.sessionId);
+
+  // Store remember-me token if returned
+  if (data.rememberToken) {
+    localStorage.setItem('rememberToken', data.rememberToken);
+  }
 
   el.authStatus.textContent = `Logged in as ${data.username}`;
   el.toggleNsfw.checked     = !!data.nsfwEnabled;
@@ -1566,6 +1654,7 @@ async function handleReset() {
   // Clear story
   el.storyContent.innerHTML = '';
   localStorage.removeItem('sessionId');
+  localStorage.removeItem('storyHistory');
 
   // Reinitialize
   client.inCreation  = true;

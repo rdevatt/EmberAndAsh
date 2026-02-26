@@ -363,6 +363,20 @@ aside {
   white-space: pre-wrap;
 }
 
+/* History divider (previous session separator) */
+.story-entry .history-divider {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  color: var(--text-dim);
+  letter-spacing: 2px;
+  text-align: center;
+  padding: 4px 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  margin: 8px 0;
+  opacity: 0.6;
+}
+
 /* Creation phase output */
 .story-entry .creation-text {
   font-family: var(--font-ui);
@@ -594,6 +608,24 @@ aside {
 
 .auth-buttons .modal-btn {
   flex: 1;
+}
+
+.remember-me-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  color: var(--text-dim);
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  margin: 4px 0;
+}
+.remember-me-label input[type="checkbox"] {
+  accent-color: var(--accent);
+  width: 13px;
+  height: 13px;
+  cursor: pointer;
 }
 
 .error-msg {
@@ -1281,7 +1313,6 @@ aside {
 
   /* STORY panel: adjust input area */
   #panel-center {
-    display: flex;
     flex-direction: column;
   }
 
@@ -1307,8 +1338,7 @@ aside {
     flex-direction: column;
   }
 
-  /* Story panel default active */
-  #panel-center { display: flex; }
+  /* Story panel default active — set by JS setMobilePanel('center') on load */
 
   /* Add spacing for mobile nav */
   body { padding-bottom: 52px; }

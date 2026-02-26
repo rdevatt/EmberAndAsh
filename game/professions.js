@@ -288,10 +288,11 @@ function calculateProfessionTaskXP(taskLevel, professionLevel) {
 const CRAFTING_PROFESSIONS = new Set(['blacksmith','alchemist','woodsman','hunter','scholar','cook','scout','merchant']);
 
 function _tryGenerateCraftedItem(state, input, profLvl) {
-  if (!state.profession) return null;
-  if (!CRAFTING_PROFESSIONS.has(state.profession)) return null;
+  // Any player can craft — no profession required for primitive items.
+  // Profession determines quality tier. No profession = crude (tier 0).
+  const profKey = state.profession || null;
 
-  const craftedItem = buildCraftedGearItem(state.profession, profLvl, input);
+  const craftedItem = buildCraftedGearItem(profKey, profLvl, input);
   if (!craftedItem) return null;
 
   // Add to crafted gear inventory (separate from string inventory)
@@ -303,14 +304,93 @@ function _tryGenerateCraftedItem(state, input, profLvl) {
 
 
 // =============================================
+// SECONDARY SKILL XP (cross-profession learning)
+// A blacksmith who skins a beast earns reduced skinning XP.
+// Cap is lower than the player's primary profession.
+// =============================================
+const SECONDARY_SKILL_RATE = 0.35; // 35% of normal XP rate for secondary skills
+
+function resolveSecondarySkillTask(state, input) {
+  if (!state.profession) return null;
+
+  // Check all OTHER professions' task lists for a match
+  const results = [];
+  for (const [profKey, tasks] of Object.entries(PROFESSION_TASKS)) {
+    if (profKey === state.profession) continue; // skip primary profession
+
+    const t = input.toLowerCase();
+    let bestTask = null;
+    for (const task of (tasks || [])) {
+      if (task.keywords.some(k => t.includes(k))) {
+        if (!bestTask || task.level > bestTask.level) bestTask = task;
+      }
+    }
+
+    if (!bestTask) continue;
+
+    // Secondary skill XP is reduced; cap contribution tracked separately
+    if (!state.secondarySkills) state.secondarySkills = {};
+    if (!state.secondarySkills[profKey]) state.secondarySkills[profKey] = 0;
+
+    const secondaryLevel = Math.floor(state.secondarySkills[profKey] / 100) + 1;
+    // Secondary level capped at 60% of primary prof level
+    const primaryLevel   = getProfessionLevel(state.profXP || 0);
+    const secondaryCap   = Math.max(1, Math.floor(primaryLevel * 0.6));
+
+    if (secondaryLevel >= secondaryCap) continue; // capped out
+
+    const rawXP  = calculateProfessionTaskXP(bestTask.level, secondaryLevel);
+    const xpGain = Math.max(1, Math.round(rawXP * SECONDARY_SKILL_RATE));
+    state.secondarySkills[profKey] += xpGain;
+
+    results.push({ profKey, xpGain, taskLevel: bestTask.level });
+  }
+
+  return results.length > 0 ? results : null;
+}
+
+
+// =============================================
 // PROFESSION TASK RESOLUTION
 // Returns result object with XP, success flag, and narrative hint.
 // =============================================
 function resolveProfessionTask(state, input) {
-  if (!state.profession) return null;
+  // --- No-profession path: allow primitive crafting ---
+  if (!state.profession) {
+    const profLvl   = 0;
+    const craftedItem = _tryGenerateCraftedItem(state, input, profLvl);
+    if (!craftedItem) return null;
+    return {
+      success:    true,
+      impossible: false,
+      xp:         0, // No prof XP — no profession yet
+      craftedItem,
+      hint: `[NO PROFESSION — player crafted a primitive item: "${craftedItem.name}" (crude quality, +1 weapon/armor bonus). It is now in their inventory and CAN be equipped with "equip ${craftedItem.name}". Narrate the rough but functional result.]`
+    };
+  }
 
   const taskLevel = detectProfessionTaskLevel(input, state.profession);
-  if (taskLevel === null) return null;
+
+  // Even if this action isn't their primary profession's task,
+  // check if it's secondary skill work
+  const secondaryGains = resolveSecondarySkillTask(state, input);
+
+  if (taskLevel === null) {
+    // Not a primary profession task, but may have earned secondary skill XP
+    if (secondaryGains && secondaryGains.length > 0) {
+      const secLabel = secondaryGains.map(s =>
+        `${PROFESSIONS[s.profKey] ? PROFESSIONS[s.profKey].label : s.profKey} skill`
+      ).join(', ');
+      return {
+        success:         true,
+        isSecondaryOnly: true,
+        secondaryGains,
+        xp:              0,
+        hint:            `[SECONDARY SKILL WORK — player performed a task outside their primary profession. Earned progress in: ${secLabel}. Narrate the work naturally without mentioning skill mechanics.]`
+      };
+    }
+    return null;
+  }
 
   const profLvl  = getProfessionLevel(state.profXP || 0);
   const taskXP   = calculateProfessionTaskXP(taskLevel, profLvl);
@@ -342,6 +422,7 @@ function resolveProfessionTask(state, input) {
         xp:         failXP,
         taskLevel,
         taskGap,
+        secondaryGains,
         hint: `[PROFESSION TASK ABOVE SKILL — failed attempt. The work falls short. Narrate struggle, wasted effort, or a ruined result. +${failXP} minimal XP for trying.]`
       };
     }
@@ -360,6 +441,7 @@ function resolveProfessionTask(state, input) {
         taskLevel,
         taskGap,
         bonus:      true,
+        secondaryGains,
         craftedItem: craftedItemBonus,
         hint: `[PROFESSION TASK ABOVE SKILL — succeeded against the odds! Crafted: "${craftedItemBonus.name}" (${craftedItemBonus.quality})${craftedItemBonus.statMods ? ' with exceptional stat modifiers' : ''}. Narrate the difficulty and the satisfying result. +${bonusXP} bonus XP. Item now in inventory — can be equipped or sold for premium.]`
       };
@@ -372,6 +454,7 @@ function resolveProfessionTask(state, input) {
       taskLevel,
       taskGap,
       bonus:      true,
+      secondaryGains,
       hint: `[PROFESSION TASK ABOVE SKILL — succeeded against the odds. Narrate the difficulty, the close call, and the satisfying result. +${bonusXP} bonus XP rewarded.]`
     };
   }
@@ -389,6 +472,7 @@ function resolveProfessionTask(state, input) {
       taskLevel,
       taskGap:    0,
       bonus:      false,
+      secondaryGains,
       craftedItem,
       hint: `[PROFESSION TASK — within skill range. Crafted: "${craftedItem.name}" (${craftedItem.quality})${craftedItem.statMods ? ' with stat modifiers' : ''}. +${taskXP} profession XP. The item is now in their inventory — it can be equipped or sold for a premium.]`
     };
@@ -401,6 +485,7 @@ function resolveProfessionTask(state, input) {
     taskLevel,
     taskGap:    0,
     bonus:      false,
+    secondaryGains,
     hint: `[PROFESSION TASK — within skill range. Competent work. +${taskXP} profession XP.]`
   };
 }

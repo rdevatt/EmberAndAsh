@@ -273,26 +273,45 @@ const CRAFTING_DETECT_KEYWORDS = [
   'whittle','knap','bind','inscribe','enchant'
 ];
 
+// Universal primitive/improvised items — craftable by ANYONE regardless of profession.
+// Quality is always crude/rough without a profession, but they are valid equippable gear.
+const UNIVERSAL_WEAPONS = [
+  'club','stick','stone knife','stone axe','rock','flint knife','flint axe','bone knife',
+  'sharpened stick','crude spear','primitive spear','crude club','branch','makeshift club',
+  'rock-headed club','knapped blade','flint blade','stone tool','bone tool','tooth knife',
+  'sharpened bone','jaw blade','antler pick','wooden spear','crude bow','rough spear',
+  'stone','knapped','flint','chipped stone','chipped flint'
+];
+
+const UNIVERSAL_ARMOR = [
+  'hood','cap','wrap','binding','pelt','hide','cloak','tunic','vest',
+  'makeshift hood','wolf pelt hood','rabbit hide cap','bark vest','wrapped hide',
+  'hide wrap','bone pauldron','lashed hide','crude shield','bark shield','wicker shield',
+  'makeshift armor','crude armor','rough armor','padded wrap','fur cloak','animal hide',
+  'pelt cloak','hide cloak','tanned hide','leather wrap','wolf hood','wolf cloak',
+  'wolf pelt','deer hide','rabbit pelt','bear pelt','boar hide'
+];
+
 const CRAFTABLE_WEAPONS = {
-  blacksmith: ['sword','blade','dagger','axe','hammer','mace','spear','shield'],
+  blacksmith: ['sword','blade','dagger','axe','hammer','mace','spear','shield','shortsword','longsword','hatchet','maul'],
   alchemist:  ['staff','wand','focus','rod'],
-  woodsman:   ['staff','club','bow','arrow','spear','shaft'],
-  hunter:     ['bow','spear','javelin','arrow'],
+  woodsman:   ['staff','club','bow','arrow','spear','shaft','shortbow','longbow','quarterstaff'],
+  hunter:     ['bow','spear','javelin','arrow','shortbow','hunting spear','throwing knife'],
   scholar:    ['staff','tome','focus','rod'],
   merchant:   ['shortsword','dagger','club'],
-  cook:       ['knife','cleaver','skillet'],
-  scout:      ['shortbow','dagger','shortsword','sling']
+  cook:       ['knife','cleaver','skillet','butcher knife'],
+  scout:      ['shortbow','dagger','shortsword','sling','hand crossbow']
 };
 
 const CRAFTABLE_ARMOR = {
-  blacksmith: ['armor','chainmail','plate','helm','gauntlets','greaves','shield'],
+  blacksmith: ['armor','chainmail','plate','helm','gauntlets','greaves','shield','breastplate','coif','vambrace'],
   alchemist:  ['cloak','robe','gloves','band','ring'],
-  woodsman:   ['shield','hide armor','bark armor'],
-  hunter:     ['leather armor','hide armor','cloak'],
+  woodsman:   ['shield','hide armor','bark armor','bark vest','hide cloak','fur armor'],
+  hunter:     ['leather armor','hide armor','cloak','pelt armor','fur armor','leather hood'],
   scholar:    ['robe','cloak','cap'],
   merchant:   ['vest','coat'],
   cook:       ['apron','gloves'],
-  scout:      ['leather armor','cloak','hood']
+  scout:      ['leather armor','cloak','hood','soft armor','padded vest','face wrap']
 };
 
 function detectCraftingIntent(input, profKey) {
@@ -300,31 +319,37 @@ function detectCraftingIntent(input, profKey) {
   const hasCraftVerb = CRAFTING_DETECT_KEYWORDS.some(k => t.includes(k));
   if (!hasCraftVerb) return null;
 
-  // Determine if weapon or armor
+  // Check profession-specific lists first
   const weaponList = CRAFTABLE_WEAPONS[profKey] || [];
   const armorList  = CRAFTABLE_ARMOR[profKey]   || [];
 
-  const isWeapon = weaponList.some(w => t.includes(w));
-  const isArmor  = armorList.some(a => t.includes(a));
+  const isProfWeapon = weaponList.some(w => t.includes(w));
+  const isProfArmor  = armorList.some(a => t.includes(a));
+
+  // Fall back to universal primitive lists (any player can craft these)
+  const isUniversalWeapon = !isProfWeapon && UNIVERSAL_WEAPONS.some(w => t.includes(w));
+  const isUniversalArmor  = !isProfArmor  && UNIVERSAL_ARMOR.some(a => t.includes(a));
+
+  const isWeapon = isProfWeapon || isUniversalWeapon;
+  const isArmor  = isProfArmor  || isUniversalArmor;
 
   if (!isWeapon && !isArmor) return null;
 
-  // Try to extract item name from input (up to 4 words after craft verb)
+  // Try to extract item name from input (up to 5 words after craft verb)
   let itemName = null;
   for (const verb of CRAFTING_DETECT_KEYWORDS) {
     const idx = t.indexOf(verb);
     if (idx !== -1) {
-      // Grab up to 5 words after verb
       const after = t.slice(idx + verb.length).trim().split(/\s+/).slice(0, 5).join(' ');
-      // Strip articles
       itemName = after.replace(/^(a|an|the)\s+/i,'').trim();
       break;
     }
   }
 
   return {
-    isArmor: isArmor && !isWeapon,
-    itemName: itemName || (isArmor ? 'armor piece' : 'weapon')
+    isArmor:    isArmor && !isWeapon,
+    isPrimitive: !isProfWeapon && !isProfArmor, // crude quality cap if no profession match
+    itemName:   itemName || (isArmor ? 'improvised armor' : 'improvised weapon')
   };
 }
 
@@ -332,12 +357,20 @@ function buildCraftedGearItem(profKey, profLevel, input) {
   const intent = detectCraftingIntent(input, profKey);
   if (!intent) return null;
 
-  // Tier is driven by profession level (0–9, capped)
-  // profLevel 1→tier 0, 2→1, 3→2, 4→3, 5→5
-  const tierMap   = [0, 0, 1, 2, 3, 5];
-  const rawTier   = tierMap[Math.min(profLevel, tierMap.length - 1)];
-  const tier      = Math.min(rawTier, GEAR_QUALITIES.length - 1);
-  const quality   = GEAR_QUALITIES[tier];
+  // Primitive/universal crafting: no profession needed, but quality capped at crude (tier 0)
+  // Profession crafting: tier scales with level
+  let tier;
+  if (intent.isPrimitive || !profKey) {
+    // Improvised item — always crude quality regardless of level
+    // Even a master blacksmith making a "rock club" gets crude quality for that specific item
+    tier = 0;
+  } else {
+    // Tier driven by profession level
+    const tierMap = [0, 0, 1, 2, 3, 5];
+    tier = tierMap[Math.min(profLevel, tierMap.length - 1)];
+  }
+  tier = Math.min(tier, GEAR_QUALITIES.length - 1);
+  const quality = GEAR_QUALITIES[tier];
 
   // Parse goal keywords from input
   const t    = input.toLowerCase();
@@ -348,14 +381,15 @@ function buildCraftedGearItem(profKey, profLevel, input) {
     }
   }
 
-  // Blend in profession affinity (lower weight)
-  const affinity = PROFESSION_STAT_AFFINITY[profKey] || {};
-  for (const [stat, weight] of Object.entries(affinity)) {
-    // Only add affinity mod if no conflicting goal keyword was found
-    if (!mods[stat]) mods[stat] = weight > 1 ? 1 : 0;
+  // Profession affinity mods — only applied if this is a profession item (not primitive)
+  if (!intent.isPrimitive && profKey) {
+    const affinity = PROFESSION_STAT_AFFINITY[profKey] || {};
+    for (const [stat, weight] of Object.entries(affinity)) {
+      if (!mods[stat]) mods[stat] = weight > 1 ? 1 : 0;
+    }
   }
 
-  // Cap each individual mod at 3, total mods at 3 entries
+  // Cap: each mod max 3, max 3 stat entries total
   const finalMods = {};
   let count = 0;
   for (const [stat, val] of Object.entries(mods).sort((a,b) => b[1]-a[1])) {
@@ -364,19 +398,21 @@ function buildCraftedGearItem(profKey, profLevel, input) {
     count++;
   }
 
-  // Sell bonus: crafted items sell for 25–100% more copper than found equivalent
-  const sellBonus = Math.round(quality.weaponBonus * (1 + profLevel * 0.2) * 10);
+  // Primitive items get minimal weapon/armor bonus (+1) regardless of quality tier
+  const effectiveProfLevel = (intent.isPrimitive || !profKey) ? 0 : profLevel;
+  const sellBonus = Math.round(quality.weaponBonus * (1 + effectiveProfLevel * 0.2) * 10);
 
   return {
     name:        intent.itemName,
     quality:     quality.label,
     tier,
     levelReq:    quality.levelReq,
-    weaponBonus: intent.isArmor ? 0 : quality.weaponBonus,
-    armorLevel:  intent.isArmor ? quality.armorLevel : 0,
+    weaponBonus: intent.isArmor ? 0 : Math.max(1, quality.weaponBonus),
+    armorLevel:  intent.isArmor ? Math.max(1, quality.armorLevel) : 0,
     statMods:    Object.keys(finalMods).length > 0 ? finalMods : null,
     isCrafted:   true,
-    craftedBy:   profKey,
+    isPrimitive: intent.isPrimitive || false,
+    craftedBy:   profKey || 'improvised',
     sellBonus
   };
 }

@@ -151,7 +151,7 @@ app.post('/api/auth/register', async (req, res) => {
 
 // POST /api/auth/login
 app.post('/api/auth/login', async (req, res) => {
-  const { username, password, sessionId } = req.body;
+  const { username, password, sessionId, rememberMe } = req.body;
 
   if (!username || !password) {
     return res.status(400).json({ error: 'Username and password required.' });
@@ -184,11 +184,62 @@ app.post('/api/auth/login', async (req, res) => {
     saveId:    null
   });
 
+  // Generate a persistent remember-me token if requested
+  let rememberToken = null;
+  if (rememberMe) {
+    rememberToken = uuidv4();
+    db.storeRememberToken(player.id, rememberToken);
+  }
+
   res.json({
-    success:   true,
-    sessionId: newSessionId,
-    username:  player.username,
-    nsfwEnabled: !!player.nsfw_enabled
+    success:      true,
+    sessionId:    newSessionId,
+    username:     player.username,
+    rememberToken,
+    nsfwEnabled:  !!player.nsfw_enabled
+  });
+});
+
+
+// POST /api/auth/auto-login
+// Silently log back in using a stored remember-me token
+app.post('/api/auth/auto-login', async (req, res) => {
+  const { rememberToken } = req.body;
+  if (!rememberToken) return res.status(400).json({ error: 'No token.' });
+
+  const player = db.getPlayerByRememberToken(rememberToken);
+  if (!player) return res.status(401).json({ error: 'Token expired or invalid.' });
+
+  // Load their most recent save automatically
+  const saves = db.getSaves(player.id);
+  let state   = null;
+  if (saves && saves.length > 0) {
+    const latest = saves.sort((a, b) => b.updated_at - a.updated_at)[0];
+    const loaded = db.loadSave(latest.id);
+    if (loaded) state = loaded.state;
+  }
+
+  const newSessionId = uuidv4();
+  setSession(newSessionId, {
+    state:    state || createFreshState(),
+    playerId: player.id,
+    saveSlot: 1,
+    saveId:   null
+  });
+
+  // Refresh the remember token (rolling expiry)
+  const newToken = uuidv4();
+  db.storeRememberToken(player.id, newToken);
+
+  res.json({
+    success:      true,
+    sessionId:    newSessionId,
+    username:     player.username,
+    rememberToken: newToken,
+    autoLoggedIn: true,
+    hasCharacter: state && isReady(state),
+    storySummary: state ? (state.storySummary || '') : '',
+    nsfwEnabled:  !!player.nsfw_enabled
   });
 });
 
@@ -789,9 +840,14 @@ app.post('/api/action', requireSession, async (req, res) => {
       const narrative = await processNarrative(state, cleanInput, events);
       await persistSession(req.sessionId);
 
+      // Append the mechanical combat log below the narrative prose
+      const fullOutput = combatResult.combatLog
+        ? (narrative.fullOutput || '') + combatResult.combatLog
+        : narrative.fullOutput;
+
       return res.json({
         success:     true,
-        output:      narrative.fullOutput,
+        output:      fullOutput,
         character:   buildCharacterPanelData(state),
         progression: buildProgressionPanelData(state),
         economy:     buildEconomyPanelData(state),
