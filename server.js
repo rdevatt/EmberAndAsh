@@ -234,89 +234,51 @@ app.post('/api/auth/auto-login', async (req, res) => {
     saveId:   null
   });
 
-  // Refresh the remember token
-  const newRememberToken = uuidv4();
-  db.storeRememberToken(player.id, newRememberToken);
-
-  const hasCharacter = state && isReady(state);
+  // Refresh the remember token (rolling expiry)
+  const newToken = uuidv4();
+  db.storeRememberToken(player.id, newToken);
 
   res.json({
-    success:       true,
-    sessionId:     newSessionId,
-    username:      player.username,
-    rememberToken: newRememberToken,
-    hasCharacter,
-    storySummary:  hasCharacter ? state.storySummary : null,
-    nsfwEnabled:   !!player.nsfw_enabled
+    success:      true,
+    sessionId:    newSessionId,
+    username:     player.username,
+    rememberToken: newToken,
+    autoLoggedIn: true,
+    hasCharacter: state && isReady(state),
+    storySummary: state ? (state.storySummary || '') : '',
+    nsfwEnabled:  !!player.nsfw_enabled
   });
 });
 
 
-// POST /api/auth/logout
-app.post('/api/auth/logout', requireSession, (req, res) => {
-  // Clear remember token
-  if (req.session.playerId) {
-    db.clearRememberToken(req.session.playerId);
-  }
-  sessions.delete(req.sessionId);
-  res.json({ success: true });
-});
+// POST /api/auth/guest
+// Start a guest session — no account needed
+app.post('/api/auth/guest', (req, res) => {
+  const sessionId = uuidv4();
+  const state     = createFreshState();
 
-
-// =============================================
-// ROUTES — SESSION
-// =============================================
-
-// GET /api/session/start
-// Start a new session or resume an existing one
-app.get('/api/session/start', (req, res) => {
-  const existingId = req.headers['x-session-id'];
-  
-  if (existingId && sessions.has(existingId)) {
-    const session = sessions.get(existingId);
-    return res.json({
-      sessionId:   existingId,
-      inCreation:  isInCreation(session.state),
-      hasCharacter:isReady(session.state),
-      character:   isReady(session.state) ? buildCharacterPanelData(session.state) : null,
-      rightPanel:  isReady(session.state) ? buildRightPanelData(session.state) : null,
-      board:       isReady(session.state) ? buildBoardDisplayData(session.state) : null,
-      storySummary:session.state.storySummary || null
-    });
-  }
-
-  // Check for saved guest session in DB
+  // Check if resuming a guest session
+  const existingId = req.body.sessionId;
   if (existingId) {
-    const saved = db.loadGuestSession(existingId);
-    if (saved) {
-      setSession(existingId, { state: saved.state, playerId: null, saveSlot: null, saveId: null });
+    const existing = db.loadGuestSession(existingId);
+    if (existing) {
+      setSession(existingId, { state: existing.state, playerId: null, saveSlot: null, saveId: null });
       return res.json({
-        sessionId:   existingId,
-        inCreation:  isInCreation(saved.state),
-        hasCharacter:isReady(saved.state),
-        character:   isReady(saved.state) ? buildCharacterPanelData(saved.state) : null,
-        rightPanel:  isReady(saved.state) ? buildRightPanelData(saved.state) : null,
-        board:       isReady(saved.state) ? buildBoardDisplayData(saved.state) : null,
-        storySummary:saved.state.storySummary || null
+        success:      true,
+        sessionId:    existingId,
+        resumed:      true,
+        inCreation:   isInCreation(existing.state),
+        isReady:      isReady(existing.state),
+        storySummary: existing.state.storySummary || ''
       });
     }
   }
 
-  // Brand new session
-  const sessionId = uuidv4();
-  setSession(sessionId, {
-    state:    createFreshState(),
-    playerId: null,
-    saveSlot: null,
-    saveId:   null
-  });
+  state.creation.phase = 1;
+  state.creationPrompt = buildOpeningPrompt();
+  setSession(sessionId, { state, playerId: null, saveSlot: null, saveId: null });
 
-  res.json({
-    sessionId,
-    inCreation:   true,
-    hasCharacter: false,
-    output:       buildOpeningPrompt()
-  });
+  res.json({ success: true, sessionId, resumed: false, output: buildOpeningPrompt() });
 });
 
 
@@ -324,183 +286,324 @@ app.get('/api/session/start', (req, res) => {
 // ROUTES — SAVES
 // =============================================
 
-// GET /api/saves/all
-app.get('/api/saves/all', requireSession, (req, res) => {
+// GET /api/saves
+app.get('/api/saves', requireSession, (req, res) => {
   if (!req.session.playerId) {
-    // Guest — only slot 1 available
-    return res.json({
-      isGuest: true,
-      slots: [
-        { slot: 1, empty: false, name: 'Guest Session', level: getPlayerLevel(req.session.state.totalXP || 0) },
-        { slot: 2, empty: true },
-        { slot: 3, empty: true }
-      ],
-      currentSlot: 1
-    });
+    return res.status(401).json({ error: 'Must be logged in to view saves.' });
   }
-
-  const saves = db.getSaves(req.session.playerId);
-  const slots = [1, 2, 3].map(slot => {
-    const save = saves.find(s => s.slot === slot);
-    if (!save) return { slot, empty: true };
-
-    const state = save.state;
-    const bg    = state.character ? state.character.background : null;
-    const region= state.character ? state.character.region     : null;
-
-    return {
-      slot,
-      empty:     false,
-      name:      state.character ? state.character.description : 'Unknown',
-      level:     getPlayerLevel(state.totalXP || 0),
-      background:bg,
-      region,
-      updatedAt: save.updated_at
-    };
-  });
-
-  res.json({ isGuest: false, slots, currentSlot: req.session.saveSlot || 1 });
-});
-
-
-// POST /api/saves/save-to-slot
-app.post('/api/saves/save-to-slot', requireSession, (req, res) => {
-  const { slot } = req.body;
-  if (!req.session.playerId) {
-    return res.status(403).json({ error: 'Must be logged in to save.' });
-  }
-  if (![1, 2, 3].includes(slot)) {
-    return res.status(400).json({ error: 'Invalid slot.' });
-  }
-
-  db.saveGame(req.session.playerId, slot, req.session.state);
-  req.session.saveSlot = slot;
-
-  res.json({ success: true, slot });
+  const slots = db.getSaveSlots(req.session.playerId);
+  res.json({ success: true, slots });
 });
 
 
 // POST /api/saves/load
 app.post('/api/saves/load', requireSession, (req, res) => {
   const { slot } = req.body;
-  if (!req.session.playerId) {
-    return res.status(403).json({ error: 'Must be logged in to load saves.' });
-  }
+  if (!req.session.playerId) return res.status(401).json({ error: 'Must be logged in.' });
 
-  const saves = db.getSaves(req.session.playerId);
-  const save  = saves.find(s => s.slot === slot);
-  if (!save) {
-    return res.status(404).json({ error: 'No save in that slot.' });
-  }
+  const save = db.loadGame(req.session.playerId, slot || 1);
+  if (!save) return res.status(404).json({ error: 'No save found in that slot.' });
 
   req.session.state    = save.state;
-  req.session.saveSlot = slot;
-  req.session.saveId   = save.id;
+  req.session.saveSlot = slot || 1;
+  req.session.saveId   = save.saveId;
+  setSession(req.sessionId, req.session);
 
   res.json({
-    success:     true,
-    character:   buildCharacterPanelData(save.state),
-    rightPanel:  buildRightPanelData(save.state),
-    board:       buildBoardDisplayData(save.state),
-    storySummary:save.state.storySummary || null
+    success:      true,
+    character:    buildCharacterPanelData(save.state),
+    rightPanel:   buildRightPanelData(save.state),
+    storySummary: save.state.storySummary || ''
+  });
+});
+
+
+// POST /api/saves/save
+app.post('/api/saves/save', requireSession, async (req, res) => {
+  if (!req.session.playerId) return res.status(401).json({ error: 'Must be logged in.' });
+
+  await persistSession(req.sessionId);
+  res.json({ success: true });
+});
+
+
+// POST /api/saves/save-to-slot
+// Save current game to a specific slot (1-3)
+app.post('/api/saves/save-to-slot', requireSession, async (req, res) => {
+  if (!req.session.playerId) return res.status(401).json({ error: 'Must be logged in.' });
+
+  const { slot } = req.body;
+  const slotNum  = parseInt(slot);
+  if (!slotNum || slotNum < 1 || slotNum > 3) {
+    return res.status(400).json({ error: 'Slot must be 1, 2, or 3.' });
+  }
+
+  db.saveGame(req.session.playerId, slotNum, req.session.state);
+  req.session.saveSlot = slotNum;
+  setSession(req.sessionId, req.session);
+
+  res.json({ success: true, slot: slotNum });
+});
+
+
+// GET /api/saves/all
+// Returns all 3 save slots with character preview data
+app.get('/api/saves/all', requireSession, (req, res) => {
+  if (!req.session.playerId) {
+    return res.json({ success: true, slots: [], isGuest: true });
+  }
+
+  const slots = [];
+  for (let i = 1; i <= 3; i++) {
+    const save = db.loadGame(req.session.playerId, i);
+    if (save && save.state) {
+      const s   = save.state;
+      const c   = s.character || {};
+      const lvl = s.totalXP ? Math.floor(Math.sqrt(s.totalXP / 10)) + 1 : 1;
+      slots.push({
+        slot:       i,
+        empty:      false,
+        name:       c.name || 'Unnamed',
+        background: c.background || '—',
+        level:      Math.min(lvl, 100),
+        region:     c.region || '—',
+        saveId:     save.saveId,
+        updatedAt:  save.updatedAt || null
+      });
+    } else {
+      slots.push({ slot: i, empty: true });
+    }
+  }
+
+  res.json({ success: true, slots, currentSlot: req.session.saveSlot || 1 });
+});
+
+
+// POST /api/game/reset
+// Wipes the current session and starts a fresh character
+app.post('/api/game/reset', requireSession, async (req, res) => {
+  const freshState      = createFreshState();
+  freshState.creation.phase = 1;
+  freshState.creationPrompt = buildOpeningPrompt();
+
+  req.session.state    = freshState;
+  req.session.saveSlot = req.session.saveSlot || 1;
+  req.session.saveId   = null;
+  setSession(req.sessionId, req.session);
+
+  // Persist the wipe
+  if (req.session.playerId && req.session.saveSlot) {
+    db.saveGame(req.session.playerId, req.session.saveSlot, freshState);
+  } else {
+    db.saveGuestSession(req.sessionId, freshState);
+  }
+
+  res.json({ success: true, output: buildOpeningPrompt() });
+});
+
+
+// POST /api/game/equip-crafted
+// Equip a crafted item from the crafted gear inventory
+app.post('/api/game/equip-crafted', requireSession, (req, res) => {
+  const { itemName } = req.body;
+  if (!itemName) return res.status(400).json({ error: 'itemName required.' });
+
+  const state  = req.session.state;
+  const result = equipCraftedItem(state, itemName);
+  setSession(req.sessionId, req.session);
+
+  res.json({
+    success:  result.success,
+    message:  result.message,
+    economy:  buildEconomyPanelData(state),
+    character: buildCharacterPanelData(state)
+  });
+});
+
+
+// POST /api/game/sell-crafted
+// Sell a crafted item for coins
+app.post('/api/game/sell-crafted', requireSession, (req, res) => {
+  const { itemName } = req.body;
+  if (!itemName) return res.status(400).json({ error: 'itemName required.' });
+
+  const state  = req.session.state;
+  const result = sellCraftedItem(state, itemName);
+  setSession(req.sessionId, req.session);
+
+  res.json({
+    success:  result.success,
+    message:  result.message,
+    amount:   result.amount,
+    display:  result.display,
+    economy:  buildEconomyPanelData(state),
+    character: buildCharacterPanelData(state)
   });
 });
 
 
 // =============================================
-// ROUTES — GAME ACTIONS
+// ROUTES — QUESTS
 // =============================================
 
-// POST /api/game/reset
-app.post('/api/game/reset', requireSession, (req, res) => {
-  req.session.state = createFreshState();
-  res.json({ success: true, output: buildOpeningPrompt() });
+app.get('/api/quests/board', requireSession, (req, res) => {
+  res.json({ success: true, board: buildBoardDisplayData(req.session.state) });
 });
 
+app.post('/api/quests/refresh', requireSession, (req, res) => {
+  refreshBoard(req.session.state);
+  setSession(req.sessionId, req.session);
+  res.json({ success: true, board: buildBoardDisplayData(req.session.state) });
+});
 
-// POST /api/game/retry
-// Retry the last narrative generation with the same input
-app.post('/api/game/retry', requireSession, async (req, res) => {
+app.post('/api/quests/accept', requireSession, (req, res) => {
   const state = req.session.state;
-  
-  // Pop the last conversation entry if it exists
-  if (state.conversationHistory && state.conversationHistory.length > 0) {
-    state.conversationHistory.pop();
-  }
+  const { questIndex, questId } = req.body;
+  const result = questId ? acceptQuest(state, questId) : acceptQuestByIndex(state, parseInt(questIndex));
+  setSession(req.sessionId, req.session);
+  res.json({ success: result.success, message: result.message, quest: result.quest, board: buildBoardDisplayData(state) });
+});
 
-  // Regenerate narrative with same context
-  try {
-    const narrative = await processNarrative(state, state.lastPlayerInput || '', []);
-    await persistSession(req.sessionId);
-
-    return res.json({
-      success:    true,
-      output:     narrative.fullOutput,
-      rightPanel: narrative.rightPanel
-    });
-  } catch (err) {
-    console.error('[Retry] Error:', err);
-    return res.status(500).json({ error: 'Failed to regenerate.' });
-  }
+app.post('/api/quests/abandon', requireSession, (req, res) => {
+  const state = req.session.state;
+  const { questId } = req.body;
+  if (!questId || !state.activeQuests) return res.json({ success: false });
+  const idx = state.activeQuests.findIndex(q => q.id === questId);
+  if (idx !== -1) state.activeQuests.splice(idx, 1);
+  setSession(req.sessionId, req.session);
+  res.json({ success: true, board: buildBoardDisplayData(state) });
 });
 
 
-// POST /api/game/action
-// Main game loop — process player input
-app.post('/api/game/action', requireSession, async (req, res) => {
+// =============================================
+// ROUTES — SETTINGS
+// =============================================
+
+// POST /api/settings/nsfw
+app.post('/api/settings/nsfw', requireSession, (req, res) => {
+  const { enabled } = req.body;
+  req.session.state.nsfwEnabled = !!enabled;
+  setSession(req.sessionId, req.session);
+
+  if (req.session.playerId) {
+    db.setNSFWSetting(req.session.playerId, !!enabled);
+  }
+
+  res.json({ success: true, nsfwEnabled: !!enabled });
+});
+
+
+// =============================================
+// ROUTES — GAME STATE
+// Returns current panel data without taking an action
+// =============================================
+
+// GET /api/state
+app.get('/api/state', requireSession, (req, res) => {
+  const state = req.session.state;
+  res.json({
+    success:     true,
+    character:   buildCharacterPanelData(state),
+    progression: buildProgressionPanelData(state),
+    economy:     buildEconomyPanelData(state),
+    rightPanel:  buildRightPanelData(state),
+    inCreation:  isInCreation(state),
+    isReady:     isReady(state)
+  });
+});
+
+
+// GET /api/history
+app.get('/api/history', requireSession, (req, res) => {
+  const saveId = req.session.saveId;
+  if (!saveId) return res.json({ success: true, history: [] });
+
+  const history = db.getRecentHistory(saveId, 30);
+  res.json({ success: true, history });
+});
+
+
+// =============================================
+// MAIN GAME LOOP — POST /api/action
+// This is the heart of the server.
+// Receives player input, runs all game logic,
+// calls AI, returns narrative + panel updates.
+// =============================================
+app.post('/api/action', requireSession, async (req, res) => {
+  const { input } = req.body;
+  if (!input || typeof input !== 'string' || input.trim().length === 0) {
+    return res.status(400).json({ error: 'Input required.' });
+  }
+
+  const state      = req.session.state;
+  const cleanInput = input.trim();
+  const events     = [];   // Collects all game events this turn
+
   try {
-    const { input } = req.body;
-    const state     = req.session.state;
-    const cleanInput= (input || '').trim();
-
-    if (!cleanInput) {
-      return res.status(400).json({ error: 'No input provided.' });
-    }
-
-    state.lastPlayerInput = cleanInput;
-    state.actionCount     = (state.actionCount || 0) + 1;
-    state.lastActionAt    = new Date().toISOString();
-
-    const events = [];
 
     // --------------------------------------------------------
-    // CHARACTER CREATION
+    // CREATION PHASE
     // --------------------------------------------------------
     if (isInCreation(state)) {
-      const creationResult = processCreationInput(state, cleanInput);
-      
-      if (creationResult.error) {
-        return res.json({ success: true, output: creationResult.error, inCreation: true });
-      }
+      const result = processCreationInput(state, cleanInput);
 
-      if (creationResult.done) {
-        // Refresh bounty board for the starting region
-        refreshBoard(state);
-
-        await persistSession(req.sessionId);
-        
-        // Auto-create save slot 1 for logged-in users
-        if (req.session.playerId) {
-          db.saveGame(req.session.playerId, 1, state);
-          req.session.saveSlot = 1;
-          const saves = db.getSaves(req.session.playerId);
-          const save  = saves.find(s => s.slot === 1);
-          if (save) req.session.saveId = save.id;
-        }
-
-        const narrative = await processNarrative(state, cleanInput, [{ type: 'creationComplete' }]);
-        return res.json({
-          success:    true,
-          output:     narrative.fullOutput,
-          character:  buildCharacterPanelData(state),
-          rightPanel: narrative.rightPanel,
-          board:      buildBoardDisplayData(state),
-          inCreation: false
+      // Guard: processCreationInput should never return undefined, but be safe
+      if (!result) {
+        console.error('[Creation] processCreationInput returned null for phase', state.creation.phase, 'input:', JSON.stringify(cleanInput));
+        return res.status(500).json({
+          error: `Creation phase ${state.creation.phase} returned no result. Check console.`
         });
       }
 
-      // Still in creation
-      const narrative = await processNarrative(state, cleanInput, []);
+      if (result.done) {
+        // Character fully built — inject a rich opening scene hint so the AI
+        // knows this is the very first moment of the story, not a response to "3"
+        const c        = state.character || {};
+        const envKey   = c.startingEnvironment || '';
+        const bgKey    = c.background           || '';
+        const charName = c.name                 || null;
+        const region   = c.region               || '';
+
+        // Map env/region keys to human-readable labels without requiring constants
+        const envLabels = {
+          deep_forest:   'Deep Forest — dense woodland, sparse population, beast-heavy',
+          open_plains:   'Open Plains — vast grasslands, visible horizon, traveler roads',
+          small_village: 'Small Village — a settlement of a few hundred people, community life',
+          bustling_city: 'Bustling City — a metropolis of millions, wealth and rot in equal measure'
+        };
+        const regionFlavors = {
+          thornwick: 'rolling farmland, muddy roads, and treelines that feel closer every year',
+          ironport:  'salt-stained cobblestones, crowded markets, and shadows that watch you back',
+          ashwood:   'silver bark trees, eerie silence, and light that bends at wrong angles',
+          dustfall:  'amber grass, open sky, and the wind carrying the smell of something dead'
+        };
+        const beastOpenings = {
+          thornwick: 'A road wolf the size of a pony crashes into the mud at your feet — brought down by someone else\'s arrow before it could reach you',
+          ironport:  'A bloated harbour beast — part eel, part nightmare — stops thrashing as the man beside you wrenches his blade free from its skull',
+          ashwood:   'A corrupted stag — its antlers fused into bone blades, its eyes black and burning — drops mid-charge at the hand of a stranger who doesn\'t stay to explain',
+          dustfall:  'An orc raider twice your size crumples face-first into the dust — the crossbow bolt through its eye placed by a hooded figure already disappearing into the grass'
+        };
+
+        const openingHint = [
+          '[OPENING SCENE — character creation just completed. Write the very first moment of this character\'s story in vivid prose.]',
+          charName ? `[Character name: ${charName}]` : '[Character has no name — do not give them one]',
+          bgKey    ? `[Background: ${bgKey}]` : '',
+          envKey   ? `[Starting environment: ${envLabels[envKey] || envKey}]` : '',
+          region   ? `[Region feel: ${regionFlavors[region] || region}]` : '',
+          beastOpenings[region] ? `[Opening beat: ${beastOpenings[region]}]` : '',
+          '[Write ONLY prose. No stats, no mechanics, no system text. Establish the world as dangerous, real, and indifferent.]',
+          '[End on an open beat — something just changed, now what?]'
+        ].filter(Boolean).join('\n');
+
+        state.pendingContextHint = openingHint;
+        state.creationPrompt     = null;
+      } else {
+        state.creationPrompt = result.prompt;
+      }
+
+      const narrative = await processNarrative(state, cleanInput, events);
+      await persistSession(req.sessionId);
+
       return res.json({
         success:    true,
         output:     narrative.fullOutput,
