@@ -20,7 +20,15 @@ const {
   getActiveArmor
 } = require('./character');
 
-const { getReputationLabel, formatCoin } = require('./economy');
+const { 
+  getReputationLabel, 
+  formatCoin,
+  addItem,
+  addCompanion,
+  removeCompanion,
+  equipWeapon,
+  equipArmor
+} = require('./economy');
 
 
 // =============================================
@@ -125,6 +133,11 @@ function buildCharacterContext(state) {
                    : rep >= -20 ? 'People treat them as a stranger — neutral.'
                    : 'People are hostile or alert to their presence.';
 
+  // Companions
+  const companionStr = state.companions && state.companions.length > 0
+    ? `Companions: ${state.companions.map(c => c.name).join(', ')}.`
+    : 'Traveling alone.';
+
   return [
     '[CHARACTER — never state these numbers in narrative]',
     `${c.age}yo ${c.gender} | ${bg ? bg.label : c.background} | ${rg ? rg.label : 'Unknown'}`,
@@ -136,6 +149,7 @@ function buildCharacterContext(state) {
     `Physical: ${hpLabel}. Stamina: ${stamLabel}.`,
     `Gear: ${weaponStr}, ${armorStr}.`,
     `Coin: ${formatCoin(state.coin || 0)}. Carrying: ${state.inventory && state.inventory.length ? state.inventory.join(', ') : 'nothing notable'}.`,
+    companionStr,
     `Reputation: ${repLabel}. ${repNote}`,
     state.shopOpen ? `Runs an active shop stall here.` : '',
     '[High stats = natural aptitude. Low stats = tendency toward failure or struggle.]',
@@ -212,6 +226,7 @@ function buildSceneContext(state) {
 
   return lines.join('\n');
 }
+
 
 function buildPendingHint(state) {
   if (!state.pendingContextHint) return '';
@@ -330,6 +345,304 @@ function handleCreationOutput(state) {
 
 
 // =============================================
+// AI OUTPUT PARSER — ITEM DETECTION
+// Scans narrative text for phrases indicating
+// items being given, found, or received.
+// Returns array of detected items.
+// =============================================
+const ITEM_GRANT_PATTERNS = [
+  // Direct giving patterns
+  /(?:hands?|gives?|offers?|passes?|tosses?|throws?|presents?)\s+(?:you|him|her|them)\s+(?:a|an|the|some|her|his)?\s*([a-z\s\-']+?)(?:\.|,|;|\s+and\s|\s+before|\s+then|\s+as|\s+with|\s+"|\s+—)/gi,
+  /(?:hands?|gives?|offers?|passes?|tosses?)\s+(?:over|across)?\s*(?:a|an|the)?\s*([a-z\s\-']+?)(?:\s+to\s+you|\.|,)/gi,
+  
+  // Receiving patterns  
+  /(?:you\s+)?(?:receive|accept|take|grab|catch)\s+(?:a|an|the|some)?\s*([a-z\s\-']+?)(?:\s+from|\.|,)/gi,
+  
+  // "Here's a X" / "Take this X" patterns
+  /(?:here(?:'s| is)|take this|have this)\s+([a-z\s\-']+?)(?:"|'|\.|,)/gi,
+  
+  // Placement patterns
+  /(?:sets?|places?|lays?|puts?)\s+(?:a|an|the)?\s*([a-z\s\-']+?)\s+(?:in(?:to)?|on|beside|before|next to)\s+(?:your|his|her|their)\s+(?:hands?|lap|pack|bag)/gi,
+  
+  // Found/discovered patterns
+  /(?:you\s+)?(?:find|discover|spot|notice)\s+(?:a|an|the)?\s*([a-z\s\-']+?)\s+(?:on the|lying|resting|hidden)/gi,
+  
+  // Pickup patterns
+  /(?:pick(?:s)?\s+up|collect(?:s)?|gather(?:s)?)\s+(?:a|an|the)?\s*([a-z\s\-']+?)(?:\.|,|\s+and|\s+from)/gi,
+];
+
+// Words that indicate it's probably equipment
+const EQUIPMENT_INDICATORS = [
+  'sword', 'blade', 'dagger', 'knife', 'axe', 'mace', 'hammer', 'club', 'spear',
+  'staff', 'bow', 'crossbow', 'weapon', 'pitchfork', 'scythe', 'hatchet', 'cutlass',
+  'armor', 'armour', 'leather', 'chainmail', 'plate', 'tunic', 'vest', 'helmet',
+  'helm', 'shield', 'gauntlets', 'boots', 'greaves', 'cuirass', 'breastplate',
+  'mail', 'padded', 'cloak', 'robe', 'jerkin', 'bracers'
+];
+
+// Words to exclude (not actual items)
+const ITEM_EXCLUSIONS = [
+  'hand', 'hands', 'look', 'glance', 'smile', 'nod', 'moment', 'breath', 'word',
+  'words', 'silence', 'pause', 'gesture', 'thought', 'feeling', 'sense', 'sound',
+  'nothing', 'something', 'everything', 'anything', 'way', 'time', 'place',
+  'you', 'your', 'him', 'her', 'them', 'their', 'it', 'its', 'this', 'that'
+];
+
+function detectItemsInNarrative(narrativeText) {
+  const detectedItems = [];
+  const seen = new Set();
+  
+  for (const pattern of ITEM_GRANT_PATTERNS) {
+    // Reset lastIndex for global regex
+    pattern.lastIndex = 0;
+    
+    let match;
+    while ((match = pattern.exec(narrativeText)) !== null) {
+      let itemName = match[1].trim().toLowerCase();
+      
+      // Clean up the item name
+      itemName = itemName
+        .replace(/^(a|an|the|some|her|his|your)\s+/i, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+      
+      // Skip if too short, too long, or excluded
+      if (itemName.length < 3 || itemName.length > 40) continue;
+      if (ITEM_EXCLUSIONS.some(ex => itemName === ex || itemName.startsWith(ex + ' '))) continue;
+      if (seen.has(itemName)) continue;
+      
+      // Determine if it's equipment
+      const isEquipment = EQUIPMENT_INDICATORS.some(ind => itemName.includes(ind));
+      const isWeapon = ['sword', 'blade', 'dagger', 'knife', 'axe', 'mace', 'hammer', 
+                        'club', 'spear', 'staff', 'bow', 'crossbow', 'weapon', 'pitchfork',
+                        'scythe', 'hatchet', 'cutlass'].some(w => itemName.includes(w));
+      const isArmor = ['armor', 'armour', 'leather', 'chainmail', 'plate', 'tunic', 
+                       'vest', 'helmet', 'helm', 'shield', 'gauntlets', 'boots',
+                       'greaves', 'cuirass', 'breastplate', 'mail', 'cloak', 'robe',
+                       'jerkin', 'bracers'].some(a => itemName.includes(a));
+      
+      seen.add(itemName);
+      detectedItems.push({
+        name: itemName,
+        isEquipment,
+        isWeapon,
+        isArmor,
+        rawMatch: match[0]
+      });
+    }
+  }
+  
+  return detectedItems;
+}
+
+
+// =============================================
+// AI OUTPUT PARSER — COMPANION DETECTION
+// Scans narrative text for phrases indicating
+// someone joining the party or agreeing to travel.
+// =============================================
+const COMPANION_JOIN_PATTERNS = [
+  // Explicit joining
+  /([A-Z][a-z]+)\s+(?:agrees?|decides?|chooses?|offers?)\s+to\s+(?:join|accompany|travel|come|follow|go)\s+(?:with\s+)?(?:you|along|together)/gi,
+  /([A-Z][a-z]+)\s+(?:will|shall|'ll)\s+(?:join|accompany|travel|come|follow)\s+(?:with\s+)?(?:you|along)/gi,
+  
+  // "I'll come with you" type dialogue
+  /"[^"]*(?:I'll|I will|I shall)\s+(?:come|go|travel|join|accompany)[^"]*"\s*(?:says?|replies?|answers?)?\s*([A-Z][a-z]+)?/gi,
+  /([A-Z][a-z]+)\s+(?:says?|replies?|answers?)[^.]*"[^"]*(?:I'll|I will)\s+(?:come|go|travel|join)[^"]*"/gi,
+  
+  // Falls in beside / walks with patterns
+  /([A-Z][a-z]+)\s+(?:falls?\s+in(?:to\s+step)?|walks?|moves?|steps?)\s+(?:beside|alongside|with)\s+(?:you|the\s+player)/gi,
+  
+  // Ready to go patterns
+  /([A-Z][a-z]+)\s+(?:is\s+ready|stands?\s+ready|prepares?)\s+to\s+(?:leave|travel|go|depart)\s+(?:with\s+)?(?:you)?/gi,
+];
+
+const COMPANION_LEAVE_PATTERNS = [
+  // Departure patterns
+  /([A-Z][a-z]+)\s+(?:leaves?|departs?|parts?\s+ways?|says?\s+(?:goodbye|farewell)|turns?\s+(?:away|back)|walks?\s+away)/gi,
+  /([A-Z][a-z]+)\s+(?:must|has\s+to|needs?\s+to)\s+(?:leave|go|depart|part)/gi,
+  
+  // Staying behind
+  /([A-Z][a-z]+)\s+(?:stays?|remains?)\s+(?:behind|here)/gi,
+];
+
+function detectCompanionChangesInNarrative(narrativeText, state) {
+  const changes = {
+    joining: [],
+    leaving: []
+  };
+  
+  const currentCompanions = (state.companions || []).map(c => c.name.toLowerCase());
+  
+  // Detect joins
+  for (const pattern of COMPANION_JOIN_PATTERNS) {
+    pattern.lastIndex = 0;
+    let match;
+    while ((match = pattern.exec(narrativeText)) !== null) {
+      // Find the name in the match
+      let name = null;
+      for (let i = 1; i < match.length; i++) {
+        if (match[i] && /^[A-Z][a-z]+$/.test(match[i])) {
+          name = match[i];
+          break;
+        }
+      }
+      
+      if (name && name.length >= 3 && name.length <= 20) {
+        // Don't add if already a companion
+        if (!currentCompanions.includes(name.toLowerCase())) {
+          if (!changes.joining.find(j => j.name.toLowerCase() === name.toLowerCase())) {
+            changes.joining.push({ name, rawMatch: match[0] });
+          }
+        }
+      }
+    }
+  }
+  
+  // Detect leaves
+  for (const pattern of COMPANION_LEAVE_PATTERNS) {
+    pattern.lastIndex = 0;
+    let match;
+    while ((match = pattern.exec(narrativeText)) !== null) {
+      let name = match[1];
+      if (name && name.length >= 3 && name.length <= 20) {
+        // Only track if currently a companion
+        if (currentCompanions.includes(name.toLowerCase())) {
+          if (!changes.leaving.find(l => l.name.toLowerCase() === name.toLowerCase())) {
+            changes.leaving.push({ name, rawMatch: match[0] });
+          }
+        }
+      }
+    }
+  }
+  
+  return changes;
+}
+
+
+// =============================================
+// APPLY DETECTED CHANGES TO STATE
+// Takes parsed items/companions and updates game state.
+// Returns events array for announcements.
+// =============================================
+function applyDetectedChanges(state, items, companionChanges) {
+  const events = [];
+  
+  // Add detected items
+  for (const item of items) {
+    // Capitalize item name nicely
+    const displayName = item.name.split(' ')
+      .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+      .join(' ');
+    
+    if (item.isWeapon && !state.gear.weapon) {
+      // Auto-equip weapon if player has none
+      const result = equipWeapon(state, { name: displayName, tier: 1 });
+      if (result.success) {
+        events.push({ 
+          type: 'itemEquipped', 
+          item: result.item, 
+          slot: 'weapon',
+          auto: true,
+          message: `Equipped: ${displayName}` 
+        });
+      }
+    } else if (item.isArmor && !state.gear.armor) {
+      // Auto-equip armor if player has none
+      const result = equipArmor(state, { name: displayName, tier: 1 });
+      if (result.success) {
+        events.push({ 
+          type: 'itemEquipped', 
+          item: result.item, 
+          slot: 'armor',
+          auto: true,
+          message: `Equipped: ${displayName}` 
+        });
+      }
+    } else {
+      // Add to inventory
+      addItem(state, displayName);
+      events.push({ 
+        type: 'itemReceived', 
+        name: displayName,
+        isEquipment: item.isEquipment 
+      });
+    }
+  }
+  
+  // Add companions who joined
+  for (const joiner of companionChanges.joining) {
+    const result = addCompanion(state, {
+      name: joiner.name,
+      description: 'A companion who joined your journey.',
+      role: 'ally'
+    });
+    
+    if (result.success) {
+      events.push({ 
+        type: 'companionJoined', 
+        companion: result.companion,
+        auto: true 
+      });
+    }
+  }
+  
+  // Remove companions who left
+  for (const leaver of companionChanges.leaving) {
+    const result = removeCompanion(state, leaver.name);
+    if (result.success) {
+      events.push({ 
+        type: 'companionLeft', 
+        companion: result.companion,
+        auto: true 
+      });
+    }
+  }
+  
+  return events;
+}
+
+
+// =============================================
+// NPC NAME EXTRACTION
+// Tries to identify NPCs mentioned in narrative
+// to track currentNPC for the right panel.
+// =============================================
+function extractCurrentNPC(narrativeText, state) {
+  // Look for dialogue attribution patterns
+  const dialoguePatterns = [
+    /([A-Z][a-z]+)\s+(?:says?|asks?|replies?|answers?|murmurs?|whispers?|shouts?|calls?|speaks?)/g,
+    /(?:says?|asks?|replies?)\s+([A-Z][a-z]+)/g,
+    /"[^"]+"\s+([A-Z][a-z]+)\s+(?:says?|asks?|replies?)/g
+  ];
+  
+  const names = new Set();
+  
+  for (const pattern of dialoguePatterns) {
+    pattern.lastIndex = 0;
+    let match;
+    while ((match = pattern.exec(narrativeText)) !== null) {
+      const name = match[1];
+      if (name && name.length >= 3 && name.length <= 20) {
+        // Exclude common non-name words
+        if (!['The', 'You', 'Your', 'This', 'That', 'Then', 'There', 'Here'].includes(name)) {
+          names.add(name);
+        }
+      }
+    }
+  }
+  
+  // Return the most recently mentioned NPC, or keep current
+  const nameArray = Array.from(names);
+  if (nameArray.length > 0) {
+    return nameArray[nameArray.length - 1];
+  }
+  
+  return state.currentNPC;
+}
+
+
+// =============================================
 // EVENT NARRATIVE BUILDER
 // Converts game events (level up, kill, death, etc.)
 // into player-facing announcement strings.
@@ -422,6 +735,32 @@ function buildEventAnnouncements(events) {
           lines.push(`[The road ahead is open. A new region awaits.]`);
         }
         break;
+
+      // NEW: Item received events
+      case 'itemReceived':
+        lines.push(`\n[Received: ${evt.name}${evt.isEquipment ? ' (equipment)' : ''}]`);
+        break;
+
+      case 'itemEquipped':
+        if (evt.auto) {
+          lines.push(`\n[${evt.message}]`);
+        } else {
+          lines.push(`\n[Gear updated: ${evt.message}]`);
+        }
+        break;
+
+      case 'itemUnequipped':
+        lines.push(`\n[${evt.message}]`);
+        break;
+
+      // NEW: Companion events  
+      case 'companionJoined':
+        lines.push(`\n[${evt.companion.name} has joined your party.]`);
+        break;
+
+      case 'companionLeft':
+        lines.push(`\n[${evt.companion.name} has left your party.]`);
+        break;
     }
   }
 
@@ -490,6 +829,12 @@ function buildRightPanelData(state) {
     };
   }
 
+  // Companions
+  const companions = (state.companions || []).map(c => ({
+    name: c.name,
+    role: c.role || 'ally'
+  }));
+
   return {
     // Location
     location:     state.currentLocation || (region ? region.label : 'Unknown'),
@@ -508,7 +853,10 @@ function buildRightPanelData(state) {
     storySummary: state.storySummary || '',
 
     // Ambient threats
-    regionThreats: region ? region.monsters.slice(0, 3) : []
+    regionThreats: region ? region.monsters.slice(0, 3) : [],
+
+    // Companions
+    companions
   };
 }
 
@@ -517,7 +865,8 @@ function buildRightPanelData(state) {
 // MAIN NARRATIVE PROCESSOR
 // Called once per player action after all game
 // logic has already run. Builds prompt, calls AI,
-// appends event announcements, returns final output.
+// parses output for items/companions, appends 
+// event announcements, returns final output.
 // =============================================
 async function processNarrative(state, playerInput, events = []) {
   state.actionCount = (state.actionCount || 0) + 1;
@@ -546,6 +895,35 @@ async function processNarrative(state, playerInput, events = []) {
     state.conversationHistory.push({ role: 'assistant', content: aiResult.text });
     if (state.conversationHistory.length > 20) {
       state.conversationHistory = state.conversationHistory.slice(-20);
+    }
+  }
+
+  // ============================================
+  // POST-PROCESS AI OUTPUT
+  // Detect items and companions mentioned in narrative
+  // ============================================
+  if (aiResult.success && aiResult.text) {
+    // Detect items being given/received
+    const detectedItems = detectItemsInNarrative(aiResult.text);
+    
+    // Detect companion changes
+    const companionChanges = detectCompanionChangesInNarrative(aiResult.text, state);
+    
+    // Apply changes to state and collect events
+    const autoEvents = applyDetectedChanges(state, detectedItems, companionChanges);
+    events.push(...autoEvents);
+    
+    // Update current NPC being interacted with
+    const detectedNPC = extractCurrentNPC(aiResult.text, state);
+    if (detectedNPC) {
+      state.currentNPC = detectedNPC;
+      
+      // Initialize NPC relationship if new
+      const npcKey = detectedNPC.toLowerCase().replace(/\s+/g, '_');
+      if (!state.npcRelationships) state.npcRelationships = {};
+      if (!state.npcRelationships[npcKey]) {
+        state.npcRelationships[npcKey] = { rapport: 10, metBefore: true };
+      }
     }
   }
 
@@ -591,6 +969,12 @@ module.exports = {
   // Events
   buildEventAnnouncements,
   buildDeathAnnouncement,
+
+  // Detection (exported for testing)
+  detectItemsInNarrative,
+  detectCompanionChangesInNarrative,
+  applyDetectedChanges,
+  extractCurrentNPC,
 
   // UI
   buildRightPanelData
