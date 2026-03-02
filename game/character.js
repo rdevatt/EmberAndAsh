@@ -608,6 +608,178 @@ function processPhase2(state, input) {
 }
 
 
+// =============================================
+// CUSTOM STARTING GEAR DETECTION
+// Parses freeform text for items the player describes having.
+// Used during character creation to honor player-defined gear.
+// =============================================
+const CUSTOM_WEAPON_PATTERNS = [
+  // Specific weapon types
+  'sword', 'blade', 'dagger', 'knife', 'axe', 'hatchet', 'mace', 'hammer', 
+  'club', 'cudgel', 'spear', 'pike', 'staff', 'quarterstaff', 'bow', 'crossbow',
+  'sling', 'whip', 'flail', 'morningstar', 'scythe', 'sickle', 'pitchfork',
+  'machete', 'cleaver', 'rapier', 'cutlass', 'sabre', 'saber', 'lance',
+  'halberd', 'glaive', 'trident', 'warhammer', 'battleaxe', 'shortsword',
+  'longsword', 'greatsword', 'broadsword', 'falchion', 'stiletto', 'dirk',
+  'kukri', 'tomahawk', 'pick', 'pickaxe', 'mattock'
+];
+
+const CUSTOM_ARMOR_PATTERNS = [
+  // Armor types
+  'armor', 'armour', 'chainmail', 'chain mail', 'plate', 'breastplate',
+  'cuirass', 'hauberk', 'brigandine', 'gambeson', 'leather armor', 
+  'studded leather', 'scale mail', 'ring mail', 'splint mail', 'half plate',
+  'full plate', 'mail shirt', 'chain shirt',
+  // Protective clothing that counts as armor
+  'leather tunic', 'leather vest', 'padded vest', 'padded armor',
+  'hide armor', 'fur armor', 'quilted armor'
+];
+
+const CUSTOM_CLOTHING_PATTERNS = [
+  // Clothing items (go to inventory, not armor slot)
+  'cloak', 'cape', 'robe', 'robes', 'tunic', 'shirt', 'vest', 'jerkin',
+  'coat', 'jacket', 'hood', 'cowl', 'hat', 'cap', 'boots', 'shoes',
+  'sandals', 'gloves', 'gauntlets', 'bracers', 'belt', 'sash', 
+  'trousers', 'pants', 'breeches', 'leggings', 'skirt', 'dress',
+  'clothes', 'clothing', 'garb', 'attire', 'outfit'
+];
+
+const CUSTOM_CONTAINER_PATTERNS = [
+  // Containers
+  'backpack', 'pack', 'satchel', 'bag', 'pouch', 'sack', 'rucksack',
+  'knapsack', 'haversack', 'purse', 'wallet', 'belt pouch'
+];
+
+const CUSTOM_SUPPLY_PATTERNS = [
+  // Supplies and tools
+  'waterskin', 'water skin', 'canteen', 'flask', 'bottle', 'jug',
+  'rations', 'food', 'bread', 'jerky', 'dried meat', 'provisions',
+  'rope', 'torch', 'torches', 'lantern', 'lamp', 'tinderbox', 'flint',
+  'bedroll', 'blanket', 'tent', 'cooking pot', 'pan', 'kettle',
+  'needle', 'thread', 'fishing line', 'hook', 'net', 'snare',
+  'compass', 'map', 'spyglass', 'mirror', 'soap', 'comb',
+  'bandages', 'herbs', 'medicine', 'healing salve', 'antidote',
+  'lockpick', 'lockpicks', 'thieves tools', 'crowbar', 'grappling hook',
+  'chalk', 'ink', 'quill', 'parchment', 'paper', 'book', 'journal',
+  'coin purse', 'coins', 'gold', 'silver', 'copper'
+];
+
+const GEAR_QUALITY_MODIFIERS = {
+  // Maps descriptive words to quality tiers
+  'rusty': 0, 'rusted': 0, 'broken': 0, 'crude': 0, 'rough': 0,
+  'worn': 0, 'old': 0, 'battered': 0, 'tattered': 0, 'ragged': 0,
+  'damaged': 0, 'dented': 0, 'chipped': 0, 'cracked': 0,
+  'simple': 1, 'plain': 1, 'common': 1, 'basic': 1, 'ordinary': 1,
+  'decent': 2, 'good': 2, 'sturdy': 2, 'solid': 2, 'reliable': 2,
+  'fine': 3, 'quality': 3, 'well-made': 3, 'well made': 3,
+  'excellent': 4, 'superior': 4, 'masterwork': 5, 'master-crafted': 5
+};
+
+/**
+ * Parses freeform text for custom starting gear.
+ * Returns { weapon, armor, inventory } or null if no custom gear found.
+ */
+function parseCustomStartingGear(input) {
+  const t = input.toLowerCase();
+  const result = {
+    weapon: null,
+    armor: null,
+    inventory: []
+  };
+  let foundAny = false;
+
+  // Helper to extract quality modifier from surrounding text
+  function getQualityTier(itemMatch, fullText) {
+    const idx = fullText.indexOf(itemMatch);
+    // Look at ~30 chars before the item for quality words
+    const prefix = fullText.slice(Math.max(0, idx - 30), idx).toLowerCase();
+    
+    for (const [word, tier] of Object.entries(GEAR_QUALITY_MODIFIERS)) {
+      if (prefix.includes(word)) {
+        return tier;
+      }
+    }
+    return 1; // Default to Common quality
+  }
+
+  // Helper to build item name with quality adjective
+  function buildItemName(baseItem, fullText) {
+    const idx = fullText.toLowerCase().indexOf(baseItem.toLowerCase());
+    const prefix = fullText.slice(Math.max(0, idx - 20), idx).trim();
+    
+    // Extract the last 1-2 words before the item as adjectives
+    const words = prefix.split(/\s+/).filter(w => w.length > 0);
+    const adjectives = words.slice(-2).filter(w => 
+      Object.keys(GEAR_QUALITY_MODIFIERS).includes(w.toLowerCase()) ||
+      ['old', 'new', 'worn', 'tattered', 'rusty', 'wooden', 'iron', 'steel', 
+       'leather', 'cloth', 'simple', 'heavy', 'light', 'short', 'long'].includes(w.toLowerCase())
+    );
+    
+    if (adjectives.length > 0) {
+      return adjectives.join(' ') + ' ' + baseItem;
+    }
+    return baseItem;
+  }
+
+  // Look for weapons
+  for (const weapon of CUSTOM_WEAPON_PATTERNS) {
+    if (t.includes(weapon)) {
+      const tier = getQualityTier(weapon, t);
+      const name = buildItemName(weapon, input);
+      result.weapon = { name, tier };
+      foundAny = true;
+      break; // Only take first weapon found
+    }
+  }
+
+  // Look for armor
+  for (const armor of CUSTOM_ARMOR_PATTERNS) {
+    if (t.includes(armor)) {
+      const tier = getQualityTier(armor, t);
+      const name = buildItemName(armor, input);
+      result.armor = { name, tier };
+      foundAny = true;
+      break; // Only take first armor found
+    }
+  }
+
+  // Look for clothing items (add to inventory)
+  for (const clothing of CUSTOM_CLOTHING_PATTERNS) {
+    if (t.includes(clothing)) {
+      const name = buildItemName(clothing, input);
+      // Avoid duplicating if it's already the armor
+      if (!result.armor || !result.armor.name.toLowerCase().includes(clothing)) {
+        result.inventory.push(name);
+        foundAny = true;
+      }
+    }
+  }
+
+  // Look for containers
+  for (const container of CUSTOM_CONTAINER_PATTERNS) {
+    if (t.includes(container)) {
+      const name = buildItemName(container, input);
+      result.inventory.push(name);
+      foundAny = true;
+    }
+  }
+
+  // Look for supplies
+  for (const supply of CUSTOM_SUPPLY_PATTERNS) {
+    if (t.includes(supply)) {
+      const name = buildItemName(supply, input);
+      result.inventory.push(name);
+      foundAny = true;
+    }
+  }
+
+  // Deduplicate inventory
+  result.inventory = [...new Set(result.inventory)];
+
+  return foundAny ? result : null;
+}
+
+
 // -----------------------------------------------
 // Phase 3: Background — list selection or free-form
 // -----------------------------------------------
@@ -668,6 +840,16 @@ function processPhase3(state, input) {
 
   state.creation.background = chosenKey;
   state.creation.phase      = 4;
+
+  // =============================================
+  // CUSTOM GEAR DETECTION
+  // If the player described specific gear in their freeform
+  // background description, parse and store it for Phase 4.
+  // =============================================
+  const customGear = parseCustomStartingGear(input);
+  if (customGear) {
+    state.creation.customGear = customGear;
+  }
 
   const bg = BACKGROUNDS[chosenKey];
   const spellNote = bg.isMagical
@@ -787,11 +969,62 @@ function processPhase4(state, input) {
   state.coin            = env.startingCoin || 150;
   state.freeformSkills  = {};  // tracks player-invented skills and their use count
 
-  // Starting gear (universal clothing base + background weapon)
-  const startGear        = getStartingGear(bgKey);
-  state.gear             = { weapon: startGear.weapon, armor: startGear.armor };
-  state.clothingArmor    = startGear.clothingArmor || 3;
-  state.inventory        = startGear.inventory;
+  // =============================================
+  // STARTING GEAR
+  // Priority: Custom gear from freeform description > Background defaults
+  // =============================================
+  const customGear = state.creation.customGear;
+  
+  if (customGear) {
+    // Player defined their own gear in the background description
+    // Use what they specified, fill gaps with basics
+    
+    // Weapon: use custom if specified, otherwise background default
+    if (customGear.weapon) {
+      state.gear = { 
+        weapon: buildGearItem(customGear.weapon, false), 
+        armor: null 
+      };
+    } else {
+      const defaultGear = getStartingGear(bgKey);
+      state.gear = { weapon: defaultGear.weapon, armor: null };
+    }
+    
+    // Armor: use custom if specified
+    if (customGear.armor) {
+      state.gear.armor = buildGearItem(customGear.armor, true);
+    }
+    
+    // Inventory: start with custom items, add basics if not mentioned
+    const customInv = customGear.inventory || [];
+    const hasWaterskin = customInv.some(i => i.toLowerCase().includes('waterskin') || i.toLowerCase().includes('canteen') || i.toLowerCase().includes('flask'));
+    const hasClothing = customInv.some(i => 
+      i.toLowerCase().includes('shirt') || 
+      i.toLowerCase().includes('tunic') || 
+      i.toLowerCase().includes('clothes') ||
+      i.toLowerCase().includes('trousers') ||
+      i.toLowerCase().includes('pants')
+    );
+    
+    state.inventory = [...customInv];
+    
+    // Add basics only if player didn't mention them
+    if (!hasClothing) {
+      state.inventory.push('basic linen shirt', 'plain trousers', 'worn leather shoes');
+    }
+    if (!hasWaterskin) {
+      state.inventory.push('waterskin');
+    }
+    
+    state.clothingArmor = 3; // Basic clothing protection
+    
+  } else {
+    // No custom gear - use background defaults
+    const startGear        = getStartingGear(bgKey);
+    state.gear             = { weapon: startGear.weapon, armor: startGear.armor };
+    state.clothingArmor    = startGear.clothingArmor || 3;
+    state.inventory        = startGear.inventory;
+  }
 
   // Starting spell for magical backgrounds
   const startSpell = getStartingSpell(bgKey);

@@ -73,6 +73,15 @@ STRICT RULES:
 - Response length should match the scene. Quiet moments can breathe. Action can be punchy. Rich scenes deserve rich prose. Do not artificially cap length.
 - End on an open beat — describe the world settling into stillness, waiting. Never write the player's next action or decision for them.
 
+CHARACTER PHYSICALITY:
+- The player's physical description is CANON. Use it. Reference it. Let NPCs react to it.
+- Height, build, scars, distinctive features — these should appear naturally in narrative when relevant.
+- If the character is tall, NPCs look up. If they're heavyset, furniture creaks. If they have visible scars, people notice.
+- GENERAL FEATURES (height, build, scars, hair, face) can be referenced anytime — in combat, social scenes, exploration.
+- INTIMATE FEATURES (genitalia, private body details) are ONLY referenced during intimate/sexual scenes. Never mention these in combat, shopping, or casual conversation.
+- In physical or intimate scenes, the character's body as described is the body that exists in the story.
+- Do not sanitize or ignore physical details the player established — they are part of the character, used in appropriate context.
+
 PLAYER AGENCY — THIS IS ABSOLUTE AND INVIOLABLE:
 - The player character is "you" but YOU DO NOT CONTROL THEM.
 - NEVER write what the player character says. No dialogue from them. Not even implied speech.
@@ -90,6 +99,7 @@ RIGHT: "The herbs dissolve into the broth. Steam rises, carrying the scent of ro
 INTIMATE SCENES:
 - If instructed to write an intimate scene, treat it as one story beat among many
 - Write it with the same craft and restraint as any other scene
+- The character's physical description applies fully — use the details the player established
 - When it reaches a natural conclusion, return to the wider story
 - Never escalate beyond what the instruction specifies
 - Never re-initiate after conclusion unless the player does
@@ -139,9 +149,10 @@ function buildCharacterContext(state) {
     : 'Traveling alone.';
 
   return [
-    '[CHARACTER — never state these numbers in narrative]',
+    '[CHARACTER — never state numbers, but DO use physical appearance contextually]',
     `${c.age}yo ${c.gender} | ${bg ? bg.label : c.background} | ${rg ? rg.label : 'Unknown'}`,
-    c.description ? `Appearance: ${c.description}` : '',
+    c.description ? `Physical appearance: ${c.description}` : '',
+    c.description ? '[Use general features (height, build, scars) anytime. Use intimate details ONLY in intimate scenes.]' : '',
     `STR ${s.str}  DEX ${s.dex}  VIT ${s.vit}  INT ${s.int}  WIS ${s.wis}  CHA ${s.cha}`,
     `Level ${playerLevel}` +
       (cls  ? ` | ${cls.label} Lv${state.classLevel || 1}` : '') +
@@ -153,7 +164,7 @@ function buildCharacterContext(state) {
     `Reputation: ${repLabel}. ${repNote}`,
     state.shopOpen ? `Runs an active shop stall here.` : '',
     '[High stats = natural aptitude. Low stats = tendency toward failure or struggle.]',
-    '[Do not mention any of these numbers or system terms in narrative.]'
+    '[Do not mention any numbers or system terms in narrative.]'
   ].filter(Boolean).join('\n');
 }
 
@@ -736,15 +747,14 @@ function buildEventAnnouncements(events) {
         }
         break;
 
-      // NEW: Item received events
+      // Item events - only show for explicit player equip commands, not auto-detection
       case 'itemReceived':
-        lines.push(`\n[Received: ${evt.name}${evt.isEquipment ? ' (equipment)' : ''}]`);
+        // Silent - don't spam brackets for auto-detected items
         break;
 
       case 'itemEquipped':
-        if (evt.auto) {
-          lines.push(`\n[${evt.message}]`);
-        } else {
+        // Only show if it was a player command, not auto-detection
+        if (!evt.auto) {
           lines.push(`\n[Gear updated: ${evt.message}]`);
         }
         break;
@@ -753,13 +763,21 @@ function buildEventAnnouncements(events) {
         lines.push(`\n[${evt.message}]`);
         break;
 
-      // NEW: Companion events  
+      // Companion events - only show for explicit changes
       case 'companionJoined':
-        lines.push(`\n[${evt.companion.name} has joined your party.]`);
+        if (!evt.auto) {
+          lines.push(`\n[${evt.companion.name} has joined your party.]`);
+        }
         break;
 
       case 'companionLeft':
-        lines.push(`\n[${evt.companion.name} has left your party.]`);
+        if (!evt.auto) {
+          lines.push(`\n[${evt.companion.name} has left your party.]`);
+        }
+        break;
+      
+      case 'equipFailed':
+        // Silent - the AI will handle this narratively via pendingContextHint
         break;
     }
   }
@@ -900,20 +918,17 @@ async function processNarrative(state, playerInput, events = []) {
 
   // ============================================
   // POST-PROCESS AI OUTPUT
-  // Detect items and companions mentioned in narrative
+  // Extract NPC names for tracking (lightweight, no item detection)
+  // 
+  // NOTE: Automatic item detection has been DISABLED because
+  // regex-based parsing of narrative text creates too many
+  // false positives. Items should be granted through:
+  // 1. Explicit player commands ("equip sword")
+  // 2. Game events (quest rewards, purchases, crafting)
+  // 3. Manual GM-style commands if needed
   // ============================================
   if (aiResult.success && aiResult.text) {
-    // Detect items being given/received
-    const detectedItems = detectItemsInNarrative(aiResult.text);
-    
-    // Detect companion changes
-    const companionChanges = detectCompanionChangesInNarrative(aiResult.text, state);
-    
-    // Apply changes to state and collect events
-    const autoEvents = applyDetectedChanges(state, detectedItems, companionChanges);
-    events.push(...autoEvents);
-    
-    // Update current NPC being interacted with
+    // Update current NPC being interacted with (lightweight detection)
     const detectedNPC = extractCurrentNPC(aiResult.text, state);
     if (detectedNPC) {
       state.currentNPC = detectedNPC;
