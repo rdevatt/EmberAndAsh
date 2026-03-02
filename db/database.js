@@ -89,11 +89,23 @@ function initializeSchema() {
       updated_at   TEXT    NOT NULL DEFAULT (datetime('now'))
     );
 
+    -- Remember tokens table
+    -- Persistent login tokens for "remember me" functionality
+    CREATE TABLE IF NOT EXISTS remember_tokens (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      player_id    INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+      token        TEXT    UNIQUE NOT NULL,
+      created_at   TEXT    NOT NULL DEFAULT (datetime('now')),
+      expires_at   TEXT    NOT NULL DEFAULT (datetime('now', '+30 days'))
+    );
+
     -- Indexes for common queries
     CREATE INDEX IF NOT EXISTS idx_saves_player    ON saves(player_id);
     CREATE INDEX IF NOT EXISTS idx_history_save    ON story_history(save_id);
     CREATE INDEX IF NOT EXISTS idx_history_actions ON story_history(save_id, action_count);
     CREATE INDEX IF NOT EXISTS idx_guest_updated   ON guest_sessions(updated_at);
+    CREATE INDEX IF NOT EXISTS idx_remember_token  ON remember_tokens(token);
+    CREATE INDEX IF NOT EXISTS idx_remember_player ON remember_tokens(player_id);
   `);
 
   console.log('[DB] Schema initialized.');
@@ -169,6 +181,64 @@ function updatePlayerSettings(playerId, settings) {
 
 
 // =============================================
+// REMEMBER TOKENS
+// Persistent login tokens for "remember me"
+// =============================================
+
+// Store a remember-me token for persistent login
+function storeRememberToken(playerId, token) {
+  try {
+    // Delete any existing tokens for this player (one active token per player)
+    const deleteStmt = db.prepare(`
+      DELETE FROM remember_tokens WHERE player_id = ?
+    `);
+    deleteStmt.run(playerId);
+
+    // Insert new token with 30-day expiry
+    const stmt = db.prepare(`
+      INSERT INTO remember_tokens (player_id, token, expires_at)
+      VALUES (?, ?, datetime('now', '+30 days'))
+    `);
+    stmt.run(playerId, token);
+    return true;
+  } catch (err) {
+    console.error('[DB] storeRememberToken error:', err.message);
+    return false;
+  }
+}
+
+// Get player by remember token (for auto-login)
+function getPlayerByRememberToken(token) {
+  const stmt = db.prepare(`
+    SELECT p.id, p.username, p.email, p.nsfw_enabled, p.settings
+    FROM players p
+    JOIN remember_tokens rt ON p.id = rt.player_id
+    WHERE rt.token = ? AND rt.expires_at > datetime('now')
+  `);
+  return stmt.get(token) || null;
+}
+
+// Delete a remember token (for logout)
+function deleteRememberToken(token) {
+  const stmt = db.prepare(`
+    DELETE FROM remember_tokens WHERE token = ?
+  `);
+  stmt.run(token);
+}
+
+// Clean up expired remember tokens
+function cleanExpiredRememberTokens() {
+  const stmt = db.prepare(`
+    DELETE FROM remember_tokens WHERE expires_at < datetime('now')
+  `);
+  const result = stmt.run();
+  if (result.changes > 0) {
+    console.log(`[DB] Cleaned ${result.changes} expired remember token(s).`);
+  }
+}
+
+
+// =============================================
 // GAME SAVES
 // =============================================
 
@@ -219,15 +289,47 @@ function loadGame(playerId, slot) {
   };
 }
 
+// Load game state by save ID (for auto-login)
+function loadSaveById(saveId) {
+  const stmt = db.prepare(`
+    SELECT id, player_id, slot, state_json, updated_at, level, region, character_name
+    FROM saves
+    WHERE id = ?
+  `);
+  const row = stmt.get(saveId);
+  if (!row) return null;
+
+  return {
+    saveId:        row.id,
+    playerId:      row.player_id,
+    slot:          row.slot,
+    state:         deserializeState(row.state_json),
+    updatedAt:     row.updated_at,
+    level:         row.level,
+    region:        row.region,
+    characterName: row.character_name
+  };
+}
+
 // Get all save slots for a player (summary only, no full state)
 function getSaveSlots(playerId) {
   const stmt = db.prepare(`
-    SELECT slot, character_name, region, level, updated_at
+    SELECT id, slot, character_name, region, level, updated_at
     FROM saves
     WHERE player_id = ?
     ORDER BY slot ASC
   `);
   return stmt.all(playerId);
+}
+
+// Alias for getSaveSlots (server.js uses getSaves in some places)
+function getSaves(playerId) {
+  return getSaveSlots(playerId);
+}
+
+// Alias for loadSaveById (server.js uses loadSave in auto-login)
+function loadSave(saveId) {
+  return loadSaveById(saveId);
 }
 
 // Delete a save slot
@@ -370,6 +472,7 @@ function cleanExpiredGuestSessions() {
 // Run cleanup tasks — call periodically
 function runMaintenance() {
   cleanExpiredGuestSessions();
+  cleanExpiredRememberTokens();
 
   // Trim history for all saves to keep DB lean
   const saves = db.prepare('SELECT id FROM saves').all();
@@ -418,10 +521,19 @@ module.exports = {
   setNSFWSetting,
   updatePlayerSettings,
 
+  // Remember tokens
+  storeRememberToken,
+  getPlayerByRememberToken,
+  deleteRememberToken,
+  cleanExpiredRememberTokens,
+
   // Saves
   saveGame,
   loadGame,
+  loadSaveById,
   getSaveSlots,
+  getSaves,       // alias for getSaveSlots
+  loadSave,       // alias for loadSaveById
   deleteSave,
   getSaveId,
 
