@@ -18,6 +18,11 @@ const client = {
   inCreation:    true,
   creationStep:  1,   // 1-4 wizard steps
   lastInput:     null, // tracks last player action for retry
+  lastPlayerEntry: null, // DOM element of last player input
+  lastAIEntry:   null, // DOM element of last AI response
+  canUndo:       false, // whether undo is available
+  isEditing:     false, // whether we're in edit mode
+  editPlayerEntry: null, // player entry being edited
   // Gathered creation data
   creation: {
     name:       '',
@@ -277,6 +282,14 @@ async function submitAction() {
   const input = el.playerInput.value.trim();
   if (!input || client.isLoading) return;
 
+  // Check if we're in edit mode
+  if (client.isEditing) {
+    await submitEditedAction(input);
+    el.playerInput.value = '';
+    updateCharCount();
+    return;
+  }
+
   // Track for retry
   client.lastInput = input;
 
@@ -366,21 +379,21 @@ async function _doNormalAction(input) {
 
 
 // =============================================
-// RETRY LAST ACTION
-// Regenerates the AI response for the last player input.
-// Replaces the existing story entry in-place.
+// RETRY NARRATIVE ONLY
+// Regenerates just the AI prose without re-rolling combat mechanics.
+// The damage/hit results stay the same, only the description changes.
 // =============================================
-async function retryLastAction(entryToReplace) {
+async function retryNarrative(entryToReplace, playerInputEntry) {
   if (!client.lastInput || client.isLoading) return;
 
   setLoading(true);
 
-  const { ok, data } = await apiCall('POST', '/action', { input: client.lastInput });
+  const { ok, data } = await apiCall('POST', '/retry-narrative', {});
 
   setLoading(false);
 
   if (!ok) {
-    appendStory(null, data.error || 'Something went wrong.', false);
+    appendStory(null, data.error || 'Failed to regenerate.', false);
     return;
   }
 
@@ -395,13 +408,8 @@ async function retryLastAction(entryToReplace) {
     }
     entryToReplace.innerHTML = html;
 
-    // Re-attach retry button
-    const retryBtn = document.createElement('button');
-    retryBtn.className = 'retry-btn';
-    retryBtn.textContent = '↺ Retry';
-    retryBtn.title = 'Regenerate this response';
-    retryBtn.addEventListener('click', () => retryLastAction(entryToReplace));
-    entryToReplace.appendChild(retryBtn);
+    // Re-attach action buttons
+    attachStoryEntryButtons(entryToReplace, playerInputEntry);
   }
 
   if (data.character)   updateCharacterPanel(data.character);
@@ -409,6 +417,200 @@ async function retryLastAction(entryToReplace) {
   if (data.economy)     updateEconomyPanel(data.economy);
   if (data.rightPanel)  updateRightPanel(data.rightPanel);
   if (data.board)       updateBoardPanel(data.board);
+}
+
+
+// =============================================
+// UNDO LAST ACTION
+// Restores game state to before the action was processed.
+// Removes the last exchange from the story.
+// =============================================
+async function undoLastAction(aiEntry, playerInputEntry) {
+  if (client.isLoading) return;
+
+  setLoading(true);
+
+  const { ok, data } = await apiCall('POST', '/undo', {});
+
+  setLoading(false);
+
+  if (!ok) {
+    appendStory(null, data.error || 'Failed to undo.', false);
+    return;
+  }
+
+  // Remove both the AI response and the player input from the story
+  if (aiEntry && aiEntry.parentNode) {
+    aiEntry.parentNode.removeChild(aiEntry);
+  }
+  if (playerInputEntry && playerInputEntry.parentNode) {
+    playerInputEntry.parentNode.removeChild(playerInputEntry);
+  }
+
+  // Clear client tracking
+  client.lastInput = null;
+  client.lastPlayerEntry = null;
+  client.lastAIEntry = null;
+  client.canUndo = false;
+
+  // Update all panels to reflect restored state
+  if (data.character)   updateCharacterPanel(data.character);
+  if (data.progression) updateProgressionPanel(data.progression);
+  if (data.economy)     updateEconomyPanel(data.economy);
+  if (data.rightPanel)  updateRightPanel(data.rightPanel);
+  if (data.board)       updateBoardPanel(data.board);
+
+  // Show confirmation
+  showToast('Action undone — try something different.');
+}
+
+
+// =============================================
+// EDIT LAST ACTION
+// Opens input field with previous action text for editing.
+// =============================================
+function editLastAction(playerInputEntry) {
+  if (!client.lastInput || client.isLoading) return;
+
+  // Put the last input back in the input field
+  el.playerInput.value = client.lastInput;
+  el.playerInput.focus();
+  
+  // Mark that we're in edit mode
+  client.isEditing = true;
+  client.editPlayerEntry = playerInputEntry;
+  
+  // Update submit button text
+  el.btnSubmit.textContent = 'Resubmit';
+  el.btnSubmit.classList.add('edit-mode');
+  
+  // Show cancel option
+  showEditModeUI();
+}
+
+function showEditModeUI() {
+  // Add cancel button if not exists
+  let cancelBtn = document.getElementById('btn-cancel-edit');
+  if (!cancelBtn) {
+    cancelBtn = document.createElement('button');
+    cancelBtn.id = 'btn-cancel-edit';
+    cancelBtn.className = 'btn-cancel-edit';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', cancelEdit);
+    el.btnSubmit.parentNode.insertBefore(cancelBtn, el.btnSubmit.nextSibling);
+  }
+  cancelBtn.classList.remove('hidden');
+}
+
+function cancelEdit() {
+  client.isEditing = false;
+  client.editPlayerEntry = null;
+  el.playerInput.value = '';
+  el.btnSubmit.textContent = 'Send';
+  el.btnSubmit.classList.remove('edit-mode');
+  
+  const cancelBtn = document.getElementById('btn-cancel-edit');
+  if (cancelBtn) cancelBtn.classList.add('hidden');
+}
+
+async function submitEditedAction(newInput) {
+  if (client.isLoading) return;
+
+  setLoading(true);
+
+  const { ok, data } = await apiCall('POST', '/edit-action', { input: newInput });
+
+  setLoading(false);
+  
+  // Exit edit mode
+  client.isEditing = false;
+  el.btnSubmit.textContent = 'Send';
+  el.btnSubmit.classList.remove('edit-mode');
+  const cancelBtn = document.getElementById('btn-cancel-edit');
+  if (cancelBtn) cancelBtn.classList.add('hidden');
+
+  if (!ok) {
+    appendStory(null, data.error || 'Failed to process edit.', false);
+    return;
+  }
+
+  // Remove the old AI response entry
+  if (client.lastAIEntry && client.lastAIEntry.parentNode) {
+    client.lastAIEntry.parentNode.removeChild(client.lastAIEntry);
+  }
+
+  // Update the player input entry with new text
+  if (client.editPlayerEntry) {
+    client.editPlayerEntry.querySelector('.player-action').textContent = '> ' + newInput;
+  }
+
+  // Track new input
+  client.lastInput = newInput;
+
+  // Append new AI response
+  if (data.output) {
+    appendStory(newInput, data.output, false, true); // skipSave since we're replacing
+  }
+
+  if (data.character)   updateCharacterPanel(data.character);
+  if (data.progression) updateProgressionPanel(data.progression);
+  if (data.economy)     updateEconomyPanel(data.economy);
+  if (data.rightPanel)  updateRightPanel(data.rightPanel);
+  if (data.board)       updateBoardPanel(data.board);
+}
+
+
+// =============================================
+// ATTACH STORY ENTRY BUTTONS
+// Adds retry/undo/edit buttons to a story entry
+// =============================================
+function attachStoryEntryButtons(aiEntry, playerInputEntry) {
+  // Create button container
+  const btnContainer = document.createElement('div');
+  btnContainer.className = 'story-entry-buttons';
+
+  // Retry button (regenerate narrative only)
+  const retryBtn = document.createElement('button');
+  retryBtn.className = 'story-btn retry-btn';
+  retryBtn.textContent = '↺ Retry';
+  retryBtn.title = 'Regenerate the narrative (same outcome)';
+  retryBtn.addEventListener('click', () => retryNarrative(aiEntry, playerInputEntry));
+  btnContainer.appendChild(retryBtn);
+
+  // Edit button
+  const editBtn = document.createElement('button');
+  editBtn.className = 'story-btn edit-btn';
+  editBtn.textContent = '✎ Edit';
+  editBtn.title = 'Change what you said/did';
+  editBtn.addEventListener('click', () => editLastAction(playerInputEntry));
+  btnContainer.appendChild(editBtn);
+
+  // Undo button (only for most recent action)
+  const undoBtn = document.createElement('button');
+  undoBtn.className = 'story-btn undo-btn';
+  undoBtn.textContent = '↶ Undo';
+  undoBtn.title = 'Undo this action completely';
+  undoBtn.addEventListener('click', () => undoLastAction(aiEntry, playerInputEntry));
+  btnContainer.appendChild(undoBtn);
+
+  aiEntry.appendChild(btnContainer);
+}
+
+
+// =============================================
+// SIMPLE TOAST NOTIFICATION
+// =============================================
+function showToast(message) {
+  let toast = document.getElementById('toast-notification');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'toast-notification';
+    toast.className = 'toast-notification';
+    document.body.appendChild(toast);
+  }
+  toast.textContent = message;
+  toast.classList.add('show');
+  setTimeout(() => toast.classList.remove('show'), 3000);
 }
 
 
@@ -678,12 +880,19 @@ async function refreshPanels() {
 // =============================================
 // STORY OUTPUT
 // =============================================
-function appendPlayerAction(text) {
+function appendPlayerAction(text, isHistory = false) {
   const entry = document.createElement('div');
-  entry.className = 'story-entry';
+  entry.className = 'story-entry player-entry';
   entry.innerHTML = `<div class="player-action">&gt; ${escapeHtml(text)}</div>`;
   el.storyContent.appendChild(entry);
   scrollToBottom();
+  
+  // Track this entry for undo/edit functionality (not for history replay)
+  if (!isHistory) {
+    client.lastPlayerEntry = entry;
+  }
+  
+  return entry;
 }
 
 // Rolling story history — last 30 entries persisted locally for resume
@@ -727,7 +936,7 @@ function loadStoryHistoryFromLocal() {
 }
 
 function appendStory(playerAction, text, isCreation = false, skipSave = false) {
-  if (!text) return;
+  if (!text) return null;
 
   // Persist to local rolling history (skip for history replay and creation text)
   if (!skipSave && !isCreation) {
@@ -752,18 +961,21 @@ function appendStory(playerAction, text, isCreation = false, skipSave = false) {
 
   entry.innerHTML = html;
 
-  // Add retry button for non-creation AI responses only
-  if (!isCreation && parts.narrative) {
-    const retryBtn = document.createElement('button');
-    retryBtn.className = 'retry-btn';
-    retryBtn.textContent = '↺ Retry';
-    retryBtn.title = 'Regenerate this response';
-    retryBtn.addEventListener('click', () => retryLastAction(entry));
-    entry.appendChild(retryBtn);
+  // Add action buttons for non-creation AI responses only
+  if (!isCreation && parts.narrative && !skipSave) {
+    // Get the player input entry (the last player action entry)
+    const playerInputEntry = client.lastPlayerEntry;
+    attachStoryEntryButtons(entry, playerInputEntry);
+    
+    // Track this as the last AI entry
+    client.lastAIEntry = entry;
+    client.canUndo = true;
   }
 
   el.storyContent.appendChild(entry);
   scrollToBottom();
+  
+  return entry;
 }
 
 function splitNarrativeAndAnnouncements(text) {
