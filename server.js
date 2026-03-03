@@ -25,7 +25,8 @@ const {
   formatCoin, equipCraftedItem, sellCraftedItem,
   // NEW: Equipment and companion functions
   detectEquipIntent, processEquipCommand, 
-  addCompanion, removeCompanion, detectCompanionIntent, getCompanionsDisplay
+  addCompanion, removeCompanion, detectCompanionIntent, getCompanionsDisplay,
+  addItem  // FIX: Import addItem for take/loot commands
 } = require('./game/economy');
 const { processNarrative, buildRightPanelData, buildEventAnnouncements } = require('./game/narrative');
 const { detectBoardIntent, detectQuestAccept, refreshBoard, getBoardQuests, acceptQuestByIndex, acceptQuest, buildBoardDisplayData, buildBoardInspectHint, checkQuestProgress, processQuestCompletions, buildActiveQuestContext } = require('./game/quests');
@@ -670,7 +671,8 @@ app.post('/api/action', requireSession, async (req, res) => {
     // Commands that show UI panels without advancing the story
     // --------------------------------------------------------
     const t = cleanInput.toLowerCase().trim();
-// Rest / recover
+
+    // Rest / recover
     if (['rest', 'sleep', 'recover', 'take a break', 'catch my breath', 'sit down', 'rest up'].includes(t) || 
         t.startsWith('rest ') || t.includes('rest for') || t.includes('take a rest')) {
       
@@ -713,6 +715,7 @@ app.post('/api/action', requireSession, async (req, res) => {
         commandType: 'rest'
       });
     }
+
     // Long rest / full recovery (with risk)
     if (['long rest', 'sleep', 'make camp', 'set up camp', 'camp', 'full rest', 'rest fully'].includes(t) ||
         t.includes('long rest') || t.includes('make camp') || t.includes('set up camp')) {
@@ -726,7 +729,7 @@ app.post('/api/action', requireSession, async (req, res) => {
         });
       }
 
-     // Check if in a safe location (no ambush possible)
+      // Check if in a safe location (no ambush possible)
       // Check currentLocation, sceneContext, storySummary, AND player input
       const safeKeywords = ['inn', 'tavern', 'temple', 'church', 'home', 'house', 'bedroom', 
                             'sanctuary', 'safehouse', 'barracks', 'guild', 'shelter', 'cabin',
@@ -742,6 +745,7 @@ app.post('/api/action', requireSession, async (req, res) => {
         lastStory.includes(loc) ||
         playerInput.includes(loc)
       );
+
       // Chance of ambush during long rest (15% base, modified by region danger)
       // Safe locations = no ambush
       let ambushed = false;
@@ -802,6 +806,7 @@ app.post('/api/action', requireSession, async (req, res) => {
         commandType: 'longRest'
       });
     }
+
     // Check stats
     if (['check stats', 'status', 'character sheet', 'view stats', 'my stats'].includes(t)) {
       const panel = buildCharacterPanelData(state);
@@ -825,7 +830,8 @@ app.post('/api/action', requireSession, async (req, res) => {
         commandType:'gear'
       });
     }
-// Explicit set/add companion command (bypasses rapport requirement for testing/GM use)
+
+    // Explicit set/add companion command (bypasses rapport requirement for testing/GM use)
     if (t.startsWith('set companion ') || t.startsWith('add companion ')) {
       const name = cleanInput.replace(/^(set|add) companion\s+/i, '').trim();
       if (!name) {
@@ -848,10 +854,12 @@ app.post('/api/action', requireSession, async (req, res) => {
         output: result.success
           ? `${result.companion.name} has joined your party.`
           : result.message,
+        economy: buildEconomyPanelData(state),  // FIX: Return economy data so companion shows in UI
         isCommand: true,
         commandType: 'companion'
       });
     }
+
     // Check companions
     if (['companions', 'check companions', 'my companions', 'party', 'my party'].includes(t)) {
       const companionData = getCompanionsDisplay(state);
@@ -936,6 +944,41 @@ app.post('/api/action', requireSession, async (req, res) => {
     }
 
     // --------------------------------------------------------
+    // TAKE/LOOT COMMANDS
+    // FIX: Detect player picking up items from environment/enemies
+    // This mechanically adds items to inventory so "equip" works later
+    // --------------------------------------------------------
+    const takePatterns = [
+      /^take (?:the )?(.+?)(?:\s+from.+)?$/i,
+      /^loot (?:the )?(.+)/i,
+      /^pick up (?:the )?(.+)/i,
+      /^grab (?:the )?(.+)/i
+    ];
+
+    let itemTaken = false;
+    for (const pattern of takePatterns) {
+      const match = cleanInput.match(pattern);
+      if (match && match[1]) {
+        // Clean the item name
+        let itemName = match[1].trim()
+          .replace(/\s*(from|off of|off)\s+.*/i, '')  // Remove "from the body" etc
+          .replace(/^(a|an|the)\s+/i, '');            // Remove articles
+        
+        if (itemName.length > 0 && itemName.length < 50) {
+          addItem(state, itemName);
+          events.push({ 
+            type: 'itemTaken', 
+            item: itemName,
+            message: `You picked up: ${itemName}` 
+          });
+          state.pendingContextHint = `[ITEM ACQUIRED — player now has "${itemName}" in their inventory. Narrate this naturally.]`;
+          itemTaken = true;
+        }
+        break;
+      }
+    }
+
+    // --------------------------------------------------------
     // EQUIPMENT COMMANDS
     // Detect equip/unequip intent and process mechanically
     // --------------------------------------------------------
@@ -957,6 +1000,20 @@ app.post('/api/action', requireSession, async (req, res) => {
           events.push({ type: 'equipFailed', message: equipResult.message });
         }
       }
+
+      // --------------------------------------------------------
+      // FIX: If an equipment command was recognized, return early
+      // This prevents "equip sword" from being treated as a combat action
+      // --------------------------------------------------------
+      const narrative = await processNarrative(state, cleanInput, events);
+      await persistSession(req.sessionId);
+      return res.json({
+        success: true,
+        output: narrative.fullOutput,
+        character: buildCharacterPanelData(state),
+        economy: buildEconomyPanelData(state),
+        rightPanel: narrative.rightPanel
+      });
     }
 
     // --------------------------------------------------------
@@ -1048,8 +1105,20 @@ app.post('/api/action', requireSession, async (req, res) => {
 
     // --------------------------------------------------------
     // ACTIVE COMBAT ROUND
+    // FIX: Added safety check to prevent dead enemy combat
     // --------------------------------------------------------
     if (state.inCombat && state.currentEnemy) {
+      // Safety: verify enemy is actually alive before processing combat
+      if (state.currentEnemy.currentHP <= 0) {
+        // Stale combat state — force clear
+        console.log('[Combat] Clearing stale combat state - enemy already dead');
+        state.inCombat = false;
+        state.currentEnemy = null;
+      }
+    }
+
+    // Only process combat if enemy is alive
+    if (state.inCombat && state.currentEnemy && state.currentEnemy.currentHP > 0) {
       const combatResult = applyCombatRound(state, cleanInput);
       state.pendingContextHint = combatResult.hint;
 
