@@ -1,0 +1,165 @@
+/* =============================================================
+   EMBER AND ASH — STYLES
+   Dark fantasy UI. Three panel layout.
+   ============================================================= */
+
+/* =============================================
+   RESET & BASE
+============================================= */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  --bg-deep:       #0d0d0f;
+  --bg-panel:      #111114;
+  --bg-section:    #161619;
+  --bg-input:      #1a1a1e;
+  --bg-hover:      #1e1e22;
+  --bg-darker:     #0a0a0c;
+
+  --border:        #2a2a30;
+  --border-bright: #3a3a44;
+
+  --text:          #f0f0f4;
+  --text-dim:      #6a6a78;
+  --text-bright:   #ffffff;
+  --text-gold:     #c8a84a;
+  --text-red:      #c84a4a;
+  --text-green:    #4ac878;
+  --text-blue:     #4a88c8;
+  --text-orange:   #c87a4a;
+
+  --bar-hp:        #c84a4a;
+  --bar-mp:        #4a88c8;
+  --bar-st:        #c8a84a;
+  --bar-enemy:     #c84a4a;
+
+  --accent:        #8a5a2a;
+  --accent-bright: #c87a3a;
+  --accent-green:  #4ac878;
+  --accent-red:    #c84a4a;
+
+  --font-main:     'Georgia', serif;
+  --font-ui:       'Trebuchet MS', 'Segoe UI', sans-serif;
+
+  --header-h:      44px;
+  --panel-left-w:  220px;
+  --panel-right-w: 220px;
+  --input-h:       110px;
+}
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg-deep);
+  color: var(--text);
+  font-family: var(--font-main);
+  font-size: 18px;
+  line-height: 1.6;
+}
+
+
+/* =============================================
+   HEADER
+============================================= */
+#header {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: var(--header-h);
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  z-index: 100;
+}
+
+#game-title {
+  font-family: var(--font-ui);
+  font-size: 13px;
+  letter-spacing: 4px;
+  color: var(--text-gold);
+}
+
+#location-display {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  letter-spacing: 2px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+}
+
+#header-right {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.header-btn {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  letter-spacing: 1px;
+  padding: 4px 10px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.header-btn:hover {
+  border-color: var(--border-bright);
+  color: var(--text);
+}
+
+
+/* =============================================
+   MAIN LAYOUT
+============================================= */
+#main-layout {
+  position: fixed;
+  top: var(--header-h);
+  left: 0; right: 0; bottom: 0;
+  display: grid;
+  grid-template-columns: var(--panel-left-w) 1fr var(--panel-right-w);
+  overflow: hidden;
+}
+
+
+/* =============================================
+   SHARED PANEL STYLES
+============================================= */
+aside {
+  background: var(--bg-panel);
+  border-color: var(--border);
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+#panel-left  { border-right: 1px solid var(--border); }
+#panel-right { border-left:  1px solid var(--border); }
+
+.panel-section {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.panel-label {
+  font-family: var(--font-ui);
+  font-size: 9px;
+  letter-spacing: 3px;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+  text-transform: uppercase;
+}
+
+.dim   { color: var(--text-dim); }
+.small { font-size: 12px; }
+
+
