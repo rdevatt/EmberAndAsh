@@ -285,7 +285,6 @@ function appendPlayerAction(text, isHistory = false) {
   entry.className = 'story-entry player-entry';
   entry.innerHTML = `<div class="player-action">&gt; ${escapeHtml(text)}</div>`;
   el.storyContent.appendChild(entry);
-  scrollToBottom();
 
   if (!isHistory) {
     client.lastPlayerEntry = entry;
@@ -325,7 +324,6 @@ function loadStoryHistoryFromLocal() {
     endDivider.className = 'story-entry';
     endDivider.innerHTML = '<div class="ai-response history-divider">— Continuing —</div>';
     el.storyContent.appendChild(endDivider);
-    scrollToBottom();
     return true;
   } catch (e) {
     return false;
@@ -364,7 +362,6 @@ function appendStory(playerAction, text, isCreation = false, skipSave = false) {
   }
 
   el.storyContent.appendChild(entry);
-  scrollToBottom();
 
   return entry;
 }

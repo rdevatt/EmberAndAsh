@@ -71,7 +71,7 @@ const {
   getCraftedGearInventory,
   equipCraftedItem,
   sellCraftedItem
-} = createCraftedGearHandlers({ addCoin, formatCoin, recalculateResources });
+} = createCraftedGearHandlers({ addCoin, formatCoin, recalculateResources, addItem });
 
 function parseCoinFromText(text) {
   const t = text.toLowerCase();
@@ -148,6 +148,10 @@ function findInventoryItem(state, nameFragment) {
   });
 }
 
+function getItemName(item) {
+  return typeof item === 'string' ? item : item.name;
+}
+
 
 // =============================================
 // GEAR MANAGEMENT
@@ -155,15 +159,29 @@ function findInventoryItem(state, nameFragment) {
 function equipWeapon(state, weaponSrc) {
   const item = buildGearItem(weaponSrc, false);
   if (!item) return { success: false, message: 'Invalid weapon.' };
+
+  const previous = state.gear && state.gear.weapon ? state.gear.weapon : null;
+  if (previous) {
+    addItem(state, previous);
+  }
+
   state.gear.weapon = item;
-  return { success: true, item, message: `Equipped: ${item.name} (${item.quality})` };
+  const stowText = previous ? ` Previous weapon stowed in backpack: ${previous.name}.` : '';
+  return { success: true, item, message: `Equipped: ${item.name} (${item.quality}).${stowText}` };
 }
 
 function equipArmor(state, armorSrc) {
   const item = buildGearItem(armorSrc, true);
   if (!item) return { success: false, message: 'Invalid armor.' };
+
+  const previous = state.gear && state.gear.armor ? state.gear.armor : null;
+  if (previous) {
+    addItem(state, previous);
+  }
+
   state.gear.armor = item;
-  return { success: true, item, message: `Equipped: ${item.name} (${item.quality})` };
+  const stowText = previous ? ` Previous armor stowed in backpack: ${previous.name}.` : '';
+  return { success: true, item, message: `Equipped: ${item.name} (${item.quality}).${stowText}` };
 }
 
 function unequipWeapon(state) {
@@ -173,7 +191,7 @@ function unequipWeapon(state) {
   const item = state.gear.weapon;
   state.gear.weapon = null;
   // Add to inventory
-  addItem(state, item.name);
+  addItem(state, item);
   return { success: true, item, message: `Unequipped: ${item.name}` };
 }
 
@@ -184,7 +202,7 @@ function unequipArmor(state) {
   const item = state.gear.armor;
   state.gear.armor = null;
   // Add to inventory
-  addItem(state, item.name);
+  addItem(state, item);
   return { success: true, item, message: `Unequipped: ${item.name}` };
 }
 
@@ -195,7 +213,8 @@ function unequipArmor(state) {
 // =============================================
 const EQUIP_KEYWORDS = [
   'equip', 'put on', 'wear', 'wield', 'arm myself', 'draw', 'ready',
-  'don', 'strap on', 'take up', 'grab my', 'pick up my', 'use my'
+  'don', 'strap on', 'take up', 'grab my', 'pick up my', 'use my',
+  'replace', 'swap', 'switch to'
 ];
 
 const UNEQUIP_KEYWORDS = [
@@ -218,12 +237,75 @@ const ARMOR_KEYWORDS = [
   'pauldrons', 'vambraces', 'chestplate', 'body armor'
 ];
 
+function classifyEquipSlot(name, explicitType = null) {
+  const lowered = (name || '').toLowerCase();
+
+  if (explicitType === 'armor') return 'armor';
+  if (explicitType === 'weapon') return 'weapon';
+
+  const isArmor = ARMOR_KEYWORDS.some(kw => lowered.includes(kw));
+  if (isArmor) return 'armor';
+
+  return 'weapon';
+}
+
+function buildBackpackSummary(state) {
+  const inventory = Array.isArray(state.inventory) ? state.inventory : [];
+  const crafted = Array.isArray(state.craftedGear) ? state.craftedGear : [];
+
+  const carried = inventory.map(getItemName);
+  const weaponCandidates = [];
+  const armorCandidates = [];
+
+  for (const item of inventory) {
+    const name = getItemName(item);
+    const slot = classifyEquipSlot(name, null);
+    if (slot === 'armor') armorCandidates.push(name);
+    else weaponCandidates.push(name);
+  }
+
+  for (const item of crafted) {
+    if (!item || !item.name) continue;
+    const explicitType = (item.armorLevel > 0 && item.weaponBonus === 0) ? 'armor' : 'weapon';
+    const slot = classifyEquipSlot(item.name, explicitType);
+    const label = `${item.name} (crafted)`;
+    if (slot === 'armor') armorCandidates.push(label);
+    else weaponCandidates.push(label);
+  }
+
+  const equippedWeapon = state.gear && state.gear.weapon ? state.gear.weapon.name : 'None';
+  const equippedArmor = state.gear && state.gear.armor ? state.gear.armor.name : 'Unarmored';
+
+  return [
+    'BACKPACK',
+    `Carrying: ${carried.length ? carried.join(', ') : 'Nothing.'}`,
+    `Equipped weapon: ${equippedWeapon}`,
+    `Equipped armor: ${equippedArmor}`,
+    `Equippable as weapon: ${weaponCandidates.length ? weaponCandidates.join(', ') : 'None.'}`,
+    `Equippable as armor: ${armorCandidates.length ? armorCandidates.join(', ') : 'None.'}`
+  ].join('\n');
+}
+
 /**
  * Detects if the player wants to equip or unequip something.
  * Returns { intent: 'equip'|'unequip'|null, itemType: 'weapon'|'armor'|'unknown', itemName: string|null }
  */
 function detectEquipIntent(text) {
   const t = text.toLowerCase();
+
+  const replaceMatch = t.match(/(?:replace|swap)\s+.+?\s+(?:with|for)\s+(.+)/i);
+  if (replaceMatch && replaceMatch[1]) {
+    const candidate = replaceMatch[1].replace(/^(the|my|a|an)\s+/i, '').trim();
+    if (candidate.length > 0) {
+      const isWeapon = WEAPON_KEYWORDS.some(kw => candidate.includes(kw));
+      const isArmor = ARMOR_KEYWORDS.some(kw => candidate.includes(kw));
+      return {
+        intent: 'equip',
+        itemType: isWeapon ? 'weapon' : isArmor ? 'armor' : 'unknown',
+        itemName: candidate
+      };
+    }
+  }
   
   // Check for equip intent
   const isEquip = EQUIP_KEYWORDS.some(kw => t.includes(kw));
@@ -305,37 +387,47 @@ function processEquipCommand(state, equipIntent) {
       const invItem = findInventoryItem(state, itemName);
       if (invItem) {
         const invItemName = typeof invItem === 'string' ? invItem : invItem.name;
+        const loweredItemName = invItemName.toLowerCase();
         
         // Determine if it's a weapon or armor based on name
-        const isWeaponItem = WEAPON_KEYWORDS.some(kw => invItemName.toLowerCase().includes(kw));
-        const isArmorItem = ARMOR_KEYWORDS.some(kw => invItemName.toLowerCase().includes(kw));
+        const isWeaponItem = WEAPON_KEYWORDS.some(kw => loweredItemName.includes(kw));
+        const isArmorItem = ARMOR_KEYWORDS.some(kw => loweredItemName.includes(kw));
         
         // Determine quality tier (default to Common/tier 1 for inventory items)
-        const tier = (typeof invItem === 'object' && invItem.tier !== undefined) ? invItem.tier : 1;
-        
-        if (isWeaponItem || itemType === 'weapon') {
-          // Remove from inventory and equip
-          removeItem(state, invItemName);
-          const result = equipWeapon(state, { name: invItemName, tier });
-          if (result.success) {
-            return {
-              success: true,
-              item: result.item,
-              slot: 'weapon',
-              message: `Equipped from inventory: ${result.item.name} (${result.item.quality})`
-            };
-          }
-        } else if (isArmorItem || itemType === 'armor') {
-          removeItem(state, invItemName);
-          const result = equipArmor(state, { name: invItemName, tier });
-          if (result.success) {
-            return {
-              success: true,
-              item: result.item,
-              slot: 'armor',
-              message: `Equipped from inventory: ${result.item.name} (${result.item.quality})`
-            };
-          }
+        const baseTier = (typeof invItem === 'object' && invItem.tier !== undefined) ? invItem.tier : 1;
+        const targetSlot = (itemType === 'armor' || (itemType !== 'weapon' && isArmorItem)) ? 'armor' : 'weapon';
+        const source = {
+          name: invItemName,
+          tier: baseTier,
+          statMods: (typeof invItem === 'object' && invItem.statMods) ? invItem.statMods : null,
+          isCrafted: !!(typeof invItem === 'object' && invItem.isCrafted),
+          sellBonus: (typeof invItem === 'object' && invItem.sellBonus) ? invItem.sellBonus : 0,
+          craftedBy: (typeof invItem === 'object' && invItem.craftedBy) ? invItem.craftedBy : null
+        };
+
+        if (!isWeaponItem && !isArmorItem && targetSlot === 'weapon') {
+          source.tier = 0;
+          source.weaponBonus = 0;
+        }
+
+        if (!isArmorItem && targetSlot === 'armor') {
+          source.tier = 0;
+          source.armorLevel = 0;
+        }
+
+        removeItem(state, invItemName);
+
+        const result = targetSlot === 'armor'
+          ? equipArmor(state, source)
+          : equipWeapon(state, source);
+
+        if (result.success) {
+          return {
+            success: true,
+            item: result.item,
+            slot: targetSlot,
+            message: `Equipped from backpack: ${result.item.name} (${result.item.quality}).`
+          };
         }
       }
     }
@@ -702,6 +794,7 @@ module.exports = {
   hasItem,
   getInventoryDisplay,
   findInventoryItem,
+  buildBackpackSummary,
 
   // Gear
   equipWeapon,

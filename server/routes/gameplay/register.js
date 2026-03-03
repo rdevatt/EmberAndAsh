@@ -50,6 +50,7 @@ module.exports = function registerGameplayRoutes(app, deps) {
     removeCompanion,
     detectCompanionIntent,
     getCompanionsDisplay,
+    buildBackpackSummary,
     addItem,
     processNarrative,
     buildRightPanelData,
@@ -271,7 +272,24 @@ module.exports = function registerGameplayRoutes(app, deps) {
 
       if (['check gear', 'gear', 'inventory', 'check inventory', 'my inventory', 'equipment', 'my gear'].includes(t)) {
         const panel = buildEconomyPanelData(state);
-        return res.json({ success: true, output: null, economy: panel, isCommand: true, commandType:'gear' });
+        return res.json({
+          success: true,
+          output: buildBackpackSummary(state),
+          economy: panel,
+          isCommand: true,
+          commandType:'gear'
+        });
+      }
+
+      if (['backpack', 'my backpack', 'check backpack', 'open backpack'].includes(t)) {
+        const panel = buildEconomyPanelData(state);
+        return res.json({
+          success: true,
+          output: buildBackpackSummary(state),
+          economy: panel,
+          isCommand: true,
+          commandType: 'backpack'
+        });
       }
 
       if (t.startsWith('set companion ') || t.startsWith('add companion ')) {
@@ -395,17 +413,18 @@ module.exports = function registerGameplayRoutes(app, deps) {
             state.pendingContextHint = equipResult.hint;
             events.push({ type: 'equipFailed', message: equipResult.message });
           }
-        }
 
-        const narrative = await processNarrative(state, cleanInput, events);
-        await persistSession(req.sessionId);
-        return res.json({
-          success: true,
-          output: narrative.fullOutput,
-          character: buildCharacterPanelData(state),
-          economy: buildEconomyPanelData(state),
-          rightPanel: narrative.rightPanel
-        });
+          await persistSession(req.sessionId);
+          return res.json({
+            success: true,
+            output: equipResult.message,
+            character: buildCharacterPanelData(state),
+            economy: buildEconomyPanelData(state),
+            rightPanel: buildRightPanelData(state),
+            isCommand: true,
+            commandType: equipIntent.intent === 'equip' ? 'equip' : 'unequip'
+          });
+        }
       }
 
       const companionIntent = detectCompanionIntent(cleanInput, state);

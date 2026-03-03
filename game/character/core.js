@@ -244,13 +244,15 @@ function getAvailableBackgrounds(age, gender) {
 function buildGearItem(src, isArmor) {
   if (!src) return null;
   const q = GEAR_QUALITIES[Math.max(0, Math.min(src.tier, GEAR_QUALITIES.length - 1))];
+  const weaponBonus = typeof src.weaponBonus === 'number' ? src.weaponBonus : q.weaponBonus;
+  const armorLevel = typeof src.armorLevel === 'number' ? src.armorLevel : q.armorLevel;
   return {
     name:        src.name,
     quality:     q.label,
     tier:        q.tier,
     levelReq:    q.levelReq,
-    weaponBonus: isArmor ? 0 : q.weaponBonus,
-    armorLevel:  isArmor ? q.armorLevel : 0,
+    weaponBonus: isArmor ? 0 : weaponBonus,
+    armorLevel:  isArmor ? armorLevel : 0,
     statMods:    src.statMods  || null,
     isCrafted:   src.isCrafted || false,
     sellBonus:   src.sellBonus || 0,
