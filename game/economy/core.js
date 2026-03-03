@@ -237,6 +237,65 @@ const ARMOR_KEYWORDS = [
   'pauldrons', 'vambraces', 'chestplate', 'body armor'
 ];
 
+function hashString(input) {
+  let hash = 2166136261;
+  for (let index = 0; index < input.length; index++) {
+    hash ^= input.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+function createRng(seed) {
+  let state = seed >>> 0;
+  return function next() {
+    state = (Math.imul(1664525, state) + 1013904223) >>> 0;
+    return state / 4294967296;
+  };
+}
+
+function getTierForLevel(playerLevel) {
+  const lvl = Math.max(1, Math.floor(playerLevel || 1));
+  let bestTier = 0;
+  for (const quality of GEAR_QUALITIES) {
+    if (lvl >= quality.levelReq) bestTier = quality.tier;
+  }
+  return bestTier;
+}
+
+function buildProceduralStatMods(itemName, slot, tier, playerLevel) {
+  const lvl = Math.max(1, Math.floor(playerLevel || 1));
+  if (lvl < 8) return null;
+
+  let points = 1;
+  if (lvl >= 20) points++;
+  if (lvl >= 35) points++;
+  if (lvl >= 55) points++;
+  if (lvl >= 75) points++;
+  if (lvl >= 90) points++;
+  points += Math.floor(Math.max(0, tier || 0) / 3);
+  points = Math.min(points, 8);
+
+  const pool = slot === 'armor'
+    ? ['vit', 'str', 'dex', 'wis']
+    : ['str', 'dex', 'vit', 'int'];
+
+  const rng = createRng(hashString(`${itemName}|${slot}|${tier}|${Math.floor(lvl / 5)}`));
+  const first = pool[Math.floor(rng() * pool.length)];
+  let second = pool[Math.floor(rng() * pool.length)];
+  if (second === first) {
+    const idx = (pool.indexOf(first) + 1) % pool.length;
+    second = pool[idx];
+  }
+
+  const primary = Math.max(1, Math.ceil(points * 0.65));
+  const secondary = Math.max(0, points - primary);
+
+  const mods = { [first]: primary };
+  if (secondary > 0) mods[second] = secondary;
+  return mods;
+}
+
 function classifyEquipSlot(name, explicitType = null) {
   const lowered = (name || '').toLowerCase();
 
@@ -393,8 +452,11 @@ function processEquipCommand(state, equipIntent) {
         const isWeaponItem = WEAPON_KEYWORDS.some(kw => loweredItemName.includes(kw));
         const isArmorItem = ARMOR_KEYWORDS.some(kw => loweredItemName.includes(kw));
         
-        // Determine quality tier (default to Common/tier 1 for inventory items)
-        const baseTier = (typeof invItem === 'object' && invItem.tier !== undefined) ? invItem.tier : 1;
+        const playerLevel = getPlayerLevel(state.totalXP || 0);
+        // Determine quality tier (defaults to level-scaled tier for plain inventory strings)
+        const baseTier = (typeof invItem === 'object' && invItem.tier !== undefined)
+          ? invItem.tier
+          : getTierForLevel(playerLevel);
         const targetSlot = (itemType === 'armor' || (itemType !== 'weapon' && isArmorItem)) ? 'armor' : 'weapon';
         const source = {
           name: invItemName,
@@ -404,6 +466,10 @@ function processEquipCommand(state, equipIntent) {
           sellBonus: (typeof invItem === 'object' && invItem.sellBonus) ? invItem.sellBonus : 0,
           craftedBy: (typeof invItem === 'object' && invItem.craftedBy) ? invItem.craftedBy : null
         };
+
+        if (!source.statMods) {
+          source.statMods = buildProceduralStatMods(invItemName, targetSlot, source.tier, playerLevel);
+        }
 
         if (!isWeaponItem && !isArmorItem && targetSlot === 'weapon') {
           source.tier = 0;

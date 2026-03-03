@@ -3,6 +3,10 @@
 const { buildOpeningHint } = require('./utils');
 const { resolveCorpseLoot } = require('../../../game/loot');
 
+function stripTrailingPunctuation(value) {
+  return String(value || '').trim().replace(/[.!?]+$/g, '').trim();
+}
+
 module.exports = function registerGameplayRoutes(app, deps) {
   const {
     db,
@@ -54,6 +58,9 @@ module.exports = function registerGameplayRoutes(app, deps) {
     getCompanionsDisplay,
     buildBackpackSummary,
     addItem,
+    removeItem,
+    findInventoryItem,
+    hasItem,
     processNarrative,
     buildRightPanelData,
     detectBoardIntent,
@@ -295,7 +302,7 @@ module.exports = function registerGameplayRoutes(app, deps) {
       }
 
       if (t.startsWith('set companion ') || t.startsWith('add companion ')) {
-        const name = cleanInput.replace(/^(set|add) companion\s+/i, '').trim();
+        const name = stripTrailingPunctuation(cleanInput.replace(/^(set|add) companion\s+/i, '').trim());
         if (!name) {
           return res.json({ success: true, output: 'Specify a companion name. Example: set companion Elara', isCommand: true });
         }
@@ -376,7 +383,102 @@ module.exports = function registerGameplayRoutes(app, deps) {
         return res.json({ success: true, output: result.message, isCommand: true });
       }
 
-      if ((t.includes('loot') || t.includes('search') || t.includes('take')) && (t.includes('corpse') || t.includes('body'))) {
+      const corpseLootIntent = (t.includes('loot') || t.includes('search') || t.includes('take'))
+        && /(corpse|body|bandit|guard|cultist|raider|thug|enemy)/i.test(t);
+
+      function normalizeCommandEntity(value) {
+        return stripTrailingPunctuation(value);
+      }
+
+      if (/^(show|inspect|examine)\s+(?:the\s+)?(.+)/i.test(cleanInput)) {
+        const match = cleanInput.match(/^(show|inspect|examine)\s+(?:the\s+)?(.+)/i);
+        const itemName = normalizeCommandEntity(match && match[2] ? match[2] : '');
+        if (itemName && hasItem(state, itemName)) {
+          return res.json({ success: true, output: `In your backpack: ${itemName}.`, economy: buildEconomyPanelData(state), isCommand: true, commandType: 'inventory' });
+        }
+        return res.json({ success: true, output: itemName ? `You do not have "${itemName}" in your backpack.` : 'Show what item?', isCommand: true, commandType: 'inventory' });
+      }
+
+      if (/^(drop|discard|throw away|remove)\s+(?:the\s+)?(.+)/i.test(cleanInput)) {
+        const match = cleanInput.match(/^(drop|discard|throw away|remove)\s+(?:the\s+)?(.+)/i);
+        const itemName = normalizeCommandEntity(match && match[2] ? match[2] : '');
+        if (!itemName) {
+          return res.json({ success: true, output: 'Drop what item?', isCommand: true, commandType: 'inventory' });
+        }
+        const removed = removeItem(state, itemName);
+        if (!removed) {
+          return res.json({ success: true, output: `You do not have "${itemName}" in your backpack.`, economy: buildEconomyPanelData(state), isCommand: true, commandType: 'inventory' });
+        }
+        await persistSession(req.sessionId);
+        return res.json({ success: true, output: `Dropped from backpack: ${itemName}.`, economy: buildEconomyPanelData(state), character: buildCharacterPanelData(state), isCommand: true, commandType: 'inventory' });
+      }
+
+      if (/^sell\s+(?:the\s+)?(.+)/i.test(cleanInput)) {
+        const match = cleanInput.match(/^sell\s+(?:the\s+)?(.+)/i);
+        const itemName = normalizeCommandEntity(match && match[1] ? match[1] : '');
+        if (!itemName) {
+          return res.json({ success: true, output: 'Sell what item?', isCommand: true, commandType: 'inventory' });
+        }
+
+        function computeSellValue(item) {
+          if (item && typeof item === 'object') {
+            const tier = Math.max(0, item.tier || 0);
+            const weaponScore = Math.max(0, item.weaponBonus || 0) * 15;
+            const armorScore = Math.max(0, item.armorLevel || 0) * 18;
+            const modScore = item.statMods
+              ? Object.values(item.statMods).reduce((sum, value) => sum + Math.max(0, Number(value) || 0), 0) * 20
+              : 0;
+            return Math.max(10, 15 + tier * 12 + weaponScore + armorScore + modScore);
+          }
+
+          const name = String(item || '').toLowerCase();
+          if (/sword|blade|axe|mace|hammer|spear|staff|bow|weapon|knife|dagger/.test(name)) return 80;
+          if (/armor|armour|leather|mail|plate|tunic|tabard|boots|shield|helm/.test(name)) return 60;
+          if (/pouch|coin|ring|gem|relic|focus|charm/.test(name)) return 100;
+          return 20;
+        }
+
+        let soldName = null;
+        let soldValue = 0;
+
+        const invItem = findInventoryItem(state, itemName);
+        if (invItem) {
+          soldName = typeof invItem === 'string' ? invItem : invItem.name;
+          soldValue = computeSellValue(invItem);
+          removeItem(state, soldName);
+        } else {
+          const equippedWeapon = state.gear && state.gear.weapon;
+          const equippedArmor = state.gear && state.gear.armor;
+
+          if (equippedWeapon && equippedWeapon.name.toLowerCase().includes(itemName.toLowerCase())) {
+            soldName = equippedWeapon.name;
+            soldValue = computeSellValue(equippedWeapon);
+            state.gear.weapon = null;
+          } else if (equippedArmor && equippedArmor.name.toLowerCase().includes(itemName.toLowerCase())) {
+            soldName = equippedArmor.name;
+            soldValue = computeSellValue(equippedArmor);
+            state.gear.armor = null;
+          }
+        }
+
+        if (!soldName) {
+          return res.json({ success: true, output: `You do not have "${itemName}" in your backpack or equipped gear.`, economy: buildEconomyPanelData(state), isCommand: true, commandType: 'inventory' });
+        }
+
+        addCoin(state, soldValue);
+
+        await persistSession(req.sessionId);
+        return res.json({
+          success: true,
+          output: `Sold ${soldName} for ${formatCoin(soldValue)}.`,
+          economy: buildEconomyPanelData(state),
+          character: buildCharacterPanelData(state),
+          isCommand: true,
+          commandType: 'inventory'
+        });
+      }
+
+      if (corpseLootIntent) {
         if (state.inCombat && state.currentEnemy && state.currentEnemy.currentHP > 0) {
           return res.json({ success: true, output: 'You cannot loot a body while still in active combat.', isCommand: true, commandType: 'loot' });
         }
@@ -452,6 +554,10 @@ module.exports = function registerGameplayRoutes(app, deps) {
       const takenItems = [];
       let coinGained = 0;
 
+      function isInvalidLootName(itemName) {
+        return /^(bandit|guard|cultist|raider|thug|enemy|corpse|body)$/i.test((itemName || '').trim());
+      }
+
       function parseCoinLoot(itemName) {
         const lower = itemName.toLowerCase();
         const isCoinLike = /(coin|coins|pouch|silver|gold|copper)/i.test(lower);
@@ -487,6 +593,8 @@ module.exports = function registerGameplayRoutes(app, deps) {
           for (const phrase of phraseParts) {
             const itemName = phrase.replace(/^(a|an|the)\s+/i, '').trim();
             if (itemName.length > 0 && itemName.length < 50) {
+              if (isInvalidLootName(itemName)) continue;
+
               const coinFromItem = parseCoinLoot(itemName);
               if (coinFromItem > 0) {
                 addCoin(state, coinFromItem);
@@ -561,15 +669,20 @@ module.exports = function registerGameplayRoutes(app, deps) {
 
       const companionIntent = detectCompanionIntent(cleanInput, state);
       if (companionIntent && companionIntent.npcName) {
+        const normalizedNpcName = stripTrailingPunctuation(companionIntent.npcName);
+        if (!normalizedNpcName) {
+          return res.json({ success: true, output: 'Specify which companion you mean.', isCommand: true, commandType: 'companion' });
+        }
+
         if (companionIntent.intent === 'join') {
-          const npcKey = companionIntent.npcName.toLowerCase();
+          const npcKey = normalizedNpcName.toLowerCase();
           const rapport = state.npcRelationships && state.npcRelationships[npcKey]
             ? state.npcRelationships[npcKey].rapport || 0
             : 0;
 
           if (rapport >= 30) {
             const result = addCompanion(state, {
-              name: companionIntent.npcName.charAt(0).toUpperCase() + companionIntent.npcName.slice(1),
+              name: normalizedNpcName.charAt(0).toUpperCase() + normalizedNpcName.slice(1),
               description: `A companion met in your travels.`,
               role: 'ally'
             });
@@ -581,10 +694,10 @@ module.exports = function registerGameplayRoutes(app, deps) {
               state.pendingContextHint = `[COMPANION LIMIT — ${result.message}]`;
             }
           } else {
-            state.pendingContextHint = `[COMPANION DECLINED — Not enough rapport (${rapport}/30) with ${companionIntent.npcName}. They are not ready to commit to traveling together. Narrate a polite decline.]`;
+            state.pendingContextHint = `[COMPANION DECLINED — Not enough rapport (${rapport}/30) with ${normalizedNpcName}. They are not ready to commit to traveling together. Narrate a polite decline.]`;
           }
         } else if (companionIntent.intent === 'leave') {
-          const result = removeCompanion(state, companionIntent.npcName);
+          const result = removeCompanion(state, normalizedNpcName);
           if (result.success) {
             events.push({ type: 'companionLeft', companion: result.companion });
             state.pendingContextHint = `[COMPANION LEFT — ${result.companion.name} has parted ways with the player. Narrate this farewell naturally.]`;
@@ -692,20 +805,22 @@ module.exports = function registerGameplayRoutes(app, deps) {
         });
       }
 
-      if (!state.inCombat && detectBoardIntent(cleanInput)) {
+      const normalizedBoardInput = stripTrailingPunctuation(cleanInput);
+
+      if (!state.inCombat && detectBoardIntent(normalizedBoardInput)) {
         state.pendingContextHint = buildBoardInspectHint(state);
       }
 
-      if (!state.inCombat && detectQuestAccept(cleanInput) && state.boardQuests && state.boardQuests.length > 0) {
-        const numMatch = cleanInput.match(/\b([1-9])\b/);
+      if (!state.inCombat && detectQuestAccept(normalizedBoardInput) && state.boardQuests && state.boardQuests.length > 0) {
+        const numMatch = normalizedBoardInput.match(/\b([1-9]\d*)\b/);
         if (numMatch) {
-          const result = acceptQuestByIndex(state, parseInt(numMatch[1]));
+          const result = acceptQuestByIndex(state, parseInt(numMatch[1], 10));
           if (result.success) {
             events.push({ type: 'questAccepted', quest: result.quest });
             state.pendingContextHint = result.hint || `[QUEST ACCEPTED: "${result.quest.label}" — narrate naturally.]`;
           }
         } else {
-          const t2 = cleanInput.toLowerCase();
+          const t2 = normalizedBoardInput.toLowerCase();
           const quests = getBoardQuests(state);
           for (let i = 0; i < quests.length; i++) {
             const q = quests[i];
@@ -953,16 +1068,17 @@ module.exports = function registerGameplayRoutes(app, deps) {
 
       const state = req.session.state;
       const cleanInput = input.trim();
+      const normalizedEditInput = stripTrailingPunctuation(cleanInput);
       const events = [];
 
       if (isInCreation(state)) {
         return res.status(400).json({ error: 'Cannot edit during character creation.' });
       }
 
-      if (state.inCombat && state.currentEnemy && !detectFleeIntent(cleanInput)) {
-        const combatResult = applyCombatRound(state, cleanInput);
+      if (state.inCombat && state.currentEnemy && !detectFleeIntent(normalizedEditInput)) {
+        const combatResult = applyCombatRound(state, normalizedEditInput);
         state.pendingContextHint = combatResult.hint;
-        updateActionProgress(state, cleanInput);
+        updateActionProgress(state, normalizedEditInput);
 
         if (combatResult.enemyKilled && state.pendingEnemyKill) {
           events.push({ type: 'enemyKill', label: state.pendingEnemyKill.label, xp: state.pendingEnemyKill.xp });

@@ -5,7 +5,8 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node --watch server.js"
+    "dev": "node --watch server.js",
+    "audit:enemies": "node -e \"const { ENEMIES } = require('./game/constants/data'); const regions=['thornwick','ironport','ashwood','dustfall','sunkenfen','blackstone','frozennorth','veldrath']; const added={}; for (const r of regions) added[r]=Object.keys(ENEMIES).filter(k=>k.startsWith(r+'_')).length; console.log(JSON.stringify({ totalEnemies: Object.keys(ENEMIES).length, addedPerRegion: added }, null, 2));\""
   },
   "keywords": [],
   "author": "",

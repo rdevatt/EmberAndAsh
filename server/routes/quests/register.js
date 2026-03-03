@@ -1,5 +1,9 @@
 'use strict';
 
+function stripTrailingPunctuation(value) {
+  return String(value || '').trim().replace(/[.!?]+$/g, '').trim();
+}
+
 module.exports = function registerQuestRoutes(app, deps) {
   const {
     requireSession,
@@ -23,7 +27,11 @@ module.exports = function registerQuestRoutes(app, deps) {
   app.post('/api/quests/accept', requireSession, (req, res) => {
     const state = req.session.state;
     const { questIndex, questId } = req.body;
-    const result = questId ? acceptQuest(state, questId) : acceptQuestByIndex(state, parseInt(questIndex));
+    const normalizedQuestId = stripTrailingPunctuation(questId);
+    const indexText = stripTrailingPunctuation(questIndex);
+    const indexMatch = indexText.match(/(\d+)/);
+    const parsedIndex = indexMatch ? parseInt(indexMatch[1], 10) : NaN;
+    const result = normalizedQuestId ? acceptQuest(state, normalizedQuestId) : acceptQuestByIndex(state, parsedIndex);
     setSession(req.sessionId, req.session);
     res.json({ success: result.success, message: result.message, quest: result.quest, board: buildBoardDisplayData(state) });
   });

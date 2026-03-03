@@ -1,5 +1,9 @@
 'use strict';
 
+function stripTrailingPunctuation(value) {
+  return String(value || '').trim().replace(/[.!?]+$/g, '').trim();
+}
+
 module.exports = function registerSaveRoutes(app, deps) {
   const {
     db,
@@ -116,11 +120,11 @@ module.exports = function registerSaveRoutes(app, deps) {
   });
 
   app.post('/api/game/equip-crafted', requireSession, (req, res) => {
-    const { itemName } = req.body;
-    if (!itemName) return res.status(400).json({ error: 'itemName required.' });
+    const normalizedItemName = stripTrailingPunctuation(req.body.itemName);
+    if (!normalizedItemName) return res.status(400).json({ error: 'itemName required.' });
 
     const state = req.session.state;
-    const result = equipCraftedItem(state, itemName);
+    const result = equipCraftedItem(state, normalizedItemName);
     setSession(req.sessionId, req.session);
 
     res.json({
@@ -132,11 +136,11 @@ module.exports = function registerSaveRoutes(app, deps) {
   });
 
   app.post('/api/game/sell-crafted', requireSession, (req, res) => {
-    const { itemName } = req.body;
-    if (!itemName) return res.status(400).json({ error: 'itemName required.' });
+    const normalizedItemName = stripTrailingPunctuation(req.body.itemName);
+    if (!normalizedItemName) return res.status(400).json({ error: 'itemName required.' });
 
     const state = req.session.state;
-    const result = sellCraftedItem(state, itemName);
+    const result = sellCraftedItem(state, normalizedItemName);
     setSession(req.sessionId, req.session);
 
     res.json({
