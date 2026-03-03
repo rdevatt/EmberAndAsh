@@ -13,7 +13,7 @@ const cors     = require('cors');
 const path     = require('path');
 const { v4: uuidv4 } = require('uuid');
 const bcrypt   = require('bcryptjs');
-
+const { REGIONS } = require('./game/constants');
 // Game modules
 const { createFreshState, validateState, isInCreation, isReady, isDead } = require('./game/state');
 const { processCreationInput, buildCharacterPanelData, getPlayerLevel, spendFreePoint, recalculateResources } = require('./game/character');
@@ -535,7 +535,7 @@ app.post('/api/action', requireSession, async (req, res) => {
     return res.status(400).json({ error: 'Input required.' });
   }
 
-  const state      = req.session.state;
+   
   const cleanInput = input.trim();
   const events     = [];   // Collects all game events this turn
 
@@ -669,7 +669,138 @@ app.post('/api/action', requireSession, async (req, res) => {
     // Commands that show UI panels without advancing the story
     // --------------------------------------------------------
     const t = cleanInput.toLowerCase().trim();
+// Rest / recover
+    if (['rest', 'sleep', 'recover', 'take a break', 'catch my breath', 'sit down', 'rest up'].includes(t) || 
+        t.startsWith('rest ') || t.includes('rest for') || t.includes('take a rest')) {
+      
+      // Can't rest in combat
+      if (state.inCombat) {
+        return res.json({
+          success: true,
+          output: "You can't rest while in combat!",
+          isCommand: true
+        });
+      }
 
+      // Calculate recovery amounts
+      const staminaRecovery = Math.floor(state.maxStamina * 0.5);  // 50% stamina
+      const hpRecovery = Math.floor(state.maxHp * 0.25);          // 25% HP
+      const manaRecovery = Math.floor(state.maxMana * 0.25);      // 25% mana
+
+      const oldStamina = state.stamina;
+      const oldHp = state.hp;
+      const oldMana = state.mana;
+
+      state.stamina = Math.min(state.maxStamina, state.stamina + staminaRecovery);
+      state.hp = Math.min(state.maxHp, state.hp + hpRecovery);
+      state.mana = Math.min(state.maxMana, state.mana + manaRecovery);
+
+      const staminaGained = state.stamina - oldStamina;
+      const hpGained = state.hp - oldHp;
+      const manaGained = state.mana - oldMana;
+
+      await persistSession(req.sessionId);
+
+      return res.json({
+        success: true,
+        output: `You take a moment to rest and recover.\n\n` +
+                `Stamina: +${staminaGained} (${state.stamina}/${state.maxStamina})\n` +
+                `HP: +${hpGained} (${state.hp}/${state.maxHp})\n` +
+                `Mana: +${manaGained} (${state.mana}/${state.maxMana})`,
+        character: buildCharacterPanelData(state),
+        isCommand: true,
+        commandType: 'rest'
+      });
+    }
+    // Long rest / full recovery (with risk)
+    if (['long rest', 'sleep', 'make camp', 'set up camp', 'camp', 'full rest', 'rest fully'].includes(t) ||
+        t.includes('long rest') || t.includes('make camp') || t.includes('set up camp')) {
+      
+      // Can't rest in combat
+      if (state.inCombat) {
+        return res.json({
+          success: true,
+          output: "You can't rest while in combat!",
+          isCommand: true
+        });
+      }
+
+     // Check if in a safe location (no ambush possible)
+      // Check currentLocation, sceneContext, storySummary, AND player input
+      const safeKeywords = ['inn', 'tavern', 'temple', 'church', 'home', 'house', 'bedroom', 
+                            'sanctuary', 'safehouse', 'barracks', 'guild', 'shelter', 'cabin',
+                            'lodge', 'hostel', 'room', 'quarters', 'bed', 'rented', 'paid for'];
+      const currentLoc = (state.currentLocation || '').toLowerCase();
+      const recentContext = (state.sceneContext || '').toLowerCase();
+      const lastStory = (state.storySummary || '').toLowerCase();
+      const playerInput = cleanInput.toLowerCase();
+      
+      const isSafe = safeKeywords.some(loc => 
+        currentLoc.includes(loc) || 
+        recentContext.includes(loc) ||
+        lastStory.includes(loc) ||
+        playerInput.includes(loc)
+      );
+      // Chance of ambush during long rest (15% base, modified by region danger)
+      // Safe locations = no ambush
+      let ambushed = false;
+      if (!isSafe) {
+        const region = REGIONS[state.character.region];
+        const dangerMod = region && region.levelRange ? (region.levelRange[1] / 100) : 0;
+        const ambushChance = 0.15 + dangerMod;
+        ambushed = Math.random() < ambushChance;
+      }
+
+      if (ambushed) {
+        // Spawn an enemy - they caught you sleeping
+        const playerLevel = getPlayerLevel(state.totalXP || 0);
+        const enemy = spawnEnemy(state.character.region, playerLevel);
+        
+        if (enemy) {
+          state.inCombat = true;
+          state.currentEnemy = enemy;
+          
+          // Partial recovery before ambush (you got some rest)
+          state.stamina = Math.min(state.maxStamina, state.stamina + Math.floor(state.maxStamina * 0.3));
+          state.hp = Math.min(state.maxHp, state.hp + Math.floor(state.maxHp * 0.15));
+          state.mana = Math.min(state.maxMana, state.mana + Math.floor(state.maxMana * 0.15));
+
+          await persistSession(req.sessionId);
+
+          return res.json({
+            success: true,
+            output: `You settle down to rest, but your sleep is cut short—\n\n` +
+                    `A ${enemy.label} has found you!\n\n` +
+                    `You scramble to your feet, still groggy from interrupted sleep.`,
+            character: buildCharacterPanelData(state),
+            rightPanel: buildRightPanelData(state),
+            isCommand: false  // Let the game flow continue with combat
+          });
+        }
+      }
+
+      // Successful long rest - full recovery
+      state.stamina = state.maxStamina;
+      state.hp = state.maxHp;
+      state.mana = state.maxMana;
+
+      await persistSession(req.sessionId);
+
+      const restMessage = isSafe
+        ? `You settle in for a peaceful night's rest.\n\nThe ${currentLoc || 'shelter'} keeps you safe through the night.`
+        : `You find a spot to rest, keeping one eye open.\n\nHours pass. You wake feeling restored.`;
+
+      return res.json({
+        success: true,
+        output: `${restMessage}\n\n` +
+                `Stamina: ${state.stamina}/${state.maxStamina} (full)\n` +
+                `HP: ${state.hp}/${state.maxHp} (full)\n` +
+                `Mana: ${state.mana}/${state.maxMana} (full)`,
+        character: buildCharacterPanelData(state),
+        isCommand: true,
+        commandType: 'longRest'
+      });
+    }
     // Check stats
     if (['check stats', 'status', 'character sheet', 'view stats', 'my stats'].includes(t)) {
       const panel = buildCharacterPanelData(state);
