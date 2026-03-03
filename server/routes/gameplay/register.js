@@ -1,6 +1,7 @@
 'use strict';
 
 const { buildOpeningHint } = require('./utils');
+const { resolveCorpseLoot } = require('../../../game/loot');
 
 module.exports = function registerGameplayRoutes(app, deps) {
   const {
@@ -34,6 +35,7 @@ module.exports = function registerGameplayRoutes(app, deps) {
     processProfessionOfferResponse,
     buildProgressionPanelData,
     detectCoinIntent,
+    addCoin,
     processPendingCoinEvents,
     tryOpenShop,
     tryCloseShop,
@@ -374,27 +376,157 @@ module.exports = function registerGameplayRoutes(app, deps) {
         return res.json({ success: true, output: result.message, isCommand: true });
       }
 
+      if ((t.includes('loot') || t.includes('search') || t.includes('take')) && (t.includes('corpse') || t.includes('body'))) {
+        if (state.inCombat && state.currentEnemy && state.currentEnemy.currentHP > 0) {
+          return res.json({ success: true, output: 'You cannot loot a body while still in active combat.', isCommand: true, commandType: 'loot' });
+        }
+
+        const lootState = state.lastDefeatedEnemyLoot;
+        if (!lootState || !lootState.label) {
+          return res.json({ success: true, output: 'There is no recently defeated body to loot.', isCommand: true, commandType: 'loot' });
+        }
+
+        if (lootState.looted) {
+          return res.json({ success: true, output: 'You already looted that body.', isCommand: true, commandType: 'loot' });
+        }
+
+        const resolvedLoot = resolveCorpseLoot(lootState.label);
+        const items = resolvedLoot.items;
+        const coinReward = resolvedLoot.coinReward;
+
+        for (const item of items) addItem(state, item);
+        if (coinReward > 0) addCoin(state, coinReward);
+
+        state.lastDefeatedEnemyLoot.looted = true;
+        state.pendingContextHint = `[LOOT ACQUIRED — player looted ${lootState.label}: ${items.join(', ')}${coinReward > 0 ? ` and ${formatCoin(coinReward)}` : ''}. Narrate this naturally.]`;
+
+        await persistSession(req.sessionId);
+        return res.json({
+          success: true,
+          output: `Looted ${lootState.label}: ${items.join(', ')}.${coinReward > 0 ? ` Added to coin pouch: ${formatCoin(coinReward)}.` : ''}`,
+          economy: buildEconomyPanelData(state),
+          character: buildCharacterPanelData(state),
+          isCommand: true,
+          commandType: 'loot'
+        });
+      }
+
+      if ((/\bput\s+all\b/.test(t) || /\bstash\b/.test(t) || /\bstore\b/.test(t)) && /\b(backpack|pack|bag)\b/.test(t)) {
+        const moved = [];
+
+        if (state.gear && state.gear.weapon) {
+          moved.push(state.gear.weapon.name);
+          addItem(state, state.gear.weapon);
+          state.gear.weapon = null;
+        }
+
+        if (state.gear && state.gear.armor) {
+          moved.push(state.gear.armor.name);
+          addItem(state, state.gear.armor);
+          state.gear.armor = null;
+        }
+
+        await persistSession(req.sessionId);
+
+        return res.json({
+          success: true,
+          output: moved.length
+            ? `Moved to backpack: ${moved.join(', ')}.`
+            : 'Nothing equipped to move into your backpack.',
+          economy: buildEconomyPanelData(state),
+          character: buildCharacterPanelData(state),
+          isCommand: true,
+          commandType: 'backpackStash'
+        });
+      }
+
       const takePatterns = [
-        /^take (?:the )?(.+?)(?:\s+from.+)?$/i,
-        /^loot (?:the )?(.+)/i,
-        /^pick up (?:the )?(.+)/i,
-        /^grab (?:the )?(.+)/i
+        /^(?:take|loot|pick up|grab)\s+(?:the\s+)?(.+?)(?:\s+from.+)?$/i
       ];
 
-      for (const pattern of takePatterns) {
-        const match = cleanInput.match(pattern);
-        if (match && match[1]) {
-          let itemName = match[1].trim()
-            .replace(/\s*(from|off of|off)\s+.*/i, '')
-            .replace(/^(a|an|the)\s+/i, '');
+      const maybeTakeSegments = cleanInput
+        .split(',')
+        .map(s => s.trim())
+        .filter(Boolean);
 
-          if (itemName.length > 0 && itemName.length < 50) {
-            addItem(state, itemName);
-            events.push({ type: 'itemTaken', item: itemName, message: `You picked up: ${itemName}` });
-            state.pendingContextHint = `[ITEM ACQUIRED — player now has "${itemName}" in their inventory. Narrate this naturally.]`;
+      const takenItems = [];
+      let coinGained = 0;
+
+      function parseCoinLoot(itemName) {
+        const lower = itemName.toLowerCase();
+        const isCoinLike = /(coin|coins|pouch|silver|gold|copper)/i.test(lower);
+        if (!isCoinLike) return 0;
+
+        let total = 0;
+        const goldMatch = lower.match(/(\d+)\s*gold/);
+        const silverMatch = lower.match(/(\d+)\s*silver/);
+        const copperMatch = lower.match(/(\d+)\s*copper/);
+
+        if (goldMatch) total += parseInt(goldMatch[1], 10) * 10000;
+        if (silverMatch) total += parseInt(silverMatch[1], 10) * 100;
+        if (copperMatch) total += parseInt(copperMatch[1], 10);
+
+        if (total > 0) return total;
+
+        if (/gold/.test(lower)) return 10000;
+        if (/silver/.test(lower)) return 100;
+        if (/copper/.test(lower)) return 1;
+
+        if (/pouch|coins?/.test(lower)) return 50;
+        return 0;
+      }
+
+      for (const segment of maybeTakeSegments) {
+        for (const pattern of takePatterns) {
+          const match = segment.match(pattern);
+          if (!match || !match[1]) continue;
+
+          const raw = match[1].trim().replace(/\s*(from|off of|off)\s+.*/i, '');
+          const phraseParts = raw.split(/\s+and\s+/i).map(p => p.trim()).filter(Boolean);
+
+          for (const phrase of phraseParts) {
+            const itemName = phrase.replace(/^(a|an|the)\s+/i, '').trim();
+            if (itemName.length > 0 && itemName.length < 50) {
+              const coinFromItem = parseCoinLoot(itemName);
+              if (coinFromItem > 0) {
+                addCoin(state, coinFromItem);
+                coinGained += coinFromItem;
+                events.push({ type: 'coinEarned', amount: coinFromItem, message: `You collected ${formatCoin(coinFromItem)}.` });
+              } else {
+                addItem(state, itemName);
+                takenItems.push(itemName);
+                events.push({ type: 'itemTaken', item: itemName, message: `You picked up: ${itemName}` });
+              }
+            }
           }
+
           break;
         }
+      }
+
+      if (takenItems.length > 0 || coinGained > 0) {
+        const hints = [];
+        if (takenItems.length > 0) {
+          hints.push(`player now has ${takenItems.map(i => `"${i}"`).join(', ')} in their inventory`);
+        }
+        if (coinGained > 0) {
+          hints.push(`player gained ${formatCoin(coinGained)}`);
+        }
+        state.pendingContextHint = `[ITEM ACQUIRED — ${hints.join(' and ')}. Narrate this naturally.]`;
+        await persistSession(req.sessionId);
+
+        const outputParts = [];
+        if (takenItems.length > 0) outputParts.push(`Added to backpack: ${takenItems.join(', ')}.`);
+        if (coinGained > 0) outputParts.push(`Added to coin pouch: ${formatCoin(coinGained)}.`);
+
+        return res.json({
+          success: true,
+          output: outputParts.join(' '),
+          economy: buildEconomyPanelData(state),
+          character: buildCharacterPanelData(state),
+          isCommand: true,
+          commandType: 'loot'
+        });
       }
 
       const equipIntent = detectEquipIntent(cleanInput);
@@ -510,6 +642,12 @@ module.exports = function registerGameplayRoutes(app, deps) {
             label: state.pendingEnemyKill ? state.pendingEnemyKill.label : 'Enemy',
             xp:    state.pendingEnemyKill ? state.pendingEnemyKill.xp    : 0
           });
+
+          state.lastDefeatedEnemyLoot = {
+            label: state.pendingEnemyKill ? state.pendingEnemyKill.label : 'Enemy',
+            looted: false,
+            ts: Date.now()
+          };
 
           if (state.pendingEnemyKill) {
             const { getPlayerLevel: gpl } = require('../../../game/character');

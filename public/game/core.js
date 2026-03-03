@@ -359,19 +359,6 @@ async function _doNormalAction(input) {
       appendStory(null, data.output, false);
     }
     return;
-
-    const commandsList = document.getElementById('commands-list');
-    if (commandsList) {
-      commandsList.addEventListener('click', (e) => {
-        const item = e.target.closest('li');
-        if (!item) return;
-        const commandText = item.textContent.trim();
-        if (!commandText) return;
-        el.playerInput.value = commandText;
-        updateCharCount();
-        el.playerInput.focus();
-      });
-    }
   }
 
   // Normal action response

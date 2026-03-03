@@ -20,7 +20,7 @@ const { processCreationInput, buildCharacterPanelData, getPlayerLevel, spendFree
 const { detectCombatIntent, detectFleeIntent, isPassiveAction, applyCombatRound, applyFleeAttempt, checkAmbientEncounter, spawnEnemy, buildEnemyInspectData, updateActionProgress, buildEnemyPanelData } = require('../game/combat');
 const { resolveProfessionTask, processPendingProgressEvents, processClassOfferResponse, processProfessionOfferResponse, buildProgressionPanelData } = require('../game/professions');
 const { 
-  detectCoinIntent, processPendingCoinEvents, tryOpenShop, tryCloseShop, checkShopCustomerEvent, 
+  addCoin, detectCoinIntent, processPendingCoinEvents, tryOpenShop, tryCloseShop, checkShopCustomerEvent, 
   recoverGear, saveGearAtDeath, buildEconomyPanelData, checkIntimacyAvailable, changeReputation, 
   formatCoin, equipCraftedItem, sellCraftedItem,
   // NEW: Equipment and companion functions
@@ -218,6 +218,7 @@ registerGameplayRoutes(app, {
   processProfessionOfferResponse,
   buildProgressionPanelData,
   detectCoinIntent,
+  addCoin,
   processPendingCoinEvents,
   tryOpenShop,
   tryCloseShop,
