@@ -17,10 +17,14 @@ const { serializeState, deserializeState } = require('../game/state');
 // =============================================
 // DATABASE SETUP
 // =============================================
-const DB_DIR  = path.join(__dirname, '..', 'data');
+// Use Railway volume (/data) if available, otherwise local ./data directory
+const DB_DIR  = fs.existsSync('/data') ? '/data' : path.join(__dirname, '..', 'data');
 const DB_PATH = path.join(DB_DIR, 'emberandash.db');
 
-// Ensure data directory exists
+console.log(`[DB] Database directory: ${DB_DIR}`);
+console.log(`[DB] Database path: ${DB_PATH}`);
+
+// Ensure data directory exists (only needed for local dev, /data is created by Railway)
 if (!fs.existsSync(DB_DIR)) {
   fs.mkdirSync(DB_DIR, { recursive: true });
 }
