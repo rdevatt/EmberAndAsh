@@ -17,7 +17,7 @@ const bcrypt   = require('bcryptjs');
 // Game modules
 const { createFreshState, validateState, isInCreation, isReady, isDead } = require('./game/state');
 const { processCreationInput, buildCharacterPanelData, getPlayerLevel, spendFreePoint, recalculateResources } = require('./game/character');
-const { detectCombatIntent, detectFleeIntent, isPassiveAction, applyCombatRound, applyFleeAttempt, checkAmbientEncounter, spawnEnemy, buildEnemyInspectData, updateActionProgress } = require('./game/combat');
+const { detectCombatIntent, detectFleeIntent, isPassiveAction, applyCombatRound, applyFleeAttempt, checkAmbientEncounter, spawnEnemy, buildEnemyInspectData, updateActionProgress, buildEnemyPanelData } = require('./game/combat');
 const { resolveProfessionTask, processPendingProgressEvents, processClassOfferResponse, processProfessionOfferResponse, buildProgressionPanelData } = require('./game/professions');
 const { 
   detectCoinIntent, processPendingCoinEvents, tryOpenShop, tryCloseShop, checkShopCustomerEvent, 
@@ -539,6 +539,13 @@ app.post('/api/action', requireSession, async (req, res) => {
   const cleanInput = input.trim();
   const events     = [];   // Collects all game events this turn
 
+  // --------------------------------------------------------
+  // STATE SNAPSHOT — save state BEFORE processing for undo/retry
+  // --------------------------------------------------------
+  const { createStateSnapshot } = require('./state');
+  req.session.stateSnapshot = createStateSnapshot(state);
+  req.session.lastInput = cleanInput;
+
   try {
 
     // --------------------------------------------------------
@@ -928,6 +935,13 @@ app.post('/api/action', requireSession, async (req, res) => {
         ? (narrative.fullOutput || '') + combatResult.combatLog
         : narrative.fullOutput;
 
+      // Store for retry-narrative functionality
+      req.session.lastOutput = fullOutput;
+      req.session.lastCombatLog = combatResult.combatLog || null;
+      req.session.lastCombatResult = state.pendingCombatResult;
+      req.session.lastEvents = events;
+      setSession(req.sessionId, req.session);
+
       return res.json({
         success:     true,
         output:      fullOutput,
@@ -1112,6 +1126,12 @@ app.post('/api/action', requireSession, async (req, res) => {
     // --------------------------------------------------------
     await persistSession(req.sessionId);
 
+    // Store last output info for retry-narrative functionality
+    req.session.lastOutput = narrative.fullOutput;
+    req.session.lastCombatLog = null; // Non-combat actions
+    req.session.lastEvents = events;
+    setSession(req.sessionId, req.session);
+
     if (req.session.saveId) {
       db.appendStoryHistory(
         req.session.saveId,
@@ -1142,6 +1162,219 @@ app.post('/api/action', requireSession, async (req, res) => {
       error:  'Something went wrong. Your progress has been saved.',
       detail: err.message   // always expose — helps debug without crashing client
     });
+  }
+});
+
+
+// =============================================
+// RETRY NARRATIVE ONLY
+// Re-generates just the AI prose using the same mechanical outcome.
+// Does NOT re-roll combat dice or change game state.
+// =============================================
+app.post('/api/retry-narrative', requireSession, async (req, res) => {
+  const state = req.session.state;
+  const lastInput = req.session.lastInput;
+  
+  if (!lastInput) {
+    return res.status(400).json({ error: 'No previous action to retry.' });
+  }
+
+  try {
+    // Re-use the existing pendingContextHint or rebuild it from stored combat result
+    // The state already has the combat outcome applied — we just regenerate prose
+    const events = req.session.lastEvents || [];
+    
+    const narrative = await processNarrative(state, lastInput, events);
+    
+    // Re-append combat log if there was one
+    const fullOutput = req.session.lastCombatLog
+      ? (narrative.fullOutput || '') + req.session.lastCombatLog
+      : narrative.fullOutput;
+
+    // Update the stored last output
+    req.session.lastOutput = fullOutput;
+    setSession(req.sessionId, req.session);
+
+    return res.json({
+      success:     true,
+      output:      fullOutput,
+      character:   buildCharacterPanelData(state),
+      progression: buildProgressionPanelData(state),
+      economy:     buildEconomyPanelData(state),
+      rightPanel:  narrative.rightPanel,
+      board:       buildBoardDisplayData(state)
+    });
+
+  } catch (err) {
+    console.error('[RetryNarrative] Error:', err);
+    return res.status(500).json({ error: 'Failed to regenerate narrative.' });
+  }
+});
+
+
+// =============================================
+// UNDO LAST ACTION
+// Restores game state to before the last action was processed.
+// Allows the player to try a completely different action.
+// =============================================
+app.post('/api/undo', requireSession, async (req, res) => {
+  const { restoreStateSnapshot } = require('./state');
+  
+  if (!req.session.stateSnapshot) {
+    return res.status(400).json({ error: 'Nothing to undo.' });
+  }
+
+  try {
+    // Restore state from snapshot
+    restoreStateSnapshot(req.session.state, req.session.stateSnapshot);
+    
+    // Clear the snapshot (can only undo once per action)
+    const undoneInput = req.session.lastInput;
+    req.session.stateSnapshot = null;
+    req.session.lastInput = null;
+    req.session.lastOutput = null;
+    req.session.lastCombatLog = null;
+    req.session.lastCombatResult = null;
+    req.session.lastEvents = null;
+    
+    setSession(req.sessionId, req.session);
+    await persistSession(req.sessionId);
+
+    return res.json({
+      success:     true,
+      message:     'Action undone. You can try something different.',
+      undoneInput: undoneInput,
+      character:   buildCharacterPanelData(req.session.state),
+      progression: buildProgressionPanelData(req.session.state),
+      economy:     buildEconomyPanelData(req.session.state),
+      rightPanel:  {
+        inCombat:    req.session.state.inCombat || false,
+        enemy:       req.session.state.currentEnemy ? buildEnemyPanelData(req.session.state) : null,
+        sceneContext:req.session.state.sceneContext || 'neutral'
+      },
+      board:       buildBoardDisplayData(req.session.state)
+    });
+
+  } catch (err) {
+    console.error('[Undo] Error:', err);
+    return res.status(500).json({ error: 'Failed to undo action.' });
+  }
+});
+
+
+// =============================================
+// EDIT AND RESUBMIT
+// Restores state to before last action, then processes new input.
+// Combines undo + new action in one call.
+// =============================================
+app.post('/api/edit-action', requireSession, async (req, res) => {
+  const { input } = req.body;
+  const { restoreStateSnapshot, createStateSnapshot } = require('./state');
+  
+  if (!input || typeof input !== 'string' || input.trim().length === 0) {
+    return res.status(400).json({ error: 'New input required.' });
+  }
+  
+  if (!req.session.stateSnapshot) {
+    return res.status(400).json({ error: 'No previous action to edit.' });
+  }
+
+  try {
+    // Restore state from snapshot
+    restoreStateSnapshot(req.session.state, req.session.stateSnapshot);
+    
+    // Now process the new input as a fresh action
+    // Create a new snapshot for this action
+    req.session.stateSnapshot = createStateSnapshot(req.session.state);
+    req.session.lastInput = input.trim();
+    
+    setSession(req.sessionId, req.session);
+
+    // Forward to the main action handler by making an internal call
+    // We'll simulate the action processing here instead
+    const state = req.session.state;
+    const cleanInput = input.trim();
+    const events = [];
+
+    // Skip creation phase handling for edit (shouldn't happen in combat)
+    if (isInCreation(state)) {
+      return res.status(400).json({ error: 'Cannot edit during character creation.' });
+    }
+
+    // Process combat if in combat
+    if (state.inCombat && state.currentEnemy && !detectFleeIntent(cleanInput)) {
+      const combatResult = applyCombatRound(state, cleanInput);
+      state.pendingContextHint = combatResult.hint;
+      updateActionProgress(state, cleanInput);
+
+      if (combatResult.enemyKilled && state.pendingEnemyKill) {
+        events.push({
+          type:  'enemyKill',
+          label: state.pendingEnemyKill.label,
+          xp:    state.pendingEnemyKill.xp
+        });
+
+        // Apply kill XP
+        const { getPlayerLevel: gpl } = require('./game/character');
+        const prevLevel = gpl(state.totalXP || 0);
+        state.totalXP = (state.totalXP || 0) + state.pendingEnemyKill.xp;
+        state.classXP = (state.classXP || 0) + state.pendingEnemyKill.xp;
+        const newLevel = gpl(state.totalXP);
+        state.pendingEnemyKill = null;
+
+        if (newLevel > prevLevel) {
+          const pts = newLevel - prevLevel;
+          state.freePoints = (state.freePoints || 0) + pts;
+          recalculateResources(state);
+          events.push({ type: 'levelUp', prevLevel, newLevel, freePointsAwarded: pts });
+        }
+      }
+
+      const narrative = await processNarrative(state, cleanInput, events);
+      await persistSession(req.sessionId);
+
+      const fullOutput = combatResult.combatLog
+        ? (narrative.fullOutput || '') + combatResult.combatLog
+        : narrative.fullOutput;
+
+      req.session.lastOutput = fullOutput;
+      req.session.lastCombatLog = combatResult.combatLog || null;
+      req.session.lastCombatResult = state.pendingCombatResult;
+      req.session.lastEvents = events;
+      setSession(req.sessionId, req.session);
+
+      return res.json({
+        success:     true,
+        output:      fullOutput,
+        character:   buildCharacterPanelData(state),
+        progression: buildProgressionPanelData(state),
+        economy:     buildEconomyPanelData(state),
+        rightPanel:  narrative.rightPanel
+      });
+    }
+
+    // Non-combat action processing
+    const narrative = await processNarrative(state, cleanInput, events);
+    await persistSession(req.sessionId);
+
+    req.session.lastOutput = narrative.fullOutput;
+    req.session.lastCombatLog = null;
+    req.session.lastEvents = events;
+    setSession(req.sessionId, req.session);
+
+    return res.json({
+      success:     true,
+      output:      narrative.fullOutput,
+      character:   buildCharacterPanelData(state),
+      progression: buildProgressionPanelData(state),
+      economy:     buildEconomyPanelData(state),
+      rightPanel:  narrative.rightPanel,
+      board:       buildBoardDisplayData(state)
+    });
+
+  } catch (err) {
+    console.error('[EditAction] Error:', err);
+    return res.status(500).json({ error: 'Failed to process edited action.' });
   }
 });
 

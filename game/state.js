@@ -274,6 +274,45 @@ function deserializeState(raw) {
 }
 
 
+// =============================================
+// STATE SNAPSHOTS
+// Deep clone state for undo/retry functionality.
+// Snapshots exclude transient fields that shouldn't persist.
+// =============================================
+function createStateSnapshot(state) {
+  // Deep clone the entire state
+  const snapshot = JSON.parse(JSON.stringify(state));
+  
+  // Also capture the last combat result if any (for narrative-only retry)
+  return {
+    state: snapshot,
+    timestamp: Date.now()
+  };
+}
+
+function restoreStateSnapshot(currentState, snapshot) {
+  // Restore all properties from snapshot to current state
+  // We modify in place to preserve the session reference
+  const snapshotState = snapshot.state;
+  
+  // Clear current state properties
+  for (const key of Object.keys(currentState)) {
+    if (key !== 'sessionId' && key !== 'playerId') {
+      delete currentState[key];
+    }
+  }
+  
+  // Copy snapshot properties (except session identifiers)
+  for (const key of Object.keys(snapshotState)) {
+    if (key !== 'sessionId' && key !== 'playerId') {
+      currentState[key] = JSON.parse(JSON.stringify(snapshotState[key]));
+    }
+  }
+  
+  return currentState;
+}
+
+
 module.exports = {
   createFreshState,
   validateState,
@@ -291,5 +330,7 @@ module.exports = {
   changeNPCRapport,
   hasMetNPC,
   serializeState,
-  deserializeState
+  deserializeState,
+  createStateSnapshot,
+  restoreStateSnapshot
 };
