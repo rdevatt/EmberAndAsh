@@ -47,6 +47,18 @@ const PASSIVE_TRIGGERS = [
   'think', 'consider', 'study', 'ask', 'say', 'speak', 'talk'
 ];
 
+const LEGACY_REGION_ALIASES = {
+  ashwood_shallow:      ['ashwood'],
+  ashwood_deep:         ['ashwood'],
+  sunkenfen_edge:       ['sunkenfen'],
+  sunkenfen_deep:       ['sunkenfen'],
+  blackstone_foothills: ['blackstone'],
+  blackstone_peaks:     ['blackstone'],
+  veldrath_border:      ['veldrath'],
+  old_veldrath:         ['veldrath'],
+  frozennorth_reaches:  ['frozennorth']
+};
+
 function detectCombatIntent(text) {
   const t = text.toLowerCase();
   return COMBAT_TRIGGERS.some(trigger => t.includes(trigger));
@@ -154,10 +166,14 @@ function spawnEnemy(regionKey, playerLevel) {
   const region = REGIONS[regionKey];
   if (!region) return null;
 
-  const [rMin, rMax] = region.monsterLevel;
+  const regionRange = region.levelRange || region.monsterLevel;
+  if (!Array.isArray(regionRange) || regionRange.length < 2) return null;
+  const [rMin, rMax] = regionRange;
+  const regionCandidates = new Set([regionKey, ...(LEGACY_REGION_ALIASES[regionKey] || [])]);
 
   const validEnemies = Object.entries(ENEMIES).filter(([, e]) => {
-    if (!e.regions.includes(regionKey)) return false;
+    const enemyRegions = Array.isArray(e.regions) ? e.regions : [];
+    if (!enemyRegions.some(r => regionCandidates.has(r))) return false;
     const [eMin, eMax] = e.levelRange;
     return eMin <= rMax && eMax >= rMin;
   });
@@ -411,7 +427,8 @@ function checkAmbientEncounter(state) {
   if (Math.random() >= 0.08) return null;
 
   const region      = REGIONS[state.character.region];
-  const dangerFactor = region ? (region.monsterLevel[1] / 15) : 0;
+  const regionRange = region ? (region.levelRange || region.monsterLevel) : null;
+  const dangerFactor = regionRange ? (regionRange[1] / 15) : 0;
 
   if (Math.random() >= dangerFactor) return null;
 
