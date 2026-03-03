@@ -107,8 +107,11 @@ function createFreshState() {
     shopOpen: false,
 
     // --- Companions ---
-    companions: [],         // future expansion — array of companion objects
+// --- Companions ---
+    companions: [],         // array of companion objects
 
+    // --- Status Effects ---
+    statusEffects: [],      // array of { type, target, remaining, damage, source }
     // --- Pending Events ---
     // These are set by game logic and consumed by the narrative builder
     pendingContextHint:    null,
