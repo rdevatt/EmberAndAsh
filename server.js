@@ -535,7 +535,8 @@ app.post('/api/action', requireSession, async (req, res) => {
     return res.status(400).json({ error: 'Input required.' });
   }
 
-   
+  const state = req.session.state;
+
   const cleanInput = input.trim();
   const events     = [];   // Collects all game events this turn
 
