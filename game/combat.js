@@ -720,12 +720,12 @@ function buildCombatNarrativeHint(result, enemy, playerHP, maxHP, stamina, maxSt
   if (result) {
     if (result.playerHit) {
       const critNote = result.playerCrit ? ' — a CRITICAL strike, devastating impact' : '';
-      lines.push(`[Player HIT the ${enemy.label} in the ${result.bodyPart}${critNote}. Describe the physical impact, the sound, the enemy's reaction.]`);
+      lines.push(`[PLAYER HIT — MANDATORY: The attack LANDED on the ${enemy.label}'s ${result.bodyPart}${critNote}. Describe solid contact, impact, pain reaction. The player SUCCEEDED.]`);
       if (result.appliedBleed) {
         lines.push(`[The wound is BLEEDING badly. Describe blood flowing, the severity of the cut.]`);
       }
     } else {
-      lines.push(`[Player MISSED. The swing went wide or was deflected. Describe the overextension, the stumble, the opening it creates. This felt bad.]`);
+      lines.push(`[PLAYER MISSED — MANDATORY: The attack FAILED. It did NOT connect. Do NOT describe the attack landing or dealing damage. Describe the swing going wide, a stumble, overextension, or the enemy dodging. The player feels frustrated. NO DAMAGE WAS DEALT.]`);
     }
 
     // Companion actions
@@ -753,17 +753,16 @@ function buildCombatNarrativeHint(result, enemy, playerHP, maxHP, stamina, maxSt
   lines.push(`[Player condition: ${hpLabel}. Stamina: ${stamLabel}. Reflect this in their movement — a badly hurt player moves slower, breathes harder, their grip falters.]`);
 
   if (enemyKilled || (enemy && enemy.currentHP <= 0)) {
-    lines.push(`[${enemy.label} IS DEAD. End the fight. Describe the killing blow, the body going still, the sudden silence. Make it feel earned.]`);
+    lines.push(`[${enemy.label} IS DEAD — MANDATORY: The fight is OVER. Describe the final blow, the body collapsing, going still. Victory.]`);
   } else if (enemy) {
     const ePct = enemy.currentHP / enemy.maxHP;
-    if      (ePct < 0.15) lines.push(`[${enemy.label} is NEARLY DEAD — staggering, barely upright, desperate.]`);
-    else if (ePct < 0.35) lines.push(`[${enemy.label} is BADLY WOUNDED — clearly losing, movements ragged.]`);
-    else if (ePct < 0.60) lines.push(`[${enemy.label} is WOUNDED — showing the toll, fighting more cautiously.]`);
-    else                  lines.push(`[${enemy.label} is mostly unscathed — still dangerous, still confident.]`);
+    if      (ePct < 0.15) lines.push(`[ENEMY STATUS: ${enemy.label} is NEARLY DEAD (${Math.round(ePct*100)}% HP) — MUST appear staggering, desperate, about to collapse. One or two hits from death.]`);
+    else if (ePct < 0.35) lines.push(`[ENEMY STATUS: ${enemy.label} is BADLY WOUNDED (${Math.round(ePct*100)}% HP) — MUST appear visibly injured, bleeding, movements ragged and slow.]`);
+    else if (ePct < 0.60) lines.push(`[ENEMY STATUS: ${enemy.label} is WOUNDED (${Math.round(ePct*100)}% HP) — Should show some toll, fighting more cautiously, but still dangerous.]`);
+    else                  lines.push(`[ENEMY STATUS: ${enemy.label} is MOSTLY UNHARMED (${Math.round(ePct*100)}% HP) — Still fresh, confident, aggressive. NOT wounded, NOT staggering, NOT dying.]`);
   }
 
-  lines.push('[Write 3–5 sentences of combat prose. Keep it tight, immediate, physical. Do not use stat names, damage numbers, or HP values in the narrative — those are in the combat log below.]');
-  return lines.join('\n');
+lines.push('[Write 3–5 sentences of combat prose. CRITICAL: Your narrative MUST match the mechanical outcome above. If the player MISSED, do NOT describe their attack connecting. If the enemy is UNHARMED, do NOT describe it dying or collapsing. The combat log shows players the truth — your narrative must not contradict it.]');  return lines.join('\n');
 }
 
 
