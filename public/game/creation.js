@@ -523,6 +523,26 @@ el.playerInput.addEventListener('keydown', e => {
 
 el.playerInput.addEventListener('input', updateCharCount);
 
+const commandsList = document.getElementById('commands-list');
+if (commandsList) {
+  commandsList.addEventListener('click', (e) => {
+    const item = e.target.closest('li');
+    if (!item) return;
+
+    const commandText = item.textContent.trim();
+    if (!commandText) return;
+
+    el.playerInput.value = commandText;
+    updateCharCount();
+    el.playerInput.focus();
+
+    const hasPlaceholder = /\[[^\]]+\]/.test(commandText);
+    if (!hasPlaceholder) {
+      submitAction();
+    }
+  });
+}
+
 el.btnSubmit.addEventListener('click', submitAction);
 
 // Creation wizard navigation
