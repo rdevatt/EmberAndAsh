@@ -693,7 +693,33 @@ app.post('/api/action', requireSession, async (req, res) => {
         commandType:'gear'
       });
     }
+// Explicit set/add companion command (bypasses rapport requirement for testing/GM use)
+    if (t.startsWith('set companion ') || t.startsWith('add companion ')) {
+      const name = cleanInput.replace(/^(set|add) companion\s+/i, '').trim();
+      if (!name) {
+        return res.json({
+          success: true,
+          output: 'Specify a companion name. Example: set companion Elara',
+          isCommand: true
+        });
+      }
+      
+      const result = addCompanion(state, {
+        name: name.charAt(0).toUpperCase() + name.slice(1).toLowerCase(),
+        description: 'A companion who joined your journey.',
+        role: 'ally'
+      });
 
+      await persistSession(req.sessionId);
+      return res.json({
+        success: true,
+        output: result.success
+          ? `${result.companion.name} has joined your party.`
+          : result.message,
+        isCommand: true,
+        commandType: 'companion'
+      });
+    }
     // Check companions
     if (['companions', 'check companions', 'my companions', 'party', 'my party'].includes(t)) {
       const companionData = getCompanionsDisplay(state);

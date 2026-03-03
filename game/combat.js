@@ -23,7 +23,11 @@ const {
   getStaminaLabel
 } = require('./character');
 
-
+// =============================================
+// STATUS EFFECT CONSTANTS
+// =============================================
+const BLEED_THRESHOLD = 0.35; // Below 35% HP, severe wounds cause bleeding
+const BLEED_BODY_PARTS = ['throat', 'head', 'leg', 'arm', 'ribs'];
 // =============================================
 // COMBAT INTENT DETECTION
 // =============================================
@@ -221,7 +225,83 @@ function calculateEnemyXP(enemyLevel, playerLevel, xpMod) {
   const gapBonus = gap > 0 ? 1 + (gap * 0.1) : 1.0;
   return Math.round(enemyLevel * gapBonus * (xpMod || 1.0));
 }
+// =============================================
+// STATUS EFFECTS SYSTEM
+// Bleeding, poison, etc.
+// =============================================
+function applyStatusEffects(state) {
+  const results = [];
+  if (!state.statusEffects) state.statusEffects = [];
 
+  for (let i = state.statusEffects.length - 1; i >= 0; i--) {
+    const effect = state.statusEffects[i];
+
+    if (effect.type === 'bleed' && effect.target === 'enemy' && state.currentEnemy) {
+      state.currentEnemy.currentHP = Math.max(0, state.currentEnemy.currentHP - effect.damage);
+      results.push({ type: 'bleed', target: 'enemy', damage: effect.damage, source: effect.source });
+    }
+
+    effect.remaining--;
+    if (effect.remaining <= 0) {
+      state.statusEffects.splice(i, 1);
+    }
+  }
+
+  return results;
+}
+
+function checkBleedApplication(enemy, bodyPart, damage) {
+  const hpPct = enemy.currentHP / enemy.maxHP;
+
+  if (BLEED_BODY_PARTS.includes(bodyPart) && damage >= 5 && hpPct < BLEED_THRESHOLD) {
+    return {
+      type: 'bleed',
+      target: 'enemy',
+      remaining: 3,
+      damage: Math.ceil(damage * 0.25),
+      source: bodyPart
+    };
+  }
+  return null;
+}
+
+
+// =============================================
+// COMPANION COMBAT RESOLUTION
+// =============================================
+function resolveCompanionAttacks(state, enemy) {
+  if (!state.companions || state.companions.length === 0) return [];
+
+  const results = [];
+  const playerLevel = getPlayerLevel(state.totalXP || 0);
+
+  for (const companion of state.companions) {
+    // Companion stats scale with player level
+    const companionStr = 8 + Math.floor(playerLevel * 0.6);
+    const companionDex = 8 + Math.floor(playerLevel * 0.5);
+
+    const hitChance = Math.min(0.75, Math.max(0.25,
+      0.50 + (companionDex - enemy.effectiveDex) / 25
+    ));
+
+    const hit = Math.random() < hitChance;
+    const baseDamage = Math.max(1, companionStr - 6 + Math.floor(Math.random() * 4));
+    const damage = hit ? baseDamage : 0;
+
+    results.push({
+      name: companion.name,
+      hit,
+      damage,
+      hitChance: Math.round(hitChance * 100)
+    });
+
+    if (hit && damage > 0) {
+      enemy.currentHP = Math.max(0, enemy.currentHP - damage);
+    }
+  }
+
+  return results;
+}
 
 // =============================================
 // COMBAT ROUND RESOLUTION
@@ -286,6 +366,9 @@ function applyCombatRound(state, input) {
   const score       = scoreAction(input);
   const bodyPartKey = detectTargetedBodyPart(input);
 
+  // Apply status effects at start of round (bleeding, etc.)
+  const statusResults = applyStatusEffects(state);
+
   // Unbeatable enemy — skip normal resolution
   if (isEnemyUnbeatable(enemy.level, playerLevel)) {
     const armor       = getActiveArmor(state);
@@ -325,14 +408,37 @@ function applyCombatRound(state, input) {
     enemy
   );
 
-  // Apply damage
+  // Apply player damage
   if (result.playerHit) {
-    enemy.currentHP    = Math.max(0, enemy.currentHP - result.playerDamage);
-    state.currentEnemy = enemy;
+    enemy.currentHP = Math.max(0, enemy.currentHP - result.playerDamage);
+
+    // Check for bleed application on significant hits
+    const bleed = checkBleedApplication(enemy, bodyPartKey, result.playerDamage);
+    if (bleed) {
+      if (!state.statusEffects) state.statusEffects = [];
+      // Don't stack multiple bleeds from same source
+      const existingBleed = state.statusEffects.find(e => e.type === 'bleed' && e.target === 'enemy');
+      if (!existingBleed) {
+        state.statusEffects.push(bleed);
+        result.appliedBleed = bleed;
+      }
+    }
   }
+
+  // Companion attacks
+  const companionResults = resolveCompanionAttacks(state, enemy);
+  result.companionAttacks = companionResults;
+
+  // Update enemy reference after all damage applied
+  state.currentEnemy = enemy;
+
+  // Apply enemy damage to player
   if (result.enemyHit) {
     state.hp = Math.max(0, state.hp - result.enemyDamage);
   }
+
+  // Store status effect results for combat log
+  result.statusEffectDamage = statusResults;
 
   state.pendingCombatResult = result;
 
@@ -347,6 +453,7 @@ function applyCombatRound(state, input) {
     state.pendingEnemyKill = { label: enemy.label, level: enemy.level, xp: xpAwarded };
     state.inCombat         = false;
     state.currentEnemy     = null;
+    state.statusEffects    = (state.statusEffects || []).filter(e => e.target !== 'enemy');
     state.stamina          = Math.min(state.maxStamina, state.stamina + 10);
 
     // Small reputation bump for defeating an enemy
@@ -359,7 +466,7 @@ function applyCombatRound(state, input) {
   }
 
   // Build narrative hint (AI guidance) and player-visible combat log
-  const hint       = buildCombatNarrativeHint(result, enemy, state.hp, state.maxHp, state.stamina, state.maxStamina, enemyKilled);
+  const hint       = buildCombatNarrativeHint(result, enemy, state.hp, state.maxHp, state.stamina, state.maxStamina, enemyKilled, companionResults);
   const combatLog  = buildCombatLog(result, enemy, state.hp, state.maxHp, state.stamina, state.maxStamina, enemyKilled, score.quality);
 
   return {
@@ -517,21 +624,47 @@ function buildCombatLog(result, enemy, playerHP, maxHP, playerStamina, maxStamin
   const sep   = '─'.repeat(36);
   const lines = [`\n${sep}`];
 
+  // Status effect damage at start of round
+  if (result.statusEffectDamage && result.statusEffectDamage.length > 0) {
+    for (const eff of result.statusEffectDamage) {
+      if (eff.target === 'enemy') {
+        lines.push(`🩸 ${enemy.label} bleeds — ${eff.damage} damage`);
+      }
+    }
+  }
+
   // Player action
   if (result.playerHit) {
     const crit = result.playerCrit ? ' ⚡ CRITICAL HIT' : '';
     lines.push(`▶ You strike the ${enemy.label}'s ${result.bodyPart}${crit}`);
     lines.push(`  Damage dealt: ${result.playerDamage}`);
-    const ePct = enemy.currentHP / enemy.maxHP;
-    const eLabel = ePct <= 0 ? 'DEAD' :
-                   ePct < 0.15 ? 'Near Death' :
-                   ePct < 0.35 ? 'Critically Wounded' :
-                   ePct < 0.60 ? 'Seriously Wounded' :
-                   ePct < 0.80 ? 'Wounded' : 'Mostly Unharmed';
-    lines.push(`  ${enemy.label}: ${eLabel}`);
+    if (result.appliedBleed) {
+      lines.push(`  ⚠ Wound is bleeding!`);
+    }
   } else {
     lines.push(`▶ You miss — ${result.hitChance}% hit chance, attack goes wide`);
   }
+
+  // Companion attacks
+  if (result.companionAttacks && result.companionAttacks.length > 0) {
+    for (const ca of result.companionAttacks) {
+      if (ca.hit) {
+        lines.push(`▷ ${ca.name} strikes — ${ca.damage} damage`);
+      } else {
+        lines.push(`▷ ${ca.name} misses`);
+      }
+    }
+  }
+
+  // Enemy HP status (with actual numbers now)
+  const ePct = enemy.currentHP / enemy.maxHP;
+  const eLabel = ePct <= 0 ? 'DEAD' :
+                 ePct < 0.15 ? 'Near Death' :
+                 ePct < 0.35 ? 'Critically Wounded' :
+                 ePct < 0.60 ? 'Seriously Wounded' :
+                 ePct < 0.80 ? 'Wounded' : 'Mostly Unharmed';
+  const eBar = buildMiniBar(ePct, 12);
+  lines.push(`  ${enemy.label}: ${eBar} ${enemy.currentHP}/${enemy.maxHP} [${eLabel}]`);
 
   // Enemy retaliation
   if (result.enemyHit) {
@@ -576,15 +709,34 @@ function buildMiniBar(pct, width) {
 // passed to the AI as authorsNote guidance.
 // Never shown to the player directly.
 // =============================================
-function buildCombatNarrativeHint(result, enemy, playerHP, maxHP, stamina, maxStamina, enemyKilled) {
+function buildCombatNarrativeHint(result, enemy, playerHP, maxHP, stamina, maxStamina, enemyKilled, companionResults = []) {
   const lines = ['[COMBAT NARRATIVE INSTRUCTIONS — write visceral, present-tense prose. Do NOT repeat numbers; those appear in the combat log the player already sees.]'];
+
+  // Status effects
+  if (result && result.statusEffectDamage && result.statusEffectDamage.length > 0) {
+    lines.push(`[The ${enemy.label} is BLEEDING from previous wounds. Describe blood loss, weakening, the toll it takes.]`);
+  }
 
   if (result) {
     if (result.playerHit) {
       const critNote = result.playerCrit ? ' — a CRITICAL strike, devastating impact' : '';
-      lines.push(`[Player HIT the ${enemy.label} in the ${result.bodyPart}${critNote}. Describe the physical impact, the sound, the enemy's reaction. Enemy is ${result.enemyDamage > 0 ? 'hurt' : 'barely affected'}.]`);
+      lines.push(`[Player HIT the ${enemy.label} in the ${result.bodyPart}${critNote}. Describe the physical impact, the sound, the enemy's reaction.]`);
+      if (result.appliedBleed) {
+        lines.push(`[The wound is BLEEDING badly. Describe blood flowing, the severity of the cut.]`);
+      }
     } else {
       lines.push(`[Player MISSED. The swing went wide or was deflected. Describe the overextension, the stumble, the opening it creates. This felt bad.]`);
+    }
+
+    // Companion actions
+    if (companionResults && companionResults.length > 0) {
+      for (const ca of companionResults) {
+        if (ca.hit) {
+          lines.push(`[${ca.name} HIT the ${enemy.label}. Describe their attack landing — arrow, blade, spell — and the enemy reacting to multiple threats.]`);
+        } else {
+          lines.push(`[${ca.name} attacked but missed. A brief moment of their weapon or spell going wide.]`);
+        }
+      }
     }
 
     if (result.enemyHit) {
@@ -625,20 +777,27 @@ function buildEnemyPanelData(state) {
   const enemy = state.currentEnemy;
   const ePct  = enemy.currentHP / enemy.maxHP;
 
+  // Check for active bleed on enemy
+  const isBleeding = state.statusEffects && 
+    state.statusEffects.some(e => e.type === 'bleed' && e.target === 'enemy');
+
   return {
     label:      enemy.label,
     desc:       enemy.desc,
     behavior:   enemy.behavior,
     level:      enemy.level,
+    currentHP:  enemy.currentHP,
+    maxHP:      enemy.maxHP,
     hpPercent:  Math.round(ePct * 100),
-    hpLabel:    ePct >= 0.80 ? 'Uninjured' :
-                ePct >= 0.50 ? 'Wounded' :
-                ePct >= 0.25 ? 'Seriously Wounded' :
-                ePct >= 0.10 ? 'Critically Wounded' : 'Near Death',
+    hpLabel:    ePct <= 0 ? 'DEAD' :
+                ePct < 0.15 ? 'Near Death' :
+                ePct < 0.35 ? 'Critically Wounded' :
+                ePct < 0.60 ? 'Seriously Wounded' :
+                ePct < 0.80 ? 'Wounded' : 'Uninjured',
+    isBleeding,
     inCombat:   true
   };
 }
-
 
 module.exports = {
   // Detection
@@ -662,6 +821,13 @@ module.exports = {
   applyCombatRound,
   applyFleeAttempt,
   checkAmbientEncounter,
+
+  // Companions
+  resolveCompanionAttacks,
+
+  // Status Effects
+  applyStatusEffects,
+  checkBleedApplication,
 
   // Inspect
   buildEnemyInspectData,

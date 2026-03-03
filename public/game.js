@@ -786,7 +786,14 @@ function updateRightPanel(r) {
 
     el.enemyName.textContent    = r.enemy.label;
     el.enemyDesc.textContent    = r.enemy.desc;
-    el.enemyHpLabel.textContent = r.enemy.hpLabel;
+    
+    // Show HP with actual numbers: "34/68 [Wounded]"
+    const hpText = (r.enemy.currentHP !== undefined && r.enemy.maxHP !== undefined)
+      ? `${r.enemy.currentHP}/${r.enemy.maxHP} [${r.enemy.hpLabel}]`
+      : r.enemy.hpLabel;
+    const bleedIndicator = r.enemy.isBleeding ? ' 🩸' : '';
+    el.enemyHpLabel.textContent = hpText + bleedIndicator;
+    
     el.enemyBehavior.textContent= `Behavior: ${r.enemy.behavior}`;
     el.barEnemy.style.width     = (r.enemy.hpPercent || 0) + '%';
 
