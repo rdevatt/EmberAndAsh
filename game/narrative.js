@@ -729,7 +729,7 @@ function buildEventAnnouncements(events) {
         break;
 
       case 'questAccepted':
-        lines.push(`\n[QUEST ACCEPTED — "${evt.quest.label}". Reward on completion: ${evt.quest.reward ? evt.quest.reward.coin + 'c + ' + evt.quest.reward.xp + ' XP' : 'coin + XP'}.]`);
+        lines.push(`\n[QUEST ACCEPTED — "${evt.quest.label}". Reward on completion: ${evt.quest.reward ? formatCoin(evt.quest.reward.coin || 0) + ' + ' + (evt.quest.reward.xp || 0) + ' XP' : 'coin + XP'}.]`);
         break;
 
       case 'questProgress':
@@ -741,7 +741,7 @@ function buildEventAnnouncements(events) {
       case 'questComplete':
         const r = evt.reward || {};
         lines.push(`\n\n— QUEST COMPLETE — "${evt.quest.label}"`);
-        lines.push(`Reward: ${r.coin || 0} coins, +${r.xp || 0} XP.`);
+        lines.push(`Reward: ${formatCoin(r.coin || 0)}, +${r.xp || 0} XP.`);
         if (evt.quest.type === 'advance') {
           lines.push(`[The road ahead is open. A new region awaits.]`);
         }

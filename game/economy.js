@@ -23,8 +23,12 @@ const {
 // =============================================
 // COIN SYSTEM
 // Internal unit is copper.
-// 10 copper = 1 silver. 100 copper = 1 gold.
+// 100 copper = 1 silver. 10,000 copper = 1 gold.
 // =============================================
+const COPPER_PER_SILVER = 100;
+const SILVER_PER_GOLD   = 100;
+const COPPER_PER_GOLD   = COPPER_PER_SILVER * SILVER_PER_GOLD;
+
 function addCoin(state, copper) {
   state.coin = (state.coin || 0) + Math.floor(copper);
 }
@@ -38,9 +42,9 @@ function spendCoin(state, copper) {
 
 function formatCoin(copper) {
   const c  = Math.max(0, Math.floor(copper || 0));
-  const g  = Math.floor(c / 100);
-  const s  = Math.floor((c % 100) / 10);
-  const cu = c % 10;
+  const g  = Math.floor(c / COPPER_PER_GOLD);
+  const s  = Math.floor((c % COPPER_PER_GOLD) / COPPER_PER_SILVER);
+  const cu = c % COPPER_PER_SILVER;
   const parts = [];
   if (g  > 0) parts.push(`${g} gold`);
   if (s  > 0) parts.push(`${s} silver`);
@@ -54,8 +58,8 @@ function parseCoinFromText(text) {
   const goldMatch   = t.match(/(\d+)\s*gold/);
   const silverMatch = t.match(/(\d+)\s*silver/);
   const copperMatch = t.match(/(\d+)\s*copper/);
-  if (goldMatch)   total += parseInt(goldMatch[1])   * 100;
-  if (silverMatch) total += parseInt(silverMatch[1]) * 10;
+  if (goldMatch)   total += parseInt(goldMatch[1])   * COPPER_PER_GOLD;
+  if (silverMatch) total += parseInt(silverMatch[1]) * COPPER_PER_SILVER;
   if (copperMatch) total += parseInt(copperMatch[1]);
   return total;
 }
