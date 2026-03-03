@@ -27,7 +27,10 @@ const {
   detectEquipIntent, processEquipCommand, 
   addCompanion, removeCompanion, detectCompanionIntent, getCompanionsDisplay,
   buildBackpackSummary,
-  addItem  // FIX: Import addItem for take/loot commands
+  addItem,
+  removeItem,
+  findInventoryItem,
+  hasItem
 } = require('../game/economy');
 const { processNarrative, buildRightPanelData, buildEventAnnouncements } = require('../game/narrative');
 const { detectBoardIntent, detectQuestAccept, refreshBoard, getBoardQuests, acceptQuestByIndex, acceptQuest, buildBoardDisplayData, buildBoardInspectHint, checkQuestProgress, processQuestCompletions, buildActiveQuestContext } = require('../game/quests');
@@ -239,6 +242,9 @@ registerGameplayRoutes(app, {
   getCompanionsDisplay,
   buildBackpackSummary,
   addItem,
+  removeItem,
+  findInventoryItem,
+  hasItem,
   processNarrative,
   buildRightPanelData,
   detectBoardIntent,

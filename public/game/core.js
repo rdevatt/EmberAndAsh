@@ -181,6 +181,16 @@ async function apiCall(method, path, body = null) {
   return { ok: res.ok, status: res.status, data };
 }
 
+function normalizeLikelyCommandInput(rawInput) {
+  const input = String(rawInput || '').trim();
+  if (!input) return '';
+
+  const lower = input.toLowerCase();
+  const commandLike = /^(equip|unequip|take|loot|search|show|inspect|examine|drop|discard|remove|sell|set companion|add companion|companions|party|backpack|gear|inventory|check board|accept quest|rest|long rest|status|check stats|open shop|close shop|recover gear|retrieve gear)\b/.test(lower);
+
+  return commandLike ? input.replace(/[.!?]+$/g, '').trim() : input;
+}
+
 
 // =============================================
 // SESSION INIT
@@ -279,7 +289,7 @@ async function submitAction() {
   // Wizard handles creation — block manual submit during active creation
   if (client.inCreation) return;
 
-  const input = el.playerInput.value.trim();
+  const input = normalizeLikelyCommandInput(el.playerInput.value);
   if (!input || client.isLoading) return;
 
   // Check if we're in edit mode
@@ -516,9 +526,12 @@ function cancelEdit() {
 async function submitEditedAction(newInput) {
   if (client.isLoading) return;
 
+  const normalizedInput = normalizeLikelyCommandInput(newInput);
+  if (!normalizedInput) return;
+
   setLoading(true);
 
-  const { ok, data } = await apiCall('POST', '/edit-action', { input: newInput });
+  const { ok, data } = await apiCall('POST', '/edit-action', { input: normalizedInput });
 
   setLoading(false);
   
@@ -541,15 +554,15 @@ async function submitEditedAction(newInput) {
 
   // Update the player input entry with new text
   if (client.editPlayerEntry) {
-    client.editPlayerEntry.querySelector('.player-action').textContent = '> ' + newInput;
+    client.editPlayerEntry.querySelector('.player-action').textContent = '> ' + normalizedInput;
   }
 
   // Track new input
-  client.lastInput = newInput;
+  client.lastInput = normalizedInput;
 
   // Append new AI response
   if (data.output) {
-    appendStory(newInput, data.output, false, true); // skipSave since we're replacing
+    appendStory(normalizedInput, data.output, false, true); // skipSave since we're replacing
   }
 
   if (data.character)   updateCharacterPanel(data.character);

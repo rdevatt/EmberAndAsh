@@ -186,6 +186,10 @@ function detectBackgroundFreeform(text, availableKeys) {
   return null;
 }
 
+function normalizeSentence(text, ending = '.') {
+  return String(text || '').trim().replace(/[.!?]+$/g, '') + ending;
+}
+
 
 // =============================================
 // STAT CALCULATION FROM BACKGROUND + AGE + BUILD
@@ -207,8 +211,9 @@ function calculateStats(age, backgroundKey, buildKey) {
 
   // 2. Age band modifiers
   const ageBand = AGE_BANDS.find(b => age >= b.min && age <= b.max) || AGE_BANDS[1]; // default Prime
+  const ageMods = (ageBand && ageBand.mods) ? ageBand.mods : {};
   statKeys.forEach(s => {
-    stats[s] += (ageBand.mods[s] || 0);
+    stats[s] += (ageMods[s] || 0);
   });
 
   // 3. Build modifiers
@@ -417,6 +422,9 @@ function processPhase2(state, input) {
   // Build detection
   const buildKey       = detectBuild(input);
   const buildData      = BUILD_MODS[buildKey];
+  const buildLabel     = buildKey
+    ? buildKey.charAt(0).toUpperCase() + buildKey.slice(1)
+    : 'Average';
 
   state.creation.physicalDescription = input.trim();
   state.creation.buildKey            = buildKey;
@@ -438,10 +446,12 @@ function processPhase2(state, input) {
     ).join('\n');
   }
 
-  const buildDesc = buildData ? ` ${buildData.label} build.` : '';
+  const buildDesc = buildData ? ` ${buildLabel} build.` : '';
+
+  const normalizedDesc = normalizeSentence(input, '.');
 
   const prompt =
-    `${input.trim()}.${buildDesc}\n\n` +
+    `${normalizedDesc}${buildDesc}\n\n` +
     `Now — what shaped you before this moment?\n\n` +
     `Select a background from the list, type its number or name, ` +
     `or describe your history in your own words and I will place you.\n\n` +
@@ -542,7 +552,7 @@ function processPhase3(state, input) {
   }).join('\n\n');
 
   const prompt =
-    `${bg.label}.${spellNote}\n\n` +
+    `${normalizeSentence(bg.label, '.')}${spellNote}\n\n` +
     `One final question — where does your story begin?\n\n` +
     `${envLines}\n\n` +
     `Type a number or the name of your starting environment.`;

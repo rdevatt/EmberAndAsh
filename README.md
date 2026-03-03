@@ -33,7 +33,15 @@
 │  ├─ constants.js
 │  ├─ constants/
 │  │  ├─ data.js
-│  │  └─ regions.js
+│  │  ├─ regions.js
+│  │  └─ data/
+│  │     ├─ character/
+│  │     │  └─ index.js
+│  │     ├─ world/
+│  │     │  ├─ enemies.js
+│  │     │  └─ quests.js
+│  │     └─ progression/
+│  │        └─ index.js
 │  ├─ character.js
 │  ├─ character/
 │  │  ├─ core.js
@@ -74,6 +82,15 @@
 - Gameplay helper modules live under `server/routes/gameplay/utils/`, imported via its barrel.
 - Game domain root files (for example, `game/character.js`) are wrappers around split internal modules.
 - Frontend scripts and styles are split by concern under `public/game/` and `public/styles/`.
+
+## Constants Layout
+
+- Keep `game/constants/data.js` as the public aggregation surface and stable export API.
+- Add character/build/spell/background constants in `game/constants/data/character/index.js`.
+- Add enemy/world-tier/body-part constants in `game/constants/data/world/enemies.js`.
+- Add quest templates and quest scaling constants in `game/constants/data/world/quests.js`.
+- Add classes/professions/progression/scene constants in `game/constants/data/progression/index.js`.
+- If adding a new constants category, prefer a new focused module and wire it through `game/constants/data.js`.
 
 ## Run Locally
 
@@ -123,3 +140,29 @@ ACTION_SUCCESS=$(curl -s -X POST "http://localhost:3000/api/action" \
 echo "guest_ok=$([ -n "$SESSION_ID" ] && echo true || echo false)"
 echo "action_success=$ACTION_SUCCESS"
 ```
+
+## Recent Changes
+
+### Server
+
+- Fixed creation phase crash caused by missing age-band stat modifiers fallback in `game/character/core.js`.
+- Added command/entity punctuation normalization (trailing `!?.`) in `server/routes/gameplay/register.js` for:
+   - inventory commands (`show`, `drop`, `sell`)
+   - companion commands and companion intent handling
+   - board and quest-accept parsing (including punctuated forms like `accept quest #1!!!`)
+   - edit-action combat replay input handling
+- Added equivalent normalization for direct API routes:
+   - `server/routes/quests/register.js` (`questIndex` / `questId` parsing)
+   - `server/routes/saves/register.js` crafted item endpoints (`itemName` parsing)
+
+### Client
+
+- Added likely-command pre-normalization in `public/game/core.js` before submit/edit-submit.
+- Added creation-wizard submission normalization in `public/game/creation.js` before posting to `/api/action`.
+- Updated creation prompt formatting in `game/character/core.js` to avoid double punctuation and show clean build labels.
+
+### Verified Behaviors
+
+- Commands with trailing punctuation now resolve correctly across flows (examples: `sell waterskin!!!`, `set companion elara!!!`, `accept quest #1!!!`).
+- Creation flow now completes without the former phase-4 crash.
+- All touched files were syntax-checked with `node --check`.

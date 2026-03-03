@@ -447,12 +447,22 @@ async function cwSubmitStep4() {
 
 // ---- Core send helper ----
 // Sends formatted text to server, shows loading, calls onSuccess(serverResponseText) on success
+function cwNormalizeSubmissionInput(text) {
+  return String(text || '').trim().replace(/[.!?]+$/g, '').trim();
+}
+
 async function cwSendAndAdvance(text, onSuccess) {
+  const normalizedText = cwNormalizeSubmissionInput(text);
+  if (!normalizedText) {
+    appendStory(null, 'Input required.', true);
+    return;
+  }
+
   setLoading(true);
 
   let ok, data;
   try {
-    ({ ok, data } = await apiCall('POST', '/action', { input: text }));
+    ({ ok, data } = await apiCall('POST', '/action', { input: normalizedText }));
   } catch (e) {
     setLoading(false);
     appendStory(null, 'Connection error. Please try again.', true);
