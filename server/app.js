@@ -26,6 +26,7 @@ const {
   // NEW: Equipment and companion functions
   detectEquipIntent, processEquipCommand, 
   addCompanion, removeCompanion, detectCompanionIntent, getCompanionsDisplay,
+  buildBackpackSummary,
   addItem  // FIX: Import addItem for take/loot commands
 } = require('../game/economy');
 const { processNarrative, buildRightPanelData, buildEventAnnouncements } = require('../game/narrative');
@@ -235,6 +236,7 @@ registerGameplayRoutes(app, {
   removeCompanion,
   detectCompanionIntent,
   getCompanionsDisplay,
+  buildBackpackSummary,
   addItem,
   processNarrative,
   buildRightPanelData,

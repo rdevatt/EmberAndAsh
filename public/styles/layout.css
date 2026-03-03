@@ -139,6 +139,51 @@
   margin-top: 3px;
 }
 
+/* Commands reference panel */
+#section-commands {
+  border-top: 1px solid var(--border);
+}
+
+#commands-list {
+  max-height: 260px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 4px;
+}
+
+.commands-category {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  letter-spacing: 1px;
+  color: var(--text-gold);
+  margin: 8px 0 4px;
+  text-transform: uppercase;
+}
+
+.commands-category:first-child {
+  margin-top: 0;
+}
+
+.commands-ul {
+  margin: 0 0 8px 14px;
+  color: var(--text-dim);
+  line-height: 1.45;
+}
+
+.commands-ul li {
+  margin-bottom: 2px;
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease;
+  border: 1px solid transparent;
+  padding: 1px 4px;
+}
+
+.commands-ul li:hover {
+  color: var(--text-bright);
+  background: var(--bg-section);
+  border-color: var(--border);
+}
+
 
 /* =============================================
    CENTER PANEL — STORY

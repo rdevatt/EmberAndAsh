@@ -351,7 +351,7 @@ async function _doNormalAction(input) {
       appendStory(null, '[Character sheet updated in the left panel.]', false);
     } else if (data.commandType === 'gear' && data.economy) {
       updateEconomyPanel(data.economy);
-      appendStory(null, '[Gear updated in the left panel.]', false);
+      appendStory(null, data.output || '[Gear updated in the left panel.]', false);
     } else if (data.commandType === 'freePoint') {
       appendStory(null, data.output, false);
       if (data.character) updateCharacterPanel(data.character);
@@ -359,6 +359,19 @@ async function _doNormalAction(input) {
       appendStory(null, data.output, false);
     }
     return;
+
+    const commandsList = document.getElementById('commands-list');
+    if (commandsList) {
+      commandsList.addEventListener('click', (e) => {
+        const item = e.target.closest('li');
+        if (!item) return;
+        const commandText = item.textContent.trim();
+        if (!commandText) return;
+        el.playerInput.value = commandText;
+        updateCharCount();
+        el.playerInput.focus();
+      });
+    }
   }
 
   // Normal action response

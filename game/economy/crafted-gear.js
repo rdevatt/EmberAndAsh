@@ -7,7 +7,7 @@ function formatStatMods(statMods) {
     .join(' / ');
 }
 
-function createCraftedGearHandlers({ addCoin, formatCoin, recalculateResources }) {
+function createCraftedGearHandlers({ addCoin, formatCoin, recalculateResources, addItem }) {
   function getCraftedGearInventory(state) {
     return state.craftedGear || [];
   }
@@ -36,6 +36,10 @@ function createCraftedGearHandlers({ addCoin, formatCoin, recalculateResources }
         state.stats[stat] = (state.stats[stat] || 5) - val;
       }
       recalculateResources(state);
+    }
+
+    if (oldGear) {
+      addItem(state, oldGear);
     }
 
     state.gear[slot] = item;
