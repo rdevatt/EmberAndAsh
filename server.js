@@ -542,7 +542,7 @@ app.post('/api/action', requireSession, async (req, res) => {
   // --------------------------------------------------------
   // STATE SNAPSHOT — save state BEFORE processing for undo/retry
   // --------------------------------------------------------
-  const { createStateSnapshot } = require('./state');
+  const { createStateSnapshot } = require('./game/state');
   req.session.stateSnapshot = createStateSnapshot(state);
   req.session.lastInput = cleanInput;
 
@@ -1218,7 +1218,7 @@ app.post('/api/retry-narrative', requireSession, async (req, res) => {
 // Allows the player to try a completely different action.
 // =============================================
 app.post('/api/undo', requireSession, async (req, res) => {
-  const { restoreStateSnapshot } = require('./state');
+  const { restoreStateSnapshot } = require('./game/state');
   
   if (!req.session.stateSnapshot) {
     return res.status(400).json({ error: 'Nothing to undo.' });
@@ -1269,7 +1269,7 @@ app.post('/api/undo', requireSession, async (req, res) => {
 // =============================================
 app.post('/api/edit-action', requireSession, async (req, res) => {
   const { input } = req.body;
-  const { restoreStateSnapshot, createStateSnapshot } = require('./state');
+  const { restoreStateSnapshot, createStateSnapshot } = require('./game/state');
   
   if (!input || typeof input !== 'string' || input.trim().length === 0) {
     return res.status(400).json({ error: 'New input required.' });
