@@ -757,6 +757,23 @@ function updateEconomyPanel(e) {
   } else {
     el.sectionDeathGear.classList.add('hidden');
   }
+  // Companions
+const companionSection = document.getElementById('section-companions');
+const companionsList = document.getElementById('companions-list');
+  if (companionSection && companionsList) {
+    if (e.companions && e.companions.hasCompanions) {
+      companionSection.classList.remove('hidden');
+      companionsList.innerHTML = e.companions.list.map(c => 
+        `<div class="companion-row">
+          <span class="companion-name">${escHtml(c.name)}</span>
+          <span class="companion-loyalty dim">(${escHtml(c.loyaltyLabel)})</span>
+        </div>`
+      ).join('');
+    } else {
+      companionSection.classList.add('hidden');
+      companionsList.textContent = 'None.';
+    }
+  }
 }
 
 // Simple HTML escaping helper
