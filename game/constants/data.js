@@ -13,7 +13,7 @@ const {
   STARTING_ENVIRONMENTS,
   STARTING_SPELLS,
   FREEFORM_SKILL_CONFIG,
-} = require('./data/character');
+} = require('./data/character/index.js');
 const {
   WORLD_TIERS,
   ENEMIES,
@@ -40,7 +40,7 @@ const {
   INTIMACY_CONDITIONS,
   MAX_LEVEL,
   CLASS_LEVEL_XP,
-} = require('./data/progression');
+} = require('./data/progression/index.js');
 
 
 // ============================================
