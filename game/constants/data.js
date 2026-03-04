@@ -1,6 +1,30 @@
 'use strict';
 
 const { REGIONS } = require('./regions');
+
+const resolvedDataModules = {};
+
+function requireFirst(label, candidates) {
+  let lastError;
+  for (const candidate of candidates) {
+    try {
+      resolvedDataModules[label] = candidate;
+      return require(candidate);
+    } catch (error) {
+      const isDirectMissingModule =
+        error &&
+        error.code === 'MODULE_NOT_FOUND' &&
+        typeof error.message === 'string' &&
+        error.message.includes(`'${candidate}'`);
+      if (!isDirectMissingModule) {
+        throw error;
+      }
+      lastError = error;
+    }
+  }
+  throw lastError;
+}
+
 const {
   BACKGROUNDS,
   MAGICAL_BACKGROUNDS,
@@ -13,12 +37,12 @@ const {
   STARTING_ENVIRONMENTS,
   STARTING_SPELLS,
   FREEFORM_SKILL_CONFIG,
-} = require('./data/character.js');
+} = requireFirst('character', ['./data/character.js', './data/character/index.js']);
 const {
   WORLD_TIERS,
   ENEMIES,
   BODY_PARTS,
-} = require('./data/enemies.js');
+} = requireFirst('enemies', ['./data/enemies.js', './data/world/enemies.js']);
 const {
   QUEST_TYPES,
   QUEST_REWARD_BASE,
@@ -29,7 +53,7 @@ const {
   RETRIEVE_TEMPLATES,
   SCOUT_TEMPLATES,
   ADVANCE_QUESTS,
-} = require('./data/quests.js');
+} = requireFirst('quests', ['./data/quests.js', './data/world/quests.js']);
 const {
   GEAR_QUALITIES,
   CLASSES,
@@ -40,7 +64,11 @@ const {
   INTIMACY_CONDITIONS,
   MAX_LEVEL,
   CLASS_LEVEL_XP,
-} = require('./data/progression.js');
+} = requireFirst('progression', ['./data/progression.js', './data/progression/index.js']);
+
+if (process.env.NODE_ENV === 'production') {
+  console.info('[constants:data] resolved modules', resolvedDataModules);
+}
 
 
 // ============================================
