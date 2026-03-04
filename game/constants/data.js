@@ -13,12 +13,12 @@ const {
   STARTING_ENVIRONMENTS,
   STARTING_SPELLS,
   FREEFORM_SKILL_CONFIG,
-} = require('./data/character/index.js');
+} = require('./data/character.js');
 const {
   WORLD_TIERS,
   ENEMIES,
   BODY_PARTS,
-} = require('./data/world/enemies');
+} = require('./data/enemies.js');
 const {
   QUEST_TYPES,
   QUEST_REWARD_BASE,
@@ -29,7 +29,7 @@ const {
   RETRIEVE_TEMPLATES,
   SCOUT_TEMPLATES,
   ADVANCE_QUESTS,
-} = require('./data/world/quests');
+} = require('./data/quests.js');
 const {
   GEAR_QUALITIES,
   CLASSES,
@@ -40,7 +40,7 @@ const {
   INTIMACY_CONDITIONS,
   MAX_LEVEL,
   CLASS_LEVEL_XP,
-} = require('./data/progression/index.js');
+} = require('./data/progression.js');
 
 
 // ============================================
