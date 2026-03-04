@@ -43,7 +43,7 @@ const {
 } = require('./data/progression');
 
 
-// =============================================
+// ============================================
 // WORLD MAP CONNECTIONS SUMMARY
 // Helper structure for generating travel/scout quests.
 // Maps region key -> neighboring region keys
