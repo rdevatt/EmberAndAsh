@@ -143,6 +143,9 @@ test('aging changes stats gently, longevity paths have real requirements, and ol
   assert.equal(chronicle.isPastLifespan(s, w), false);
   assert.ok(s.character.age > 300, 'but the calendar age does');
 
+  const elf = hero(20, 'thornwick', 'an elf with long silver hair').s;
+  elf.appearance = appearanceMod.parseAppearance(elf.character.description, elf.character, 'e');
+  assert.ok(chronicle.lifespan(elf) > 200, 'elves live for centuries');
   const m = hero(20).s;
   const mw = chronicle.worldOf(m);
   chronicle.advanceTime(m, 120 * 360 * 24);

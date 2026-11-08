@@ -222,8 +222,10 @@ function spawnEnemy(regionKey, playerLevel, options = {}) {
   const lvlMin        = Math.max(eMin, rMin);
   const lvlMax        = Math.min(eMax, rMax);
   // Spawn within a window centred on the player's level (-2..+2).
+  // Newcomers (below level 5) meet foes at most one level above them.
+  const spread        = playerLevel < 5 ? 4 : 5;
   const targetLevel   = Math.max(lvlMin, Math.min(lvlMax,
-    playerLevel + Math.floor(Math.random() * 5) - 2
+    playerLevel + Math.floor(Math.random() * spread) - 2
   ));
 
   return buildEnemyInstance(key, enemy, targetLevel);

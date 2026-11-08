@@ -127,14 +127,15 @@ function sagaRegionFor(level, here) {
   return list.sort((a, b) => (a === here ? -1 : 0) - (b === here ? -1 : 0))[hashInt(here + level + list.length) % Math.max(1, list.length)] || here;
 }
 
-function generateSaga(state, world, { patron = null } = {}) {
+function generateSaga(state, world, { patron = null, starter = false } = {}) {
   const level = getPlayerLevel(state.totalXP || 0);
   const here = state.character.region;
   const ending = world && world.ending;
   const themes = [...SAGA_THEMES.default, ...((ending && SAGA_THEMES[ending]) || [])];
   const n = (state.sagasCompleted || 0) + (state.actionCount || 0);
   const theme = themes[hashInt(`${state.characterId}:${n}`) % themes.length];
-  const region = sagaRegionFor(level, here);
+  // A newcomer's first saga starts at home, like the first chapter once did.
+  const region = starter ? here : sagaRegionFor(level, here);
   const r = REGIONS[region];
   const sagaLevel = level > 100 ? level : Math.max(r.levelRange[0], Math.min(r.levelRange[1] + 2, level + 1));
   const prefix = level > 100 ? `${ASCENDANT_PREFIX[hashInt(theme.title + level) % ASCENDANT_PREFIX.length]} ` : '';
@@ -147,12 +148,13 @@ function generateSaga(state, world, { patron = null } = {}) {
     { type: 'boss', region, boss: bossName, objective: `Defeat the ${bossName} (type "confront the ${theme.boss.toLowerCase()}")` }
   ];
   if (here === region) steps.shift();
+  if (starter) { const foe = steps.find(x => x.type === 'foe'); if (foe) { foe.count = 2; } }
   return {
     id: `saga_${state.characterId}_${n}`,
-    title: `${theme.title}${level > 100 ? ' (Ascendant)' : ''}`,
-    patron: patron ? patron.name : null,
-    region, level: sagaLevel, step: 0, steps,
-    reward: { xp: Math.round(30 * Math.max(level, sagaLevel) * (steps.length / 3)), coin: 150 * sagaLevel },
+    title: starter ? `First Steps: ${theme.title}` : `${theme.title}${level > 100 ? ' (Ascendant)' : ''}`,
+    patron: patron ? patron.name : null, starter,
+    region, level: starter ? Math.min(sagaLevel, Math.max(1, level + 1)) : sagaLevel, step: 0, steps,
+    reward: starter ? { xp: 350, coin: 150 } : { xp: Math.round(30 * Math.max(level, sagaLevel) * (steps.length / 3)), coin: 150 * sagaLevel },
     startedHour: chronicle.nowHour(world)
   };
 }
@@ -171,12 +173,15 @@ function buildSagaFoe(saga, step, boss = false) {
   const effectiveVit = 5 + 3 + Math.floor(lvl * 0.4);
   const depth = Math.min(2.5, 1 + Math.max(0, lvl - 10) / 60);
   const base = Math.round((40 * 0.6 + effectiveVit * 3 + lvl * 2) * depth);
+  // Newcomers' sagas are adventures, not walls.
+  const novice = lvl < 10;
+  const bossMult = novice ? 1.4 : lvl < 30 ? 1.9 : 2.4;
   const enemy = {
     key: `saga__${boss ? 'boss' : 'foe'}`, label: boss ? step.boss : step.foe, level: lvl, behavior: boss ? 'tactical' : 'aggressive',
     desc: boss ? `The heart of "${saga.title}".` : `One of the threats in "${saga.title}".`,
-    xpMod: boss ? 3 : 1.4, currentHP: Math.round(base * (boss ? 2.4 : 1.2)), maxHP: Math.round(base * (boss ? 2.4 : 1.2)),
+    xpMod: boss ? 3 : 1.4, currentHP: Math.round(base * (boss ? bossMult : 1.2)), maxHP: Math.round(base * (boss ? bossMult : 1.2)),
     effectiveStr, effectiveDex, effectiveVit, isRare: true, isBoss: !!boss,
-    special: boss ? { every: 3, name: 'Saga Strike', telegraph: `${step.boss} gathers itself for a crushing blow`, mult: 2.2 } : null,
+    special: boss ? { every: novice ? 4 : 3, name: 'Saga Strike', telegraph: `${step.boss} gathers itself for a crushing blow`, mult: novice ? 1.5 : 2.2 } : null,
     phases: boss ? [{ at: 0.5, effect: lvl > 100 ? 'ward' : 'enrage', amount: 0.12, text: `${step.boss} refuses to fall.`, done: false }] : [],
     meta: { saga: saga.id, sagaStep: saga.step }
   };
@@ -193,6 +198,7 @@ function handleSagaCommand(state, world, input) {
     if (s) return { info: true, message: `Your saga: ${s.title}\n► ${s.steps[s.step].objective}\nReward: +${s.reward.xp} XP, ${formatCoin(s.reward.coin)}. ("abandon saga" to give it up.)` };
     const r = REGIONS[state.character.region];
     if (!r.settlement) return { info: true, message: 'There is no one here to offer you work. Find a settlement.' };
+    if (getPlayerLevel(state.totalXP || 0) < 3) return { info: true, message: 'Nobody trusts a stranger with real work yet. Take a few bounties from the board first (level 3).' };
     state.saga = generateSaga(state, world);
     return { started: true, message: `A new saga: ${state.saga.title}.\n${state.saga.steps.map((x, i) => `  ${i + 1}. ${x.objective}`).join('\n')}\nReward: +${state.saga.reward.xp} XP, ${formatCoin(state.saga.reward.coin)}.` };
   }

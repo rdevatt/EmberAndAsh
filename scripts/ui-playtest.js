@@ -58,6 +58,10 @@ async function desktop(browser) {
   check('desktop: objective names Maren', /Maren/.test(await page.locator('#story-objective').innerText()));
   check('desktop: narration mode shown', /narration/.test(await page.locator('#narration-mode').innerText()));
   check('desktop: factions panel visible', await h.visible('#section-factions') && (await page.locator('.faction-row').count()) === 4);
+  check('desktop: portrait drawn from the description', (await page.locator('#portrait-holder svg.ea-portrait').count()) === 1);
+  const portraitHtml = await page.locator('#portrait-holder').innerHTML();
+  check('desktop: illustrated scene shown', await h.visible('#scene-holder svg.ea-scene'));
+  check('desktop: date and age shown', /E\.R\./.test(await page.locator('#world-line').innerText()) && /Age \d+/.test(await page.locator('#char-age').innerText()));
 
   await h.send('talk to Maren');
   check('desktop: talking advances objective', /Vesna/.test(await page.locator('#story-objective').innerText()));
@@ -79,6 +83,12 @@ async function desktop(browser) {
     rounds++;
   }
   check(`desktop: combat via buttons resolves (${rounds} rounds)`, !(await h.visible('#enemy-display')));
+  await page.waitForTimeout(1800);
+  const played = await page.locator('#scene-holder').getAttribute('data-played');
+  check('desktop: scene animated the turn\'s events', /attack|spell|death|enemyAttack/.test(played || ''), played);
+  const deadAttr = await page.locator('#scene-holder').getAttribute('data-enemy-dead');
+  check('desktop: a slain enemy is drawn dead (or the player fell)', deadAttr === 'true' || deadAttr === 'none', deadAttr);
+  check('desktop: portrait stable across turns', (await page.locator('#portrait-holder').innerHTML()) === portraitHtml);
   check('desktop: action bar clears after combat', (await page.locator('#combat-actions .combat-btn').count()) === 0);
   check('desktop: combat round entry cannot be undone', (await page.locator('.undo-btn').count()) === 0 || !(/◀|▶/.test(await h.lastStory())));
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/desktop.png` });
@@ -91,8 +101,31 @@ async function desktop(browser) {
   await page.reload();
   await page.waitForSelector('#input-area:not(.hidden)', { timeout: 8000 }).catch(() => {});
   check('desktop: reload keeps story progress', /Vesna/.test(await page.locator('#story-objective').innerText()));
+  check('desktop: reload keeps the same face', (await page.locator('#portrait-holder').innerHTML()) === portraitHtml);
+  await page.click('#btn-saves'); await page.waitForTimeout(600);
+  check('desktop: worlds list in saves menu', /Guttering Age|E\.R\.|Only this world/.test(await page.locator('#worlds-list').innerText()));
+  await page.click('#btn-close-saves');
   check('desktop: no console errors', errors.length === 0, errors.slice(0, 3).join(' | '));
   await page.context().close();
+}
+
+async function reducedMotion(browser) {
+  const context = await browser.newContext({ viewport: { width: 1200, height: 800 }, reducedMotion: 'reduce' });
+  const page = await context.newPage();
+  const errors = [];
+  page.on('pageerror', e => errors.push(e.message));
+  page.on('dialog', d => d.accept());
+  const h = helpers(page);
+  await page.goto(URL);
+  await createCharacter(page, h, 'Still');
+  await h.send('I attack the nearest creature');
+  await h.send('I slash at its torso');
+  const played = await page.locator('#scene-holder').getAttribute('data-played');
+  check('reduced motion: events drawn as final state immediately', !!played && /attack|spell|stunned|item/.test(played), played);
+  const anims = await page.evaluate(() => [...document.querySelectorAll('#scene-holder *')].filter(el => getComputedStyle(el).animationName !== 'none').length);
+  check('reduced motion: no running animations', anims === 0, `${anims} animated`);
+  check('reduced motion: no console errors', errors.length === 0, errors.join(' | '));
+  await context.close();
 }
 
 async function mobile(browser) {
@@ -107,6 +140,9 @@ async function mobile(browser) {
   check('mobile: input reachable on story tab', await h.visible('#player-input'));
   await h.send('I attack the nearest creature');
   check('mobile: combat buttons visible on story tab', await h.visible('#combat-actions .combat-btn'));
+  check('mobile: scene visible on story tab', await h.visible('#scene-holder svg'));
+  const sceneBox = await page.locator('#scene-holder').boundingBox();
+  check('mobile: scene fits the screen', sceneBox && sceneBox.width <= 391 && sceneBox.height <= 200, sceneBox ? `${Math.round(sceneBox.width)}×${Math.round(sceneBox.height)}` : 'none');
   const box = await page.locator('#combat-actions .combat-btn').first().boundingBox();
   check('mobile: combat buttons are touch-sized', box && box.height >= 36, box ? `${Math.round(box.height)}px` : 'none');
   let rounds = 0;
@@ -118,6 +154,7 @@ async function mobile(browser) {
   check('mobile: world tab shows main story', await h.visible('#section-story'));
   await page.click('.mobile-nav-btn[data-panel="left"]');
   check('mobile: character tab shows factions', await h.visible('#section-factions'));
+  check('mobile: portrait on character tab', await h.visible('#portrait-holder svg'));
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/mobile.png`, fullPage: false });
   check('mobile: no console errors', errors.length === 0, errors.slice(0, 3).join(' | '));
   await page.context().close();
@@ -130,6 +167,7 @@ async function mobile(browser) {
   });
   try {
     await desktop(browser);
+    await reducedMotion(browser);
     await mobile(browser);
   } catch (e) {
     results.push(`FAIL  script error — ${e.message}`);

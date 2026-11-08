@@ -25,6 +25,8 @@ const STYLE = arg('--style', 'fighter');
 const PATH  = arg('--path', 'wardens');
 const MAX   = parseInt(arg('--max', '60000'), 10);
 const QUIET = argv.includes('--quiet');
+const POSTGAME = parseInt(arg('--postgame', '0'), 10);      // actions to play the hero after the ending
+const GENERATION = parseInt(arg('--generation', '0'), 10);  // actions to play a new character in the same world
 h.seedRandom(SEED);
 
 const STYLES = {
@@ -48,6 +50,9 @@ const tierFor = lvl => { let t = 0; for (const q of GEAR_QUALITIES) if (lvl >= q
 
 const stats = { actions: 0, deaths: 0, kills: 0, bosses: [], chapters: [], regions: new Set(), crafted: 0, recruited: [], quests: 0, landmarks: 0, levelAt: {}, errors: [] };
 let c, last = {};
+let serverSessions = null;
+// Read-only peek at the live state for bookkeeping (saga step details).
+function sessionsState() { const x = serverSessions && serverSessions.get(c.sessionId); return x ? x.state : {}; }
 
 function log(...a) { if (!QUIET) console.log(...a); }
 
@@ -77,8 +82,10 @@ const inv = () => (last.character && last.character.inventory) || [];
 const count = name => inv().filter(i => (typeof i === 'string' ? i : i.name) === name).length;
 
 // ---------- combat ----------
+let genTrace = false;
 async function fightToEnd() {
   let lastOut = '';
+  if (genTrace) { const ss = sessionsState(); log(`  fight L${level()} hp ${ss.hp}/${ss.maxHp} weapon=${ss.gear && ss.gear.weapon ? ss.gear.weapon.name + '/' + ss.gear.weapon.tier : 'none'} armor=${ss.gear && ss.gear.armor ? ss.gear.armor.name : 'none'} vs ${ss.currentEnemy && ss.currentEnemy.label} L${ss.currentEnemy && ss.currentEnemy.level} in ${region()}`); }
   for (let round = 0; round < 120 && inCombat(); round++) {
     let input = style.attack;
     const abilities = (last.abilities || []).filter(a => a.ready);
@@ -281,7 +288,9 @@ function findNpcName(id) {
 
 (async () => {
   const t0 = Date.now();
-  const { base } = await h.startServer();
+  const started = await h.startServer();
+  const base = started.base;
+  serverSessions = started.sessions;
   c = h.client(base);
   const g = await c.post('/auth/guest', {}); c.sessionId = g.sessionId;
   await act(`My name is Bot${STYLE}, I am 28 years old and female`);
@@ -314,8 +323,100 @@ function findNpcName(id) {
     else rift = (r.output || '').slice(0, 80);
   }
 
+  // ---------- after the ending: continue as the hero ----------
+  const post = { levelAt: {}, sagas: 0, crises: 0, riftDepth: 0, deaths0: stats.deaths, startLevel: level(), startActions: stats.actions };
+  if (POSTGAME && last.story && last.story.ended) {
+    await act('continue');
+    const stop = stats.actions + POSTGAME;
+    let riftTurn = 0;
+    while (stats.actions < stop) {
+      await recover();
+      const st = await c.get('/state');
+      const sagaObj = st.world && st.world.saga;
+      riftTurn++;
+      if (riftTurn % 4 === 0) {
+        // A rift dive from the Throne.
+        if (region() !== 'shattered_throne') await goTo('shattered_throne');
+        await act('make camp'); if (inCombat()) await fightToEnd();
+        const d0 = stats.deaths;
+        const r = await act('enter the rift');
+        if (inCombat()) { await fightToEnd(); if (stats.deaths === d0) post.riftDepth++; }
+        else if (/unmake/.test(r.output || '')) riftTurn = -1000;
+        continue;
+      }
+      if (st.world && st.world.crises && riftTurn % 3 === 0) {
+        const w = await c.get('/world');
+        const crisis = w.current && w.current.crises && w.current.crises[0];
+        if (crisis && REGIONS[crisis.region].levelRange[0] <= level()) {
+          await goTo(crisis.region);
+          const r = await act('answer the call');
+          if (inCombat()) { const d0 = stats.deaths; await fightToEnd(); if (stats.deaths === d0) post.crises++; }
+          continue;
+        }
+      }
+      if (!sagaObj) {
+        if (!REGIONS[region()].settlement) await goTo('the_core_wastes');
+        await act('sagas');
+        continue;
+      }
+      const sagaState = sessionsState();
+      const step = sagaState && sagaState.saga && sagaState.saga.steps[sagaState.saga.step];
+      if (!step) { await act('sagas'); continue; }
+      if (region() !== step.region) { const ok = await goTo(step.region); if (!ok) { await act('abandon saga'); } continue; }
+      if (argv.includes('--trace')) log(`  saga step ${step.type} L${sessionsState().saga.level} at hero L${level()}`);
+      const typed = (step.objective.match(/type "([^"]+)"/) || [])[1];
+      const before = (sagaState.sagasCompleted || 0);
+      await act(typed || 'sagas');
+      if (inCombat()) await fightToEnd();
+      if ((sessionsState().sagasCompleted || 0) > before) post.sagas++;
+      const lv = level();
+      if (!post.levelAt[lv]) post.levelAt[lv] = stats.actions - post.startActions;
+    }
+  }
+  post.endLevel = level(); post.deaths = stats.deaths - post.deaths0; post.actions = stats.actions - post.startActions;
+
+  // ---------- a new generation in the same world ----------
+  const gen = {};
+  if (GENERATION && last.story && last.story.ended) {
+    const heroName = last.character.name;
+    const r = await c.act('new character in this world, 30 years later');
+    gen.started = !!r.inCreation;
+    boughtTier = -1; wardsNeeded.clear();          // a new life buys its own kit
+    await act('My name is Wren, I am 16 years old and female');
+    await act('Short and wiry, freckles, red curly hair');
+    const b = await act('1'); if (b.creationError) await act('1');
+    await act('3');
+    gen.level0 = level();
+    gen.inherited = !!(sessionsState().campaign && sessionsState().campaign.inherited);
+    const legends = await act('legends');
+    gen.legendKnown = (legends.output || '').includes(heroName);
+    const talk = await act('talk to ' + (REGIONS[region()].npcs[0] || { name: 'nobody' }).name);
+    gen.rumor = (talk.output || '').split('\n').find(l => /"/.test(l) && /Did you hear|rules now|buried|saw them|I heard/.test(l)) || null;
+    const d0 = stats.deaths, a0 = stats.actions;
+    gen.sagas = 0;
+    genTrace = argv.includes('--trace');
+    while (stats.actions < a0 + GENERATION) {
+      // Newcomers mix bounties with sagas from the local settlement.
+      const ss = sessionsState();
+      const step = ss.saga && ss.saga.steps[ss.saga.step];
+      if (!step) { if (REGIONS[region()].settlement) await act('sagas'); await grindOnce(); continue; }
+      if (region() !== step.region) { if (!(await goTo(step.region))) await act('abandon saga'); continue; }
+      const before = ss.sagasCompleted || 0;
+      await recover();
+      const dBefore = stats.deaths;
+      await act((step.objective.match(/type "([^"]+)"/) || [])[1] || 'sagas');
+      if (inCombat()) await fightToEnd();
+      if (stats.deaths > dBefore) { for (let k = 0; k < 3; k++) await grindOnce(); }   // get stronger before retrying
+      if ((sessionsState().sagasCompleted || 0) > before) gen.sagas++;
+    }
+    gen.level = level(); gen.deaths = stats.deaths - d0; gen.actions = stats.actions - a0;
+    gen.age = sessionsState().character.age;
+  }
+
   const final = await c.get('/state');
   const report = {
+    postgame: POSTGAME ? post : undefined,
+    generation: GENERATION ? gen : undefined,
     seed: SEED, style: STYLE, path: PATH,
     finished: !!(final.story && final.story.ended), ending: final.story && final.story.ending,
     actions: stats.actions, minutes: +((Date.now() - t0) / 60000).toFixed(1),

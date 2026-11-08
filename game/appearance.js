@@ -60,7 +60,7 @@ function parseAppearance(description, character = {}, seedKey = '') {
   }
   if (!scars.length && /\bscar/.test(lower)) scars.push('cheek');
   const marks = [];
-  if (/tattoo|inked|ink-stained|runes? on (?:my|his|her|their) (?:face|skin)/.test(lower)) marks.push('tattoo');
+  if (/tattoo|\binked\b|runes? on (?:my|his|her|their) (?:face|skin)/.test(lower)) marks.push('tattoo');
   if (/freckle/.test(lower)) marks.push('freckles');
   if (/eye ?patch|one eye|missing (?:an |one |my )?eye/.test(lower)) marks.push('eyepatch');
   if (/missing (?:an |one |my |half (?:of )?(?:an |my )?)?ear/.test(lower)) marks.push('missing ear');

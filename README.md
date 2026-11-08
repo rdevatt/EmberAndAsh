@@ -170,19 +170,23 @@ Type what your character does. Type `help` in-game for the full command list. Th
 - **Rest:** `rest` (short), `make camp` (full heal, ambush risk), `rent a room at the inn` (safe, costs coin).
 - **Death:** you lose 1 level (up to 3 for repeated deaths), wake at the last settlement, and leave your gear where you fell (`recover gear` there).
 - **No rerolls:** combat rounds and story decisions can't be undone or edited.
+- **After the ending:** `continue`, `new character in this world, 40 years later`, or `new world` (or use the buttons). Nothing is deleted — set-aside characters can be resumed from Saves → Worlds & Characters.
+- **The living world:** `date`, `chronicle`, `legends`, `crises` / `answer the call`, `sagas`, `titles`, `longevity` / `pursue <path>`, `train strength for a year`, `govern for prosperity` (rulers), `found the <name> order`, `talk to <legend>`, `learn from <legend>`. Time passes with real actions; characters age; there is no level cap, but levels beyond 100 get dramatically harder.
+- **Art:** your portrait is drawn from your description and changes with gear, age, scars and rank; each turn is illustrated. "Still" stops animation; "Hide art" hides it; reduced-motion settings are respected.
 
 ## Development tools
 
 ```bash
-npm test                                   # 64 unit + API tests (temp DB, offline narration)
+npm test                                   # 89 unit + API tests (temp DB, offline narration)
 node scripts/balance-sim.js --fights 200   # win%/rounds/HP per tier & build, and every boss
 node scripts/region-sweep.js               # fighter vs every one of the 38 regions
 node scripts/playthrough.js --style fighter|wizard|ranger --path wardens|remnant|ascend|shatter
                                            # bot plays the whole game over HTTP to an ending
+                                           # add --postgame N (play the hero on) and --generation N (a successor)
 node scripts/ui-playtest.js                # desktop + mobile browser checks (needs playwright-core + Chromium; see file header)
 ```
 
-Status of every system, what is verified and what remains: [`docs/GAME_COMPLETION.md`](docs/GAME_COMPLETION.md). Credentials: [`docs/SECURITY.md`](docs/SECURITY.md).
+Status of every system, what is verified and what remains: [`docs/GAME_COMPLETION.md`](docs/GAME_COMPLETION.md) (campaign era) and [`docs/LIVING_WORLD.md`](docs/LIVING_WORLD.md) (persistent worlds, generations, endless play, art). Credentials: [`docs/SECURITY.md`](docs/SECURITY.md).
 
 ## Changes in this pass
 

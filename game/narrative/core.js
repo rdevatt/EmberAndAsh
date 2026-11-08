@@ -613,7 +613,7 @@ function buildDeathAnnouncement(evt) {
     '\n\n— DARKNESS —\n',
     `You wake in the citadel, gasping. The stone is cold beneath you.\n`,
     `[DEATH #${evt.deathCount}]`,
-    `Lost ${evt.levelsLost} level(s). You are now Level ${evt.newLevel}.`,
+    evt.xpLost !== null && evt.xpLost !== undefined ? `Lost ${evt.xpLost} XP of progress. You remain Level ${evt.newLevel}.` : `Lost ${evt.levelsLost} level(s). You are now Level ${evt.newLevel}.`,
     `Revived at the nearest citadel in ${evt.regionLabel || 'the region'}.`,
     evt.hadGear
       ? 'Your equipment remains where you fell. Return there and type "recover gear" to retrieve it — or buy replacements ("shop").'

@@ -169,9 +169,24 @@ module.exports = function registerGameplayRoutes(app, deps) {
     state.deathCount  = (state.deathCount || 0) + 1;
     state.recentDeaths = (state.recentDeaths || []).filter(a => now - a < RECENT_DEATH_WINDOW);
     state.recentDeaths.push(now);
-    const levelsLost  = Math.min(3, state.recentDeaths.length);
-    const newLevel    = Math.max(1, playerLevel - levelsLost);
-    state.totalXP     = getXPForLevel(newLevel);
+    // Below level 100 a death costs 1–3 levels (the original rule). Beyond
+    // that a single level can be worth a whole campaign, so legends instead
+    // lose a quarter of their progress toward the next level — painful,
+    // never ruinous, and never a spiral.
+    let levelsLost = 0, newLevel = playerLevel, xpLost = null;
+    if (playerLevel < 100) {
+      // Newcomers (below level 10) lose a single level, never a stack.
+      levelsLost = playerLevel < 10 ? 1 : Math.min(3, state.recentDeaths.length);
+      newLevel   = Math.max(1, playerLevel - levelsLost);
+      state.totalXP = getXPForLevel(newLevel);
+    } else {
+      const XPm = require('../../../game/character/xp');
+      const floor = XPm.toBig(getXPForLevel(playerLevel));
+      const progress = XPm.toBig(state.totalXP) - floor;
+      const loss = progress / 4n;
+      state.totalXP = XPm.fromBig(XPm.toBig(state.totalXP) - loss);
+      xpLost = XPm.formatXP(XPm.fromBig(loss));
+    }
     state.inCombat     = false;
     state.currentEnemy = null;
     tactics.clearCombatEffects(state);
@@ -202,7 +217,7 @@ module.exports = function registerGameplayRoutes(app, deps) {
     state.lastDefeatedEnemyLoot = null;
 
     const regionLabel = buildCharacterPanelData(state).region || 'the region';
-    events.push({ type: 'death', deathCount: state.deathCount, levelsLost: Math.min(levelsLost, playerLevel - 1), newLevel, hadGear, regionLabel });
+    events.push({ type: 'death', deathCount: state.deathCount, levelsLost: Math.min(levelsLost, playerLevel - 1), newLevel, hadGear, regionLabel, xpLost });
     appendHint(state, `[DEATH — the player was killed and revived at the nearest citadel in ${regionLabel}. Describe waking cold and diminished. Their gear was left where they fell.]`);
   }
 
@@ -439,7 +454,19 @@ module.exports = function registerGameplayRoutes(app, deps) {
           state.creationPrompt = result.prompt;
         }
 
+        // Born into an age that already has its legends: a first saga at home.
+        let narrativeExtra = '';
+        const Wc = result.done ? chronicle.worldOf(state) : null;
+        if (Wc) chronicle.ensureCharacterIdentity(state, Wc);
+        if (Wc && Wc.ending && !state.starterSagaGiven) {
+          campaign.ensureCampaign(state);
+          state.saga = endless.generateSaga(state, Wc, { starter: true });
+          state.starterSagaGiven = true;
+          narrativeExtra = `\n\n${Wc.era.name}, ${chronicle.formatDate(chronicle.nowHour(Wc))}.${Wc.realm ? ` ${Wc.realm.title} rules.` : ''}\nYour first saga — ${state.saga.title}: ${state.saga.steps[0].objective}. ("sagas" shows it; "legends" and "chronicle" tell you what came before.)`;
+        }
+
         const narrative = await processNarrative(state, cleanInput, events);
+        if (narrativeExtra) narrative.fullOutput = (narrative.fullOutput || '') + narrativeExtra;
         await persistSession(req.sessionId);
 
         if (result.done) appearance.ensureAppearance(state);

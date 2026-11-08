@@ -210,7 +210,10 @@ function lifespan(state) {
   const L = longevity(state);
   if (L.immortal) return Infinity;
   const vit = (state.stats && state.stats.vit) || 10;
-  return Math.round((70 + vit / 2 + L.bonusYears) * L.slowFactor);
+  // Elves, dwarves and halflings outlive humans; orcs burn brighter.
+  const species = (state.appearance && state.appearance.species) || 'human';
+  const kin = { elf: 3, dwarf: 1.8, halfling: 1.3, orc: 0.9 }[species] || 1;
+  return Math.round((70 + vit / 2 + L.bonusYears) * kin * L.slowFactor);
 }
 
 // Physiological age: slowed aging makes the body younger than the calendar.
