@@ -470,6 +470,13 @@ function buildEventAnnouncements(events) {
   for (const evt of events) {
     switch (evt.type) {
 
+      case 'system':
+        lines.push(`\n\n${evt.message}`);
+        break;
+
+      case 'chapterComplete':
+        break;
+
       case 'enemyKill':
         lines.push(`\n[Defeated ${evt.label}. +${evt.xp} XP.]`);
         break;

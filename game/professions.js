@@ -298,7 +298,14 @@ function calculateProfessionTaskXP(taskLevel, professionLevel) {
 // =============================================
 const CRAFTING_PROFESSIONS = new Set(['blacksmith','alchemist','woodsman','hunter','scholar','cook','scout','merchant']);
 
+// Free-form crafting no longer conjures gear: items come from recipes that
+// consume materials (game/crafting-recipes.js). Narrated craft work still
+// earns profession XP below, at a limited rate.
 function _tryGenerateCraftedItem(state, input, profLvl) {
+  return null;
+}
+
+function _legacyGenerateCraftedItem(state, input, profLvl) {
   // Any player can craft — no profession required for primitive items.
   // Profession determines quality tier. No profession = crude (tier 0).
   const profKey = state.profession || null;
@@ -405,6 +412,10 @@ function resolveProfessionTask(state, input) {
   }
 
   const profLvl  = getProfessionLevel(state.profXP || 0);
+  // Narrated work earns XP at most once every 3 actions, so describing the
+  // same task over and over is not a free level.
+  if ((state.actionCount || 0) - (state.lastProfTaskAt || -99) < 3) return null;
+  state.lastProfTaskAt = state.actionCount || 0;
   const taskXP   = calculateProfessionTaskXP(taskLevel, profLvl);
   const profData = PROFESSIONS[state.profession];
 

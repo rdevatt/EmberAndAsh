@@ -1,5 +1,7 @@
 'use strict';
 
+const { extraPanels } = require('../extra-panels');
+
 module.exports = function registerAuthRoutes(app, deps) {
   const {
     db,
@@ -26,7 +28,8 @@ module.exports = function registerAuthRoutes(app, deps) {
       progression: buildProgressionPanelData(state),
       economy:     buildEconomyPanelData(state),
       rightPanel:  buildRightPanelData(state),
-      board:       buildBoardDisplayData(state)
+      board:       buildBoardDisplayData(state),
+      ...extraPanels(state, !state.character || !state.character.region || (state.creation && state.creation.phase < 5))
     };
   }
 

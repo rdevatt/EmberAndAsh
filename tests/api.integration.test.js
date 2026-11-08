@@ -293,7 +293,7 @@ test('merchant: shop, buy gear and potions, drink a potion, rent a room', async 
   const equip = await c.act(`equip ${sword.output.match(/Bought (.+?) for/)[1]}`);
   assert.match(equip.output, /Equipped/);
   const potions = await c.act('buy 2 healing potions');
-  assert.match(potions.output, /Bought 2 healing potions/);
+  assert.match(potions.output, /Bought 2 × healing potion/);
   sessions.get(c.sessionId).state.hp = 5;
   const drink = await c.act('drink potion');
   assert.match(drink.output, /HP \+\d+/);

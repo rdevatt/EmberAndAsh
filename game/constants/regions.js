@@ -416,7 +416,7 @@ const REGIONS = {
     boardLabel:null,
     monsters:['Breach Horrors','Power Elementals','Ancient Demons','Rift Guardians','Breach Titans'],
     rareMonsters:['Breach Lord','Ancient Rift Horror','Breach Dragon'],
-    connections:{ same:['shattered_march','bone_desert'], prev:['bone_desert','void_marches'], next:['the_crucible','shattered_throne'] },
+    connections:{ same:['shattered_march','bone_desert'], prev:['bone_desert','void_marches'], next:['the_crucible','the_core_wastes'] },
   },
 
   // ============================================================
@@ -431,7 +431,7 @@ const REGIONS = {
     boardLabel:null,
     monsters:['Lava Leviathans','Fire Ancients','Volcanic Dragons','Crucible Titans','Flame Archons'],
     rareMonsters:['Ancient Lava Dragon','Crucible Colossus','Fire Ancient Alpha'],
-    connections:{ same:['void_marches','eternal_breach'], prev:['crucible_gate','shattered_march'], next:['shattered_throne'] },
+    connections:{ same:['void_marches','eternal_breach'], prev:['crucible_gate','shattered_march'], next:['the_core_wastes'] },
   },
 
   // ============================================================
@@ -462,7 +462,7 @@ const REGIONS = {
     boardLabel:null,
     monsters:['Ancient Dragons','Archliches','World Titans','Throne Guardians','Primordial Horrors'],
     rareMonsters:['Ancient Dragon (Elder)','Archlich (Grand)','World Serpent'],
-    connections:{ same:[], prev:['the_core_wastes','the_crucible'], next:[] },
+    connections:{ same:[], prev:['the_core_wastes'], next:[] },
   }
 };
 

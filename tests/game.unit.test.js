@@ -82,9 +82,12 @@ test('spells cost mana and deal damage', () => {
   s.spells = [ch.getStartingSpell('apprentice_mage') || { label: 'Mana Bolt', manaCost: 8, damage: { min: 4, max: 10 }, type: 'arcane' }];
   s.inCombat = true;
   s.currentEnemy = combat.spawnEnemy('thornwick', 2);
+  s.mana = s.maxMana - 20;   // room for the in-combat mana trickle
   const before = s.mana;
   const r = combat.applyCombatRound(s, 'I cast mana bolt at its chest');
-  assert.equal(s.mana, before - s.spells[0].manaCost);
+  // Casting spends the spell's cost; casters then regain ~3% per round.
+  const trickle = Math.max(1, Math.round(s.maxMana * 0.03));
+  assert.equal(s.mana, before - s.spells[0].manaCost + trickle);
   assert.ok(r.combatLog.includes(s.spells[0].label));
 });
 
@@ -265,11 +268,13 @@ test('the enemy table is large and every enemy is well-formed', () => {
 });
 
 test('death in the wild revives at the last settlement', () => {
-  const s = readyState('wyrmwood', 31);
-  s.visitedRegions = ['thornwick', 'wyrmwood'];
-  s.lastSettlement = 'wyrmwood';
-  travel.travelTo(s, 'ashwood_deep');            // tier 4, no settlement
-  assert.equal(s.character.region, 'ashwood_deep');
-  assert.equal(travel.isSettlement('ashwood_deep'), false);
-  assert.equal(travel.getRevivalRegion(s), 'wyrmwood');
+  // Every region but the Shattered Throne now has a settlement.
+  const s = readyState('the_core_wastes', 95);
+  s.visitedRegions = ['the_core_wastes'];
+  s.lastSettlement = 'the_core_wastes';
+  s.campaign = { unlocked: ['shattered_throne'], flags: {}, choices: {}, completed: [], bossesDefeated: [], chapter: 10, step: 0 };
+  travel.travelTo(s, 'shattered_throne');
+  assert.equal(s.character.region, 'shattered_throne');
+  assert.equal(travel.isSettlement('shattered_throne'), false);
+  assert.equal(travel.getRevivalRegion(s), 'the_core_wastes');
 });

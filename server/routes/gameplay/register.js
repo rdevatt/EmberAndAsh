@@ -8,6 +8,14 @@ const { getQuestTargets, buildQuestJournal, abandonQuest } = require('../../../g
 const { detectTravelIntent, travelTo, buildMapText, getRevivalRegion } = require('../../../game/travel');
 const { applySocialRapport, describeUpgrade } = require('../../../game/economy');
 const { buildShopText, buyItem, drinkPotion } = require('../../../game/shop');
+const createWorldCommands = require('./world-commands');
+const { extraPanels } = require('../extra-panels');
+const campaign  = require('../../../game/campaign');
+const comps     = require('../../../game/companions');
+const factions  = require('../../../game/factions');
+const world     = require('../../../game/world');
+const tactics   = require('../../../game/combat-tactics');
+const { getTierForLevelPublic } = { getTierForLevelPublic: (lvl) => { const { GEAR_QUALITIES } = require('../../../game/constants'); let t = 0; for (const q of GEAR_QUALITIES) if (lvl >= q.levelReq) t = q.tier; return t; } };
 
 const MAX_INPUT_LENGTH = 2000;
 
@@ -20,16 +28,19 @@ const HELP_TEXT = [
   'Describe what you do in plain words — "I search the abandoned cart", "I ask the innkeeper about work".',
   'Detailed, tactical combat actions ("I feint left and slash at its knee") hit more often than "attack".',
   '',
-  'Combat:   attack / fight <target> · flee · inspect (Scouts read enemies) · cast <spell>',
+  'Story:    story (main quest) · talk to <name> · confront <boss> · choose N · factions',
+  'Combat:   attack / fight <target> · defend · <ability name> · cast <spell> · drink potion · flee · inspect',
+  '          abilities (list yours) — watch for ⚠ telegraphed attacks and defend against them',
   'After:    loot the body · recover gear (where you died)',
+  'World:    explore (places here) · explore <place> · gather · map · travel to <region>',
+  'Craft:    recipes · materials · craft <item> ("forge a sword", "brew healing potion", "make a fur-lined cloak")',
   'Rest:     rest (short) · make camp (full heal, risk of ambush) · rent a room at the inn (safe, costs coin)',
-  'Trade:    shop · buy <item> · drink potion · sell <item>',
+  'Trade:    shop · buy <item> · sell <item> · drink potion / drink mana potion',
   'Quests:   check board · accept quest N · quests · abandon quest N',
-  'Travel:   map · travel to <region>',
-  'Gear:     gear / backpack · equip <item> · unequip <item> · sell <item> · drop <item>',
+  'Gear:     gear / backpack · equip <item> · unequip <item> · drop <item>',
   'Growth:   stats · spend point on <stat>   (offers: answer "yes" or "no")',
-  'Party:    companions · ask <name> to join you · dismiss <name>',
-  'Shop:     open shop · close shop'
+  'Party:    companions · recruit <name> · hire a sellsword · dismiss <name>',
+  'Shop:     open shop · close shop (merchants: sell your own goods)'
 ].join('\n');
 
 // Words that follow "take"/"grab" in actions that are not item pickups.
@@ -111,6 +122,7 @@ module.exports = function registerGameplayRoutes(app, deps) {
       economy:     buildEconomyPanelData(state),
       rightPanel:  buildRightPanelData(state),
       board:       buildBoardDisplayData(state),
+      ...extraPanels(state, isInCreation(state)),
       inCreation:  isInCreation(state)
     };
   }
@@ -123,7 +135,7 @@ module.exports = function registerGameplayRoutes(app, deps) {
     req.session.lastEvents = [];
     req.session.lastCombatLog = null;
     setSession(req.sessionId, req.session);
-    return res.json({ success: true, output, isCommand: true, commandType, ...allPanels(state) });
+    return res.json({ success: true, output, isCommand: true, commandType, undoable: false, ...allPanels(state) });
   }
 
   function appendHint(state, hint) {
@@ -150,8 +162,9 @@ module.exports = function registerGameplayRoutes(app, deps) {
     state.totalXP     = getXPForLevel(newLevel);
     state.inCombat     = false;
     state.currentEnemy = null;
-    state.statusEffects = [];
+    tactics.clearCombatEffects(state);
     state.pendingEnemyKill = null;
+    req_undoLock(state);
 
     const hadGear = saveGearAtDeath(state);   // also recalculates resources
     state.hp      = state.maxHp;
@@ -182,10 +195,29 @@ module.exports = function registerGameplayRoutes(app, deps) {
     state.pendingEnemyKill = null;
 
     events.push({ type: 'enemyKill', label: kill.label, xp: kill.xp });
-    state.lastDefeatedEnemyLoot = { label: kill.label, level: kill.level || 1, looted: false, ts: Date.now() };
+    state.lastDefeatedEnemyLoot = { label: kill.label, level: kill.level || 1, looted: false, ts: Date.now(), isBoss: !!kill.isBoss };
 
     const levelUp = grantXP(state, kill.xp, { classXP: true });
     if (levelUp) events.push(levelUp);
+    comps.onVictory(state);
+
+    const meta = kill.meta || {};
+    if (meta.landmark) {
+      const done = world.completeLandmark(state, meta.landmark.region, meta.landmark.id);
+      if (done.success) {
+        events.push({ type: 'system', message: done.message });
+        if (done.levelUp) events.push(done.levelUp);
+        worldCommands.pushCampaign(events, campaign.onEvent(state, { type: 'landmark', region: meta.landmark.region, id: meta.landmark.id }));
+      }
+    }
+    if (meta.boss) {
+      worldCommands.pushCampaign(events, campaign.onEvent(state, { type: 'bossDefeated', boss: meta.boss }));
+      appendHint(state, `[BOSS DEFEATED — ${kill.label} has fallen. This is a turning point in the story. Make it feel earned.]`);
+    }
+    if (meta.rift) {
+      const msg = campaign.onRiftCleared(state, meta.rift);
+      if (msg) events.push({ type: 'system', message: msg });
+    }
 
     applyQuestUpdates(state, events, input, [{ type: 'enemyDefeated', enemyLabel: kill.label }]);
   }
@@ -204,6 +236,13 @@ module.exports = function registerGameplayRoutes(app, deps) {
       events.push({ type: 'questComplete', quest: c.quest, reward: c.reward, hint: c.hint });
       if (c.levelUp) events.push(c.levelUp);
       appendHint(state, c.hint);
+      // Bounties earn the standing of whoever holds sway locally, and the
+      // regard of companions who call this region home.
+      const region = (c.quest && c.quest.region) || state.character.region;
+      const applied = factions.changeStanding(state, { [factions.getRegionFaction(region)]: 3 }, 'bounty');
+      const note = factions.formatStandingChanges(applied);
+      if (note) events.push({ type: 'system', message: `Standing: ${note}` });
+      for (const r of comps.onQuestCompleted(state, region)) events.push({ type: 'system', message: `${r.name} hears of your work (rapport ${r.rapport}).` });
     }
   }
 
@@ -221,8 +260,17 @@ module.exports = function registerGameplayRoutes(app, deps) {
   function startEncounter(state, enemy, hint) {
     state.inCombat     = true;
     state.currentEnemy = enemy;
+    tactics.clearCombatEffects(state);
     appendHint(state, hint);
   }
+
+  // Combat rounds and story decisions can't be rewound (no rerolling fate).
+  let currentReq = null;
+  function req_undoLock() { if (currentReq) currentReq.session.undoLocked = true; }
+
+  const worldCommands = createWorldCommands({
+    sendCommand, narrateAndRespond: (...a) => narrateAndRespond(...a), startEncounter, appendHint, spawnEnemy, getPlayerLevel
+  });
 
   async function narrateAndRespond(req, res, input, events, extra = {}) {
     const state     = req.session.state;
@@ -244,15 +292,21 @@ module.exports = function registerGameplayRoutes(app, deps) {
       db.appendStoryHistory(req.session.saveId, state.actionCount || 0, input, narrative.narrative || '', state.sceneContext || 'neutral');
     }
 
-    return res.json({ success: true, output, ...allPanels(state), rightPanel: narrative.rightPanel });
+    return res.json({ success: true, output, undoable: !req.session.undoLocked, ...allPanels(state), rightPanel: narrative.rightPanel });
   }
 
   // Runs one combat round (or flee) and narrates it. Shared by /action and /edit-action.
   async function handleCombatTurn(req, res, input, events) {
     const state = req.session.state;
+    req.session.undoLocked = true;
 
     if (detectFleeIntent(input)) {
+      const fleeing = state.currentEnemy;
       const fleeResult = applyFleeAttempt(state);
+      if (fleeResult.success) {
+        tactics.clearCombatEffects(state);
+        if (fleeing && fleeing.isBoss) events.push({ type: 'system', message: `You escape. ${fleeing.label} will be waiting, fully recovered, when you return.` });
+      }
       state.pendingContextHint = fleeResult.hint;
       if (isDead(state)) applyDeath(state, events);
       return narrateAndRespond(req, res, input, events);
@@ -283,6 +337,8 @@ module.exports = function registerGameplayRoutes(app, deps) {
 
     req.session.stateSnapshot = createStateSnapshot(state);
     req.session.lastInput     = cleanInput;
+    req.session.undoLocked    = false;
+    currentReq = req;
 
     try {
       // =========================================
@@ -372,10 +428,11 @@ module.exports = function registerGameplayRoutes(app, deps) {
         return sendCommand(req, res, buildBackpackSummary(state), 'backpack', { persist: false });
       }
 
-      if (['companions', 'check companions', 'my companions', 'party', 'my party'].includes(cmd)) {
-        const companionData = getCompanionsDisplay(state);
-        return sendCommand(req, res, companionData.hasCompanions ? `Your companions: ${companionData.display}` : 'You are traveling alone.', 'companions', { persist: false });
-      }
+      for (const msg of comps.tickContracts(state)) events.push({ type: 'system', message: msg });
+
+      // Story, factions, companions, exploration, gathering, crafting.
+      const worldResponse = await worldCommands.handle(req, res, cleanInput, cmd, events);
+      if (worldResponse) return worldResponse;
 
       // =========================================
       // TRAVEL
@@ -390,7 +447,12 @@ module.exports = function registerGameplayRoutes(app, deps) {
 
         events.push({ type: 'travel', from: result.from, to: result.to, message: result.message });
         state.pendingContextHint = result.hint;
+        const arrival = REGIONS[result.to];
+        if (arrival && arrival.settlement) events.push({ type: 'system', message: `${arrival.settlement.name} (${arrival.settlement.kind}) — inn: ${arrival.settlement.inn}. Type "explore" to see what is here.` });
+        const hz = world.applyHazard(state);
+        if (hz) events.push({ type: 'system', message: hz.message });
         applyQuestUpdates(state, events, cleanInput, [{ type: 'arrived', region: result.to }]);
+        worldCommands.pushCampaign(events, campaign.onEvent(state, { type: 'arrived', region: result.to }));
 
         // The road is not always quiet.
         if (Math.random() < 0.25) {
@@ -413,8 +475,10 @@ module.exports = function registerGameplayRoutes(app, deps) {
         const result = buyItem(state, buyMatch[1]);
         if (!result.notStocked) return sendCommand(req, res, result.message, 'buy', { persist: result.success });
       }
-      if (/^(?:i\s+)?(?:drink|quaff|use|down)\s+(?:a\s+|the\s+|my\s+)?(?:healing\s+)?potion\b/i.test(cleanInput)) {
-        const result = drinkPotion(state);
+      const potionMatch = cleanInput.match(/^(?:i\s+)?(?:drink|quaff|use|down|eat)\s+(?:a\s+|the\s+|my\s+|some\s+)?(healing\s+|mana\s+|hearty\s+)?(potion|meal|draught|food)\b/i);
+      if (potionMatch && !state.inCombat) {
+        const kind = /mana/i.test(potionMatch[1] || '') ? 'mana' : /meal|food|hearty/i.test((potionMatch[1] || '') + potionMatch[2]) ? 'meal' : 'healing';
+        const result = drinkPotion(state, kind);
         return sendCommand(req, res, result.message, 'potion', { persist: result.success });
       }
 
@@ -507,14 +571,7 @@ module.exports = function registerGameplayRoutes(app, deps) {
       // CHARACTER / SETTINGS COMMANDS
       // =========================================
       if (t.startsWith('set companion ') || t.startsWith('add companion ')) {
-        const name = stripTrailingPunctuation(cleanInput.replace(/^(set|add) companion\s+/i, '').trim());
-        if (!name) return sendCommand(req, res, 'Specify a companion name. Example: set companion Elara', 'companion', { persist: false });
-        const result = addCompanion(state, {
-          name: name.charAt(0).toUpperCase() + name.slice(1).toLowerCase(),
-          description: 'A companion who joined your journey.',
-          role: 'ally'
-        });
-        return sendCommand(req, res, result.success ? `${result.companion.name} has joined your party.` : result.message, 'companion');
+        return sendCommand(req, res, 'Companions have to be earned. Type "companions" to see who might join you and what they need.', 'companion', { persist: false });
       }
 
       if (/\b(spend|allocate|put|add)\b/.test(t) && /\b(str|strength|dex|dexterity|vit|vitality|int|intelligence|wis|wisdom|cha|charisma)\b/.test(t)) {
@@ -539,7 +596,9 @@ module.exports = function registerGameplayRoutes(app, deps) {
       // =========================================
       if (state.inCombat && ['inspect', 'size up', 'assess', 'read the enemy', 'study enemy'].some(w => t.includes(w))) {
         const inspectData = buildEnemyInspectData(state);
-        events.push({ type: 'inspect', content: formatInspectResult(inspectData) });
+        const traits = tactics.describeTraits(state.currentEnemy);
+        const traitText = `\nWeak to: ${traits.weak.join(', ') || 'nothing obvious'} · Resists: ${traits.strong.join(', ') || 'nothing obvious'}${traits.immune.length ? ` · Immune: ${traits.immune.join(', ')}` : ''}`;
+        events.push({ type: 'inspect', content: formatInspectResult(inspectData) + traitText });
         return narrateAndRespond(req, res, cleanInput, events);
       }
 
@@ -618,7 +677,10 @@ module.exports = function registerGameplayRoutes(app, deps) {
         // Coin scales gently with the enemy's level.
         const coinReward   = Math.round(resolvedLoot.coinReward * (1 + (lastLoot.level || 1) / 10));
 
-        for (const item of items) addItem(state, item);
+        const lootTier = Math.max(0, getTierForLevelPublic(lastLoot.level || 1) - (lastLoot.isBoss || Math.random() < 0.25 ? 0 : 1));
+        for (const item of items) addItem(state, { name: item, tier: lootTier, type: 'loot' });
+        const material = lootMaterial(lastLoot.label);
+        if (material) { world.addMaterial(state, material, 1); items.push(material); }
         if (coinReward > 0) addCoin(state, coinReward);
         state.lastDefeatedEnemyLoot.looted = true;
         appendHint(state, `[LOOT ACQUIRED — player looted ${lastLoot.label}: ${items.join(', ')}${coinReward > 0 ? ` and ${formatCoin(coinReward)}` : ''}. Narrate this naturally.]`);
@@ -659,7 +721,9 @@ module.exports = function registerGameplayRoutes(app, deps) {
               const amount = Math.max(0, MAX_LOOSE_COIN - coinGained);
               if (amount > 0) { coinGained += amount; }
             } else {
-              addItem(state, phrase);
+              // Picked up from the scene: real enough to carry, worthless to merchants,
+              // and crude if used as a weapon — words alone don't make treasure.
+              addItem(state, { name: phrase, type: 'scavenged', tier: 0, value: 1 });
               takenItems.push(phrase);
             }
           }
@@ -682,6 +746,9 @@ module.exports = function registerGameplayRoutes(app, deps) {
       // =========================================
       // EQUIP / UNEQUIP (command-style input only, never mid-attack)
       // =========================================
+      if (state.inCombat && /^(?:i\s+)?(?:equip|unequip|wear|wield|put on|don|swap)\b/i.test(cleanInput)) {
+        return sendCommand(req, res, 'There is no time to change gear mid-fight.', 'equip', { persist: false });
+      }
       if (!detectCombatIntent(cleanInput) &&
           /^(?:i\s+)?(?:equip|unequip|wear|wield|put on|don|strap on|switch to|swap|replace|take off|stow|sheathe|unwield|remove)\b/i.test(cleanInput)) {
         const equipIntent = detectEquipIntent(cleanInput);
@@ -700,7 +767,7 @@ module.exports = function registerGameplayRoutes(app, deps) {
       const companionIntent = detectCompanionIntent(cleanInput, state);
       if (companionIntent && companionIntent.npcName && !state.inCombat) {
         const npcName = stripTrailingPunctuation(companionIntent.npcName);
-        if (companionIntent.intent === 'join' && npcName) {
+        if (companionIntent.intent === 'join' && npcName && false) {
           const npcKey  = npcName.toLowerCase().replace(/\s+/g, '_');
           const rapport = state.npcRelationships && state.npcRelationships[npcKey] ? state.npcRelationships[npcKey].rapport || 0 : 0;
           if (rapport >= 30) {
@@ -861,6 +928,7 @@ module.exports = function registerGameplayRoutes(app, deps) {
 
   app.post('/api/undo', requireSession, async (req, res) => {
     if (!req.session.stateSnapshot) return res.status(400).json({ error: 'Nothing to undo.' });
+    if (req.session.undoLocked) return res.status(409).json({ error: 'Fate does not rewind: combat rounds and story decisions cannot be undone.', code: 'UNDO_LOCKED' });
     try {
       restoreStateSnapshot(req.session.state, req.session.stateSnapshot);
       const undoneInput = req.session.lastInput;
@@ -899,6 +967,7 @@ module.exports = function registerGameplayRoutes(app, deps) {
     }
     if (!req.session.stateSnapshot) return res.status(400).json({ error: 'No previous action to edit.' });
     if (isInCreation(req.session.state)) return res.status(400).json({ error: 'Cannot edit during character creation.' });
+    if (req.session.undoLocked) return res.status(409).json({ error: 'Fate does not rewind: combat rounds and story decisions cannot be edited.', code: 'UNDO_LOCKED' });
 
     try {
       restoreStateSnapshot(req.session.state, req.session.stateSnapshot);
@@ -931,7 +1000,11 @@ module.exports = function registerGameplayRoutes(app, deps) {
       const modScore    = item.statMods
         ? Object.values(item.statMods).reduce((sum, value) => sum + Math.max(0, Number(value) || 0), 0) * 20
         : 0;
-      return Math.max(10, 15 + tier * 12 + weaponScore + armorScore + modScore + (item.sellBonus || 0));
+      if (typeof item.value === 'number') return Math.max(0, item.value);
+      if (item.type === 'material') return 6;
+      if (item.type === 'potion' || item.type === 'ward') return 8;
+      const base = 15 + tier * 12 + weaponScore + armorScore + modScore;
+      return Math.max(10, Math.round(base * (1 + (item.sellBonus || 0))));
     }
     const name = String(item || '').toLowerCase();
     if (/sword|blade|axe|mace|hammer|spear|staff|bow|weapon|knife|dagger/.test(name)) return 80;
@@ -964,6 +1037,16 @@ module.exports = function registerGameplayRoutes(app, deps) {
     return null;
   }
 };
+
+// Creatures leave crafting materials behind.
+function lootMaterial(label) {
+  const l = String(label || '').toLowerCase();
+  if (/skeleton|bone|ghoul|lich|barrow|grave|tomb|zombie|dead/.test(l)) return Math.random() < 0.5 ? 'bone' : null;
+  if (/wolf|boar|bear|hound|hyena|deer|stag|cat|beast|scorpion|drake|wyvern|basilisk|rat/.test(l)) return Math.random() < 0.6 ? 'hide' : null;
+  if (/golem|construct|colossus|gate|monument|automaton/.test(l)) return Math.random() < 0.6 ? 'iron ore' : null;
+  if (/dryad|treant|thorn|sprite|druid/.test(l)) return Math.random() < 0.5 ? 'herbs' : null;
+  return Math.random() < 0.15 ? 'herbs' : null;
+}
 
 // Parses "take the lantern, the rope and some coins" into item phrases,
 // or null when the input isn't a pickup ("take a swing", "take the quest").

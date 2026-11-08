@@ -1,5 +1,7 @@
 'use strict';
 
+const { extraPanels } = require('../extra-panels');
+
 module.exports = function registerStateRoutes(app, deps) {
   const {
     db,
@@ -22,6 +24,7 @@ module.exports = function registerStateRoutes(app, deps) {
       economy: buildEconomyPanelData(state),
       rightPanel: buildRightPanelData(state),
       board: buildBoardDisplayData(state),
+      ...extraPanels(state, isInCreation(state)),
       inCreation: isInCreation(state),
       creationPhase: state.creation ? state.creation.phase : null,
       isReady: isReady(state),

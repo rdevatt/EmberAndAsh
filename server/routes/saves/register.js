@@ -1,5 +1,7 @@
 'use strict';
 
+const { extraPanels } = require('../extra-panels');
+
 function stripTrailingPunctuation(value) {
   return String(value || '').trim().replace(/[.!?]+$/g, '').trim();
 }
@@ -31,6 +33,7 @@ module.exports = function registerSaveRoutes(app, deps) {
       economy:     buildEconomyPanelData(state),
       rightPanel:  buildRightPanelData(state),
       board:       buildBoardDisplayData(state),
+      ...extraPanels(state, isInCreation(state)),
       inCreation:  isInCreation(state)
     };
   }

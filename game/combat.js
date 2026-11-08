@@ -23,6 +23,7 @@ const {
   getHPLabel,
   getStaminaLabel
 } = require('./character');
+const T = require('./combat-tactics');
 
 // =============================================
 // STATUS EFFECT CONSTANTS
@@ -42,7 +43,7 @@ const COMBAT_TRIGGERS = [
 
 const FLEE_TRIGGERS = [
   'flee', 'run away', 'escape', 'get away', 'retreat',
-  'back away', 'get out of here', 'sprint away', 'bolt',
+  'back away', 'get out of here', 'sprint away', 'bolt for', 'bolt away', 'bolt out',
   'run for it', 'turn and run', 'disengage', 'fall back'
 ];
 
@@ -71,7 +72,9 @@ function detectCombatIntent(text) {
 
 function detectFleeIntent(text) {
   const t = text.toLowerCase();
-  return FLEE_TRIGGERS.some(w => t.includes(w));
+  // "I cast Mana Bolt", "a spell of escape" are attacks, not retreats.
+  if (/\b(cast|spell|invoke|channel|conjure|use)\b/.test(t)) return false;
+  return FLEE_TRIGGERS.some(w => new RegExp(`\\b${w}\\b`).test(t));
 }
 
 function isPassiveAction(text) {
@@ -230,10 +233,12 @@ function spawnEnemy(regionKey, playerLevel, options = {}) {
 // Balance target: an even-level fight lasts ~5-8 rounds and a careful
 // player wins most of the time while losing a meaningful chunk of HP.
 function buildEnemyInstance(key, enemy, targetLevel) {
-  const effectiveStr  = 5 + (enemy.mods.str || 0) + Math.floor(targetLevel * 0.5);
+  const effectiveStr  = 5 + (enemy.mods.str || 0) + Math.floor(targetLevel * 0.57);
   const effectiveDex  = 5 + (enemy.mods.dex || 0) + Math.floor(targetLevel * 0.3);
   const effectiveVit  = 5 + (enemy.mods.vit || 0) + Math.floor(targetLevel * 0.4);
-  const maxHP         = Math.max(8, Math.round(enemy.hpBase * 0.6 + effectiveVit * 3 + targetLevel * 2));
+  // Deeper tiers field tougher creatures so fights stay meaningful as gear improves.
+  const depth         = 1 + Math.max(0, targetLevel - 10) / 60;
+  const maxHP         = Math.max(8, Math.round((enemy.hpBase * 0.6 + effectiveVit * 3 + targetLevel * 2) * depth));
 
   return {
     key,
@@ -337,36 +342,7 @@ function checkBleedApplication(enemy, bodyPart, damage) {
 // =============================================
 function resolveCompanionAttacks(state, enemy) {
   if (!state.companions || state.companions.length === 0) return [];
-
-  const results = [];
-  const playerLevel = getPlayerLevel(state.totalXP || 0);
-
-  for (const companion of state.companions) {
-    // Companion stats scale with player level
-    const companionStr = 8 + Math.floor(playerLevel * 0.6);
-    const companionDex = 8 + Math.floor(playerLevel * 0.5);
-
-    const hitChance = Math.min(0.75, Math.max(0.25,
-      0.50 + (companionDex - enemy.effectiveDex) / 25
-    ));
-
-    const hit = Math.random() < hitChance;
-    const baseDamage = Math.max(1, companionStr - 6 + Math.floor(Math.random() * 4));
-    const damage = hit ? baseDamage : 0;
-
-    results.push({
-      name: companion.name,
-      hit,
-      damage,
-      hitChance: Math.round(hitChance * 100)
-    });
-
-    if (hit && damage > 0) {
-      enemy.currentHP = Math.max(0, enemy.currentHP - damage);
-    }
-  }
-
-  return results;
+  return require('./companions').companionTurn(state, enemy, T.resistMultiplier);
 }
 
 // =============================================
@@ -470,9 +446,19 @@ function applyCombatRound(state, input) {
   const playerLevel = getPlayerLevel(state.totalXP || 0);
   const score       = scoreAction(input);
   const bodyPartKey = detectTargetedBodyPart(input);
+  if (!enemy.traits) enemy.traits = T.getEnemyTraits(enemy);
+  state.combatRound = (state.combatRound || 0) + 1;
+  T.tickCooldowns(state);
 
-  // Apply status effects at start of round (bleeding, etc.)
-  const statusResults = applyStatusEffects(state);
+  // Damage over time and regeneration land first.
+  const tick   = T.tickEffects(state, enemy);
+  const result = {
+    preLines: tick.lines, playerLines: [], enemyLines: [],
+    statusEffectDamage: tick.results,
+    playerHit: false, playerCrit: false, playerDamage: 0,
+    enemyHit: false, enemyDamage: 0, staminaCost: 0, hitChance: 0,
+    bodyPart: (BODY_PARTS[bodyPartKey] || BODY_PARTS.torso).label
+  };
 
   // Unbeatable enemy — skip normal resolution
   if (isEnemyUnbeatable(enemy.level, playerLevel)) {
@@ -480,115 +466,272 @@ function applyCombatRound(state, input) {
     const armorReduce = armor ? armor.armorLevel * 2 : 0;
     const dmg         = Math.max(1, Math.round(enemy.effectiveStr * 2) - armorReduce);
     state.hp          = Math.max(0, state.hp - dmg);
-
     state.pendingCombatResult = {
       playerHit: false, playerDamage: 0, playerCrit: false,
       enemyHit: true, enemyDamage: dmg, staminaCost: 0, bodyPart: 'torso'
     };
-
     return {
       score,
       unbeatable:  true,
       enemyKilled: false,
+      combatLog:   `\n${'─'.repeat(36)}\n✕ ${enemy.label} is far beyond you (Lv${enemy.level}). Your blows do nothing.\n◀ It strikes for ${dmg}. HP ${state.hp}/${state.maxHp}\n  Flee is the only option.\n${'─'.repeat(36)}`,
       hint: `[IMPOSSIBLE FIGHT. Every attack fails. ${enemy.label} hits for ${dmg}. Player HP: ${state.hp}/${state.maxHp}. Flee or talk are the only options.]`
     };
   }
 
   const stats        = getEffectiveStats(state);
-  const activeWeapon = getActiveWeapon(state);
-  const activeArmor  = getActiveArmor(state);
+  const weapon       = getActiveWeapon(state);
+  const armor        = getActiveArmor(state);
+  const bp           = BODY_PARTS[bodyPartKey] || BODY_PARTS.torso;
+  const qualityMod   = { crude: -0.2, basic: -0.1, decent: 0, skilled: 0.1, masterful: 0.2 }[score.quality] || 0;
 
-  // Spellcasting: if the player invokes a known spell and has the mana,
-  // the spell replaces the weapon attack for this round.
-  const spellAttempt = detectSpellCast(state, input);
-  let spell = null;
-  if (spellAttempt && spellAttempt.spell) {
-    if ((state.mana || 0) >= spellAttempt.spell.manaCost) {
-      spell = spellAttempt.spell;
-      state.mana = Math.max(0, state.mana - spell.manaCost);
+  // ---------- choose the player's action ----------
+  let action = 'attack', ability = null, spell = null, item = null;
+  const stunned = T.hasEffect(state, 'player', 'stun');
+  if (stunned) {
+    action = 'stunned';
+    result.playerLines.push('✕ You are stunned and cannot act');
+  } else if (enemy.currentHP > 0) {
+    item = T.detectCombatItem(input);
+    if (item) action = 'item';
+    if (!item) {
+      ability = T.detectAbility(state, input);
+      if (ability) {
+        const err = T.payAbilityCost(state, ability);
+        if (err) { result.playerLines.push(`✕ ${err} — you attack normally instead`); ability = null; }
+        else action = 'ability';
+      }
     }
+    if (action === 'attack') {
+      const attempt = detectSpellCast(state, input);
+      if (attempt && attempt.spell) {
+        if ((state.mana || 0) >= attempt.spell.manaCost) {
+          spell = attempt.spell;
+          state.mana = Math.max(0, state.mana - spell.manaCost);
+          action = 'spell';
+        } else {
+          result.spellFailed = 'mana';
+        }
+      }
+    }
+    if (action === 'attack' && T.detectDefend(input)) action = 'defend';
   }
 
-  // Stamina drain (spells cost mana instead)
-  const staminaCost = spell ? 0 : getCombatStaminaCost(stats.dex);
-  state.stamina     = Math.max(0, state.stamina - staminaCost);
+  // ---------- resolve the player's action ----------
+  const staminaPct  = state.maxStamina > 0 ? state.stamina / state.maxStamina : 1;
+  const staminaMod  = staminaPct < 0.15 ? -0.3 : staminaPct < 0.4 ? -0.15 : 0;
+  // Accuracy: trained strength counts as well as agility, so STR builds stay viable.
+  const accuracy    = Math.max(stats.dex, Math.round(stats.str * 0.8));
+  const dexAdv      = (accuracy - enemy.effectiveDex) / 25;
+  const dmgMult     = T.playerDamageMultiplier(state, enemy);
+  const weaponBonus = (weapon ? weapon.weaponBonus || 0 : 0) + (state.bonusWeaponDamage || 0);
+  const profile     = T.weaponProfile(weapon);
+  let evade = false, exposed = 1;
 
-  const result = resolveCombatRound(
-    stats,
-    score.quality,
-    bodyPartKey,
-    activeWeapon ? activeWeapon.weaponBonus : 0,
-    !!activeArmor,
-    activeArmor ? activeArmor.armorLevel : 0,
-    state.stamina,
-    state.maxStamina,
-    enemy,
-    playerLevel
-  );
+  const rollWeaponHit = (hitMod, critBonus, mult, element) => {
+    const atk    = T.attackStat(stats, weapon, ability);
+    const chance = Math.min(0.95, Math.max(0.05, 0.60 + dexAdv + bp.hitMod + qualityMod + staminaMod + (hitMod || 0)));
+    const hit    = Math.random() < chance;
+    const crit   = hit && (Math.random() < Math.min(critBonus >= 1 ? 1 : 0.4, stats.dex / 250 + bp.critBonus + (critBonus || 0)));
+    const raw    = (Math.max(1, atk - 7) + weaponBonus + Math.floor(playerLevel / 2)) * bp.damageMod * (mult || 1) * (crit ? 2 : 1);
+    const dmg    = hit ? Math.max(1, Math.round(raw * dmgMult * T.resistMultiplier(enemy, element || 'physical'))) : 0;
+    return { hit, crit, dmg, chance };
+  };
 
-  if (spell) applySpellToResult(result, spell, stats, score.quality, playerLevel, enemy);
-  if (spellAttempt && spellAttempt.spell && !spell) result.spellFailed = 'mana';
+  const rollSpellHit = (power, element, castKey) => {
+    const castStat = stats[castKey || 'int'] || 10;
+    const chance = Math.min(0.95, Math.max(0.3, 0.78 + (castStat - 10) / 40 + qualityMod * 0.5));
+    const hit    = Math.random() < chance;
+    const crit   = hit && Math.random() < Math.min(0.4, castStat / 250);
+    const base   = T.spellPower(state, stats, playerLevel, weapon, castKey) * (power || 1) * (0.85 + Math.random() * 0.3);
+    const dmg    = hit ? Math.max(1, Math.round(base * dmgMult * T.resistMultiplier(enemy, element) * (crit ? 1.75 : 1))) : 0;
+    return { hit, crit, dmg, chance };
+  };
 
-  // Apply player damage
-  if (result.playerHit) {
-    enemy.currentHP = Math.max(0, enemy.currentHP - result.playerDamage);
+  const applyHits = (roll, element, label) => {
+    result.hitChance = Math.round(roll.chance * 100);
+    if (!roll.hit) { result.playerLines.push(`▶ ${label ? `${label} misses` : 'You miss'} — ${result.hitChance}% hit chance`); return 0; }
+    const d = T.damageEnemy(enemy, roll.dmg, element);
+    result.playerHit = true;
+    result.playerCrit = result.playerCrit || roll.crit;
+    result.playerDamage += d.dealt;
+    const weak = T.resistMultiplier(enemy, element) > 1.05 ? ' (weakness!)' : T.resistMultiplier(enemy, element) < 0.95 ? ' (resisted)' : '';
+    result.playerLines.push(`▶ ${label || `You strike the ${enemy.label}'s ${bp.label}`}${roll.crit ? ' ⚡ CRITICAL' : ''} — ${d.dealt} damage${weak}${d.absorbed ? ` (${d.absorbed} absorbed by its ward)` : ''}`);
+    return d.dealt;
+  };
 
-    // Check for bleed application on significant hits
-    const bleed = checkBleedApplication(enemy, bodyPartKey, result.playerDamage);
-    if (bleed) {
-      if (!state.statusEffects) state.statusEffects = [];
-      // Don't stack multiple bleeds from same source
-      const existingBleed = state.statusEffects.find(e => e.type === 'bleed' && e.target === 'enemy');
-      if (!existingBleed) {
-        state.statusEffects.push(bleed);
-        result.appliedBleed = bleed;
+  if (action === 'attack') {
+    const cost = getCombatStaminaCost(stats.dex);
+    state.stamina = Math.max(0, state.stamina - cost);
+    result.staminaCost = cost;
+    const roll = rollWeaponHit(0, 0, 1, 'physical');
+    const dealt = applyHits(roll, 'physical');
+    if (dealt) {
+      const bleed = checkBleedApplication(enemy, bodyPartKey, dealt);
+      if (bleed) {
+        const r = T.addEffect(state, enemy, 'enemy', { type: 'bleed', remaining: 3 }, dealt);
+        if (!r.immune) { result.appliedBleed = bleed; result.playerLines.push('  ⚠ The wound is bleeding!'); }
+      }
+    }
+  } else if (action === 'spell') {
+    const element = spell.type === 'divine' ? 'holy' : (spell.type || 'arcane');
+    const castKey = (element === 'holy') ? 'wis' : 'int';
+    const avg = ((spell.damage && spell.damage.min) || 4) / 2 + ((spell.damage && spell.damage.max) || 10) / 2;
+    const power = Math.max(1, 1 + (avg - 7) / 40) + (spell.bonusVsUndead && enemy.traits.tags.includes('undead') ? 0.25 : 0);
+    result.spellCast = spell.label;
+    applyHits(rollSpellHit(power, element, castKey), element, `✧ ${spell.label}`);
+  } else if (action === 'defend') {
+    const regain = Math.round(state.maxStamina * 0.15);
+    state.stamina = Math.min(state.maxStamina, state.stamina + regain);
+    result.defended = true;
+    result.playerLines.push(`🛡 You take a defensive stance (+${regain} stamina)`);
+  } else if (action === 'item') {
+    const potion = (state.inventory || []).find(i => (typeof i === 'string' ? i : i.name).toLowerCase().includes(item));
+    if (!potion) {
+      result.playerLines.push(`✕ You fumble for a ${item} you do not have`);
+    } else {
+      const idx = state.inventory.indexOf(potion);
+      state.inventory.splice(idx, 1);
+      if (item === 'mana potion') {
+        const before = state.mana;
+        state.mana = Math.min(state.maxMana, state.mana + Math.ceil(state.maxMana * 0.4));
+        result.playerLines.push(`⚗ You drink a mana potion — Mana +${state.mana - before}`);
+      } else {
+        const before = state.hp;
+        state.hp = Math.min(state.maxHp, state.hp + Math.ceil(state.maxHp * ((potion && potion.heal) || 0.4)));
+        result.playerLines.push(`⚗ You drink a healing potion — HP +${state.hp - before}`);
+      }
+      result.usedItem = item;
+    }
+  } else if (action === 'ability') {
+    const a = ability;
+    result.abilityUsed = a.label;
+    const castKey = T.weaponProfile(weapon) && ({ wizard: 'int', sorcerer: 'cha', warlock: 'cha', cleric: 'wis', druid: 'wis', paladin: 'wis', bard: 'cha' })[state.combatClass];
+    let dealtTotal = 0;
+    if (a.kind === 'weapon') {
+      const hits = a.hits || 1;
+      for (let h = 0; h < hits && enemy.currentHP > 0; h++) {
+        let mult = a.dmgMult || 1;
+        if (a.execute && enemy.currentHP / enemy.maxHP < a.execute) mult *= 1.5;
+        const roll = rollWeaponHit(a.hitMod, a.autoCrit ? 1 : a.critBonus, mult, a.element || 'physical');
+        dealtTotal += applyHits(roll, a.element || 'physical', `✦ ${a.label}${hits > 1 ? ` (${h + 1}/${hits})` : ''}`);
+      }
+    } else if (a.kind === 'spell') {
+      const power = a.wild ? 0.5 + Math.random() * 1.9 : a.power;
+      dealtTotal += applyHits(rollSpellHit(power, a.element, castKey || 'int'), a.element, `✦ ${a.label}`);
+    } else {
+      result.playerLines.push(`✦ ${a.label}`);
+    }
+    if (a.status && (dealtTotal > 0 || a.kind === 'spell' && result.playerHit)) {
+      const r = T.addEffect(state, enemy, 'enemy', a.status, dealtTotal);
+      result.playerLines.push(r.immune ? `  ${enemy.label} is immune to ${a.status.type}` : `  ${enemy.label} is ${a.status.type === 'stun' ? 'stunned' : a.status.type === 'vulnerable' ? 'marked (takes +25% damage)' : a.status.type === 'weaken' ? 'weakened' : a.status.type + 'ed'}`);
+    }
+    if (a.status2 && dealtTotal > 0) T.addEffect(state, enemy, 'enemy', a.status2, dealtTotal);
+    if (a.buff) { T.addEffect(state, enemy, 'player', a.buff); result.playerLines.push(`  ${a.buff.type === 'rage' ? 'Fury fills you (+40% damage)' : 'You are inspired (+25% damage)'}`); }
+    if (a.selfStatus) T.addEffect(state, enemy, 'player', a.selfStatus);
+    if (a.heal) { const b = state.hp; state.hp = Math.min(state.maxHp, state.hp + Math.round(state.maxHp * a.heal)); result.playerLines.push(`  ✚ HP +${state.hp - b}`); }
+    if (a.lifesteal && dealtTotal) { const b = state.hp; state.hp = Math.min(state.maxHp, state.hp + Math.round(dealtTotal * a.lifesteal)); result.playerLines.push(`  ✚ You drain ${state.hp - b} HP`); }
+    if (a.ward) { T.addPlayerWard(state, Math.round(state.maxHp * a.ward)); result.playerLines.push(`  ◈ A ward absorbs the next ${Math.round(state.maxHp * a.ward)} damage`); }
+    if (a.cleanse) T.cleansePlayer(state);
+    if (a.restoreMana) { const b = state.mana; state.mana = Math.min(state.maxMana, state.mana + Math.round(state.maxMana * a.restoreMana)); result.playerLines.push(`  Mana +${state.mana - b}`); }
+    if (a.evade) evade = true;
+    if (a.exposed) exposed = a.exposed;
+    if (a.aoe && enemy.summonRounds) { enemy.summonRounds = Math.max(0, enemy.summonRounds - 2); result.playerLines.push('  The volley scatters its allies'); }
+  }
+
+  // Ranged weapons get a free volley while the enemy closes in.
+  const closingIn = profile.ranged && state.combatRound === 1 && action === 'attack';
+
+  // Companion attacks
+  const companionResults = enemy.currentHP > 0 ? resolveCompanionAttacks(state, enemy) : [];
+  result.companionAttacks = companionResults;
+
+  // Boss phase triggers
+  for (const line of T.checkPhases(enemy)) result.enemyLines.push(line);
+
+  // ---------- enemy turn ----------
+  if (enemy.currentHP > 0) {
+    if (T.hasEffect(state, 'enemy', 'stun')) {
+      result.enemyLines.push(`◀ ${enemy.label} is stunned and cannot act`);
+    } else if (closingIn) {
+      result.enemyLines.push(`◀ ${enemy.label} closes the distance under your fire`);
+    } else {
+      const plan = T.planEnemyTurn(state, enemy);
+      result.enemyLines.push(...plan.lines);
+      if (!plan.windingUp) {
+        const hitChance = Math.min(0.8, Math.max(0.3, 0.55 + (enemy.effectiveDex - stats.dex) / 40 + (plan.hitBonus || 0) - (armor && armor.armorLevel ? armor.armorLevel * 0.006 : 0)));
+        const magicResist = Math.min(0.35, Math.max(0, (stats.wis - 10) * 0.01));
+        const armorReduce = armor && armor.armorLevel ? armor.armorLevel * 2 : 0;
+        const strike = (mult) => {
+          if (evade || Math.random() >= hitChance) return 0;
+          let raw = (enemy.effectiveStr * 1.5 + (enemy.level || 1) * 0.5) * (Math.random() * 0.5 + 0.75) * mult * T.enemyDamageMultiplier(state, enemy) * exposed;
+          if (Math.random() < 0.05) raw *= 1.5;
+          const physical = plan.element === 'physical' && !plan.ignoreArmor;
+          let dmg = physical ? raw - armorReduce : raw * (1 - magicResist) - armorReduce * 0.4;
+          if (result.defended) dmg *= plan.special ? 0.25 : 0.4;
+          return Math.max(physical ? 0 : 1, Math.round(dmg));
+        };
+        let total = strike(plan.mult);
+        if (total > 0) result.enemyHit = true;
+        for (let x = 0; x < (plan.extraHits || 0); x++) total += strike(0.5);
+        if (enemy.summonRounds > 0) {
+          const minion = strike(0.4);
+          total += minion;
+          enemy.summonRounds--;
+          result.enemyLines.push(minion ? `◀ Its allies strike you for ${minion}` : '◀ Its allies swing and miss');
+        }
+        // Guardian companions step into some of the blows.
+        const share = state.companions && state.companions.length ? require('./companions').guardianShare(state) : 0;
+        if (share && total > 0) {
+          const taken = Math.round(total * share);
+          total -= taken;
+          if (taken) result.enemyLines.push(`◀ Your guardian takes ${taken} of the damage`);
+        }
+        const warded = T.absorbWithWard(state, total);
+        state.hp = Math.max(0, state.hp - warded.dmg);
+        result.enemyDamage = warded.dmg;
+        result.enemyHit = result.enemyHit || warded.dmg > 0;
+        if (result.enemyHit) {
+          result.enemyLines.push(`◀ ${enemy.label} ${plan.special ? `hits with ${plan.special}` : 'strikes back'} — ${warded.dmg} damage${warded.absorbed ? ` (${warded.absorbed} absorbed by your ward)` : ''}${result.defended ? ' (defended)' : ''}`);
+          if (plan.status && T.ENEMY_STATUS_SPECS[plan.status]) {
+            T.addEffect(state, enemy, 'player', T.ENEMY_STATUS_SPECS[plan.status], warded.dmg || total);
+            result.enemyLines.push(`  You are ${plan.status === 'weaken' ? 'weakened' : plan.status === 'bleed' ? 'bleeding' : plan.status === 'burn' ? 'burning' : 'poisoned'}`);
+          }
+        } else {
+          result.enemyLines.push(evade ? `◀ ${enemy.label} strikes at shadows — you are not there` : `◀ ${enemy.label} misses you`);
+        }
       }
     }
   }
 
-  // Companion attacks
-  const companionResults = resolveCompanionAttacks(state, enemy);
-  result.companionAttacks = companionResults;
-
-  // Update enemy reference after all damage applied
-  state.currentEnemy = enemy;
-
-  // Apply enemy damage to player
-  if (result.enemyHit) {
-    state.hp = Math.max(0, state.hp - result.enemyDamage);
+  // Casters recover a little mana each round they fight.
+  if (T.getKnownAbilities(state).some(a => a.cost && a.cost.mana) || (state.spells || []).length) {
+    state.mana = Math.min(state.maxMana, (state.mana || 0) + Math.max(1, Math.round(state.maxMana * 0.03)));
   }
+  T.decayEffects(state);
 
-  // Store status effect results for combat log
-  result.statusEffectDamage = statusResults;
-
+  state.currentEnemy = enemy;
   state.pendingCombatResult = result;
 
   // Check kill
-  let enemyKilled  = false;
-  let xpAwarded    = 0;
-
+  let enemyKilled = false;
+  let xpAwarded   = 0;
   if (enemy.currentHP <= 0) {
-    xpAwarded    = calculateEnemyXP(enemy.level, playerLevel, enemy.xpMod);
-    enemyKilled  = true;
-
-    state.pendingEnemyKill = { label: enemy.label, level: enemy.level, xp: xpAwarded };
+    xpAwarded   = calculateEnemyXP(enemy.level, playerLevel, enemy.xpMod);
+    enemyKilled = true;
+    state.pendingEnemyKill = { label: enemy.label, level: enemy.level, xp: xpAwarded, isBoss: !!enemy.isBoss, meta: enemy.meta || null };
     state.inCombat         = false;
     state.currentEnemy     = null;
-    state.statusEffects    = (state.statusEffects || []).filter(e => e.target !== 'enemy');
+    T.clearCombatEffects(state);
     state.stamina          = Math.min(state.maxStamina, state.stamina + 10);
-
-    // Small reputation bump for defeating an enemy
     if (state.reputation && state.character) {
       const region = state.character.region;
-      state.reputation[region] = Math.min(100,
-        (state.reputation[region] || 0) + 1
-      );
+      state.reputation[region] = Math.min(100, (state.reputation[region] || 0) + 1);
     }
   }
 
-  // Build narrative hint (AI guidance) and player-visible combat log
-  const hint       = buildCombatNarrativeHint(result, enemy, state.hp, state.maxHp, state.stamina, state.maxStamina, enemyKilled, companionResults);
-  const combatLog  = buildCombatLog(result, enemy, state.hp, state.maxHp, state.stamina, state.maxStamina, enemyKilled, score.quality);
+  const hint      = buildCombatNarrativeHint(result, enemy, state.hp, state.maxHp, state.stamina, state.maxStamina, enemyKilled, companionResults);
+  const combatLog = buildCombatLog(result, enemy, state.hp, state.maxHp, state.stamina, state.maxStamina, enemyKilled, score.quality, state);
 
   return {
     score,
@@ -607,8 +750,10 @@ function applyCombatRound(state, input) {
 // =============================================
 function applyFleeAttempt(state) {
   const enemy      = state.currentEnemy;
-  const fleeChance = Math.min(0.85, Math.max(0.15,
+  // Bosses are hard to escape; a rogue's Shadowstep or a scout's eye helps.
+  const fleeChance = Math.min(0.85, Math.max(0.1,
     0.5 + (getEffectiveStats(state).dex - enemy.effectiveDex) / 20
+    - (enemy.isBoss ? 0.25 : 0) + (state.profession === 'scout' ? 0.1 : 0)
   ));
   const success    = Math.random() < fleeChance;
 
@@ -739,88 +884,47 @@ function buildEnemyInspectData(state) {
 // appears BELOW the narrative in the story output.
 // Players see exact numbers here — narrative is prose only.
 // =============================================
-function buildCombatLog(result, enemy, playerHP, maxHP, playerStamina, maxStamina, enemyKilled, actionQuality) {
+function buildCombatLog(result, enemy, playerHP, maxHP, playerStamina, maxStamina, enemyKilled, actionQuality, state = null) {
   if (!result) return null;
-
   const sep   = '─'.repeat(36);
   const lines = [`\n${sep}`];
 
-  // Status effect damage at start of round
-  if (result.statusEffectDamage && result.statusEffectDamage.length > 0) {
-    for (const eff of result.statusEffectDamage) {
-      if (eff.target === 'enemy') {
-        lines.push(`🩸 ${enemy.label} bleeds — ${eff.damage} damage`);
-      }
-    }
-  }
-
-  // Player action
-  if (result.spellFailed === 'mana') {
-    lines.push(`✧ Not enough mana to cast — you fall back on a physical attack`);
-  }
-  if (result.spellCast) {
-    lines.push(result.playerHit
-      ? `✧ ${result.spellCast} strikes the ${enemy.label} — ${result.playerDamage} damage`
-      : `✧ ${result.spellCast} misses — ${result.hitChance}% hit chance`);
+  for (const l of result.preLines || []) lines.push(l);
+  if (result.spellFailed === 'mana') lines.push('✧ Not enough mana to cast — you fall back on a physical attack');
+  if (result.playerLines) {
+    for (const l of result.playerLines) lines.push(l);
   } else if (result.playerHit) {
-    const crit = result.playerCrit ? ' ⚡ CRITICAL HIT' : '';
-    lines.push(`▶ You strike the ${enemy.label}'s ${result.bodyPart}${crit}`);
-    lines.push(`  Damage dealt: ${result.playerDamage}`);
-    if (result.appliedBleed) {
-      lines.push(`  ⚠ Wound is bleeding!`);
-    }
+    lines.push(`▶ You strike the ${enemy.label}'s ${result.bodyPart}${result.playerCrit ? ' ⚡ CRITICAL HIT' : ''} — ${result.playerDamage} damage`);
   } else {
-    lines.push(`▶ You miss — ${result.hitChance}% hit chance, attack goes wide`);
+    lines.push(`▶ You miss — ${result.hitChance}% hit chance`);
   }
 
-  // Companion attacks
-  if (result.companionAttacks && result.companionAttacks.length > 0) {
-    for (const ca of result.companionAttacks) {
-      if (ca.hit) {
-        lines.push(`▷ ${ca.name} strikes — ${ca.damage} damage`);
-      } else {
-        lines.push(`▷ ${ca.name} misses`);
-      }
-    }
+  for (const ca of result.companionAttacks || []) {
+    lines.push(ca.hit ? `▷ ${ca.name} ${ca.verb || 'strikes'} — ${ca.damage}${ca.heal ? ' HP restored' : ' damage'}` : `▷ ${ca.name} misses`);
   }
 
-  // Enemy HP status (with actual numbers now)
-  const ePct = enemy.currentHP / enemy.maxHP;
-  const eLabel = ePct <= 0 ? 'DEAD' :
-                 ePct < 0.15 ? 'Near Death' :
-                 ePct < 0.35 ? 'Critically Wounded' :
-                 ePct < 0.60 ? 'Seriously Wounded' :
-                 ePct < 0.80 ? 'Wounded' : 'Mostly Unharmed';
-  const eBar = buildMiniBar(ePct, 12);
-  lines.push(`  ${enemy.label}: ${eBar} ${enemy.currentHP}/${enemy.maxHP} [${eLabel}]`);
+  const ePct = Math.max(0, enemy.currentHP) / enemy.maxHP;
+  const eLabel = ePct <= 0 ? 'DEAD' : ePct < 0.15 ? 'Near Death' : ePct < 0.35 ? 'Critically Wounded' : ePct < 0.60 ? 'Seriously Wounded' : ePct < 0.80 ? 'Wounded' : 'Mostly Unharmed';
+  lines.push(`  ${enemy.label}: ${buildMiniBar(ePct, 12)} ${Math.max(0, enemy.currentHP)}/${enemy.maxHP} [${eLabel}]${enemy.ward > 0 ? ` ◈${enemy.ward}` : ''}`);
 
-  // Enemy retaliation
-  if (result.enemyHit) {
-    lines.push(`◀ ${enemy.label} strikes back`);
-    lines.push(`  Damage taken: ${result.enemyDamage}`);
-  } else {
+  if (result.enemyLines) {
+    for (const l of result.enemyLines) lines.push(l);
+  } else if (result.enemyHit) {
+    lines.push(`◀ ${enemy.label} strikes back — ${result.enemyDamage} damage`);
+  } else if (!enemyKilled) {
     lines.push(`◀ ${enemy.label} misses you`);
   }
 
-  // Player status after the exchange
   const hpPct   = maxHP > 0 ? playerHP / maxHP : 1;
-  const hpBar   = buildMiniBar(hpPct, 12);
-  const stPct   = maxStamina > 0 ? playerStamina / maxStamina : 1;
-  const stBar   = buildMiniBar(stPct, 12);
-  const hpLabel = hpPct <= 0 ? 'DEAD' :
-                  hpPct < 0.15 ? 'Critical' :
-                  hpPct < 0.35 ? 'Badly Hurt' :
-                  hpPct < 0.60 ? 'Wounded' :
-                  hpPct < 0.80 ? 'Hurt' : 'OK';
-
-  lines.push(`  HP  ${hpBar} ${playerHP}/${maxHP} [${hpLabel}]`);
-  lines.push(`  STA ${stBar} ${playerStamina}/${maxStamina}`);
-  lines.push(`  Action quality: ${actionQuality || 'basic'}`);
-
-  if (enemyKilled) {
-    lines.push(`✦ ${enemy.label} is dead.`);
+  const hpLabel = hpPct <= 0 ? 'DEAD' : hpPct < 0.15 ? 'Critical' : hpPct < 0.35 ? 'Badly Hurt' : hpPct < 0.60 ? 'Wounded' : hpPct < 0.80 ? 'Hurt' : 'OK';
+  lines.push(`  HP  ${buildMiniBar(hpPct, 12)} ${playerHP}/${maxHP} [${hpLabel}]`);
+  lines.push(`  STA ${buildMiniBar(maxStamina > 0 ? playerStamina / maxStamina : 1, 12)} ${playerStamina}/${maxStamina}${state && state.maxMana ? `   MANA ${state.mana}/${state.maxMana}` : ''}`);
+  if (state) {
+    const fx = (state.statusEffects || []).filter(e => e.remaining > 0 || e.type === 'ward').map(e => `${e.target === 'enemy' ? enemy.label + ': ' : ''}${e.type}${e.type === 'ward' ? ` ${e.amount}` : ` (${e.remaining})`}`);
+    if (fx.length && !enemyKilled) lines.push(`  Effects: ${fx.join(', ')}`);
   }
-
+  lines.push(`  Action quality: ${actionQuality || 'basic'}`);
+  if (enemyKilled) lines.push(`✦ ${enemy.label} is dead.`);
   lines.push(sep);
   return lines.join('\n');
 }

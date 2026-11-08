@@ -70,6 +70,10 @@ const {
 const { createRegionMonsterPack } = require('./data/world/region-monsters');
 Object.assign(ENEMIES, createRegionMonsterPack(REGIONS, ENEMIES));
 
+// Settlements, NPCs, landmarks, hazards, resources and a two-way road graph.
+const { applyRegionDetails, HAZARDS, MATERIALS } = require('./data/world/region-details');
+applyRegionDetails(REGIONS);
+
 if (process.env.NODE_ENV === 'production') {
   console.info('[constants:data] resolved modules', resolvedDataModules);
 }
@@ -134,4 +138,6 @@ module.exports = {
   ADVANCE_QUESTS,
   getRegionConnections,
   getNextTierRegions,
+  HAZARDS,
+  MATERIALS,
 };

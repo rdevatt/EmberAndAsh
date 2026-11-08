@@ -21,8 +21,9 @@ const MAP_PATTERN    = /^(?:map|world map|regions|travel|where can i (?:go|trave
 
 function getConnectedRegionKeys(regionKey) {
   const r = REGIONS[regionKey];
-  if (!r || !r.connections) return [];
-  const { same = [], prev = [], next = [] } = r.connections;
+  if (!r) return [];
+  if (Array.isArray(r.adjacent)) return r.adjacent.filter(k => k !== regionKey && REGIONS[k]);
+  const { same = [], prev = [], next = [] } = r.connections || {};
   return [...new Set([...same, ...prev, ...next])].filter(k => k !== regionKey && REGIONS[k]);
 }
 
@@ -34,6 +35,9 @@ function canEnterRegion(state, regionKey) {
   const visited = (state.visitedRegions || []).includes(regionKey);
   const minLvl  = (r.levelRange || [1])[0];
   const hereTier = (REGIONS[state.character && state.character.region] || {}).tier || 1;
+  if (require('./campaign').isRegionStoryLocked(state, regionKey)) {
+    return { ok: false, reason: `${r.label} is sealed. A wall of unmaking bars the road — only the end of the Ashen Choir will open it (main story, Chapter 9).` };
+  }
   // Same-or-lower tier neighbours are always open.
   if ((r.tier || 1) <= hereTier || known || visited || level >= minLvl - 1) return { ok: true };
   return {
