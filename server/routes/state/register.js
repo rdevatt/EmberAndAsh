@@ -8,6 +8,7 @@ module.exports = function registerStateRoutes(app, deps) {
     buildProgressionPanelData,
     buildEconomyPanelData,
     buildRightPanelData,
+    buildBoardDisplayData,
     isInCreation,
     isReady
   } = deps;
@@ -20,8 +21,13 @@ module.exports = function registerStateRoutes(app, deps) {
       progression: buildProgressionPanelData(state),
       economy: buildEconomyPanelData(state),
       rightPanel: buildRightPanelData(state),
+      board: buildBoardDisplayData(state),
       inCreation: isInCreation(state),
-      isReady: isReady(state)
+      creationPhase: state.creation ? state.creation.phase : null,
+      isReady: isReady(state),
+      isLoggedIn: !!req.session.playerId,
+      saveSlot: req.session.saveSlot || null,
+      storySummary: state.storySummary || ''
     });
   });
 

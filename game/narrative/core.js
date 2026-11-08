@@ -42,6 +42,13 @@ const {
 // GROQ CLIENT
 // =============================================
 let groq = null;
+
+// Offline mode: no API key, or explicitly requested (tests / local play without AI).
+// The game engine is fully deterministic without the AI — only prose is lost.
+function isOfflineMode() {
+  return process.env.NARRATIVE_OFFLINE === '1' || !process.env.GROQ_API_KEY;
+}
+
 function getGroqClient() {
   if (!groq) groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
   return groq;
@@ -155,8 +162,13 @@ function buildCharacterContext(state) {
     ? `Companions: ${state.companions.map(c => c.name).join(', ')}.`
     : 'Traveling alone.';
 
+  const minorNote = (c.age || 0) < 18
+    ? '[The player character is a minor. Absolutely no romantic, sexual, or intimate content involving them, and no sexualized description of their body.]'
+    : '';
+
   return [
     '[CHARACTER — never state numbers, but DO use physical appearance contextually]',
+    minorNote,
     `${c.age}yo ${c.gender} | ${bg ? bg.label : c.background} | ${rg ? rg.label : 'Unknown'}`,
     c.description ? `Physical appearance: ${c.description}` : '',
     c.description ? '[Use general features (height, build, scars) anytime. Use intimate details ONLY in intimate scenes.]' : '',
@@ -285,6 +297,9 @@ function buildFullPrompt(state, playerInput) {
 // All error handling lives here.
 // =============================================
 async function callGroq(prompt, systemOverride = null, history = []) {
+  if (isOfflineMode()) {
+    return { success: false, offline: true, text: '', error: 'offline', tokens: 0 };
+  }
   try {
     const response = await getGroqClient().chat.completions.create({
       model:       MODEL,
@@ -324,6 +339,73 @@ async function callGroq(prompt, systemOverride = null, history = []) {
 
 
 // =============================================
+// OFFLINE NARRATIVE
+// Short, mechanical-but-flavored prose used when the AI is
+// unavailable. Built only from engine facts, never invents outcomes.
+// =============================================
+function pick(list, seed) {
+  return list[Math.abs(seed) % list.length];
+}
+
+function buildOfflineNarrative(state, playerInput, hint) {
+  const region = state.character ? REGIONS[state.character.region] : null;
+  const seed   = (state.actionCount || 0) + String(playerInput || '').length;
+  const h      = String(hint || '');
+  const lines  = [];
+
+  if (h.includes('[OPENING SCENE')) {
+    const opening = region && region.beastOpening
+      ? region.beastOpening + '.'
+      : 'Something that should have killed you lies dead in the mud instead.';
+    lines.push(opening);
+    lines.push(`Around you: ${region ? region.flavor : 'a world that does not care whether you live'}. The warmth in your chest has not faded.`);
+    return lines.join('\n\n');
+  }
+
+  const enemy = state.currentEnemy;
+  const r     = state.pendingCombatResult;
+  if (h.includes('ENEMY SPAWNED') || h.includes('AMBIENT ENCOUNTER') || h.includes('found you')) {
+    if (enemy) lines.push(`A ${enemy.label} closes in. ${enemy.desc}`);
+  } else if (h.includes('[COMBAT NARRATIVE') && r) {
+    lines.push(r.playerHit
+      ? pick(['Your strike lands with a wet, solid sound.', 'Steel finds flesh.', 'The blow connects and the enemy reels.'], seed)
+      : pick(['Your attack cuts only air.', 'The enemy twists away from your strike.', 'You overreach and the blow goes wide.'], seed));
+    lines.push(r.enemyHit
+      ? pick(['Pain answers — the counterblow catches you hard.', 'You take a hit and the world flashes white.'], seed)
+      : pick(['The return strike whistles past you.', 'You slip the counterattack by a hair.'], seed));
+  } else if (h.includes('SUCCESSFULLY FLEES')) {
+    lines.push('You break away and run until the sounds of pursuit fade behind you.');
+  } else if (h.includes('FLEE FAILED')) {
+    lines.push('You turn to run and a blow catches you across the back. There is no escape — not yet.');
+  } else if (h.includes('IMPOSSIBLE FIGHT')) {
+    lines.push('Nothing you do touches it. Every instinct screams at you to run.');
+  } else if (h.includes('QUEST ACCEPTED') || h.includes('QUEST ACTIVE')) {
+    lines.push('You tear the notice from the board and tuck it away. Work is work.');
+  } else if (h.includes('QUEST COMPLETED')) {
+    lines.push('The job is done. Coin changes hands, and for a moment the world feels a little less hostile.');
+  } else if (h.includes('TRAVEL —')) {
+    lines.push('The road unspools beneath your feet, mile after mile, until the land itself changes.');
+  } else if (h.includes('BOUNTY BOARD')) {
+    lines.push('Weathered notices flap against the board, each one a promise of coin and trouble.');
+  } else if (h.includes('PROFESSION TASK') || h.includes('NO PROFESSION')) {
+    lines.push('The work takes time and sweat, but it gets done.');
+  } else if (h.includes('SHOP EVENT')) {
+    lines.push('A customer drifts up to your stall, eyeing your wares.');
+  }
+
+  if (lines.length === 0) {
+    lines.push(pick([
+      `Time passes in ${region ? region.label : 'the wilds'}. ${region ? region.flavor.charAt(0).toUpperCase() + region.flavor.slice(1) : 'The world'} surrounds you.`,
+      'The world carries on around you, indifferent and watchful.',
+      'Wind moves through the area. Somewhere far off, something calls and is answered.',
+      'Nothing stirs for the moment. The silence feels earned, and temporary.'
+    ], seed));
+  }
+  return lines.join(' ');
+}
+
+
+// =============================================
 // STORY SUMMARY UPDATER
 // Maintains a rolling summary of what has happened.
 // Called every SUMMARY_EVERY actions.
@@ -332,6 +414,7 @@ async function callGroq(prompt, systemOverride = null, history = []) {
 async function updateStorySummary(state, recentNarrative) {
   if (!recentNarrative || recentNarrative.length < 20) return;
 
+  if (isOfflineMode()) return;
   const existing = state.storySummary || '';
 
   const summaryPrompt = existing
@@ -453,9 +536,34 @@ function buildEventAnnouncements(events) {
         break;
 
       case 'questProgress':
+        if (evt.message) lines.push(`\n[${evt.message}]`);
         if (evt.total > 1) {
-          lines.push(`\n[Quest progress: ${evt.progress}/${evt.total}]`);
+          lines.push(`\n[Quest progress${evt.label ? ` — ${evt.label}` : ''}: ${evt.progress}/${evt.total}]`);
         }
+        break;
+
+      case 'questAcceptFailed':
+        lines.push(`\n[${evt.message}]`);
+        break;
+
+      case 'travel':
+        lines.push(`\n[${evt.message}]`);
+        break;
+
+      case 'combatStart':
+        lines.push(`\n[${evt.ambient ? 'Ambushed by' : 'Combat begins —'} ${evt.label} (Lv${evt.level}). Fight, or type "flee".]`);
+        break;
+
+      case 'itemCrafted':
+        lines.push(`\n[Crafted: ${evt.item.name} (${evt.item.quality}). Type "equip ${evt.item.name}" to use it or "sell ${evt.item.name}".]`);
+        break;
+
+      case 'coinSpent':
+        lines.push(`\n[-${evt.display}. Remaining: ${evt.total}.]`);
+        break;
+
+      case 'companionDeclined':
+        lines.push(`\n[${evt.name} isn't ready to travel with you yet. Spend more time talking with them.]`);
         break;
 
       case 'questComplete':
@@ -517,9 +625,9 @@ function buildDeathAnnouncement(evt) {
     `Lost ${evt.levelsLost} level(s). You are now Level ${evt.newLevel}.`,
     `Revived at the nearest citadel in ${evt.regionLabel || 'the region'}.`,
     evt.hadGear
-      ? 'Your equipment remains where you fell. Return there and type "recover gear" to retrieve it.'
+      ? 'Your equipment remains where you fell. Return there and type "recover gear" to retrieve it — or buy replacements ("shop").'
       : '',
-    'You are wearing only plain clothes. No weapons.'
+    evt.hadGear ? 'You are wearing only plain clothes. No weapons.' : ''
   ].filter(Boolean);
 
   return '\n' + lines.join('\n');
@@ -622,9 +730,14 @@ async function processNarrative(state, playerInput, events = []) {
   }
 
   // Build prompt and call Groq with rolling conversation history
+  const hintForFallback = state.pendingContextHint || '';
   const prompt   = buildFullPrompt(state, playerInput);
   const history  = (state.conversationHistory || []).slice(-20);
   const aiResult = await callGroq(prompt, null, history);
+  if (!aiResult.success) {
+    // AI unavailable — keep the game playable with engine-driven prose.
+    aiResult.text = buildOfflineNarrative(state, playerInput, hintForFallback);
+  }
 
   // Store this exchange in history for next turn
   if (aiResult.success) {
@@ -697,6 +810,8 @@ module.exports = {
 
   // Groq
   callGroq,
+  isOfflineMode,
+  buildOfflineNarrative,
 
   // Summary
   updateStorySummary,

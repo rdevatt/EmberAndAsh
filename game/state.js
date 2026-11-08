@@ -107,8 +107,22 @@ function createFreshState() {
     shopOpen: false,
 
     // --- Companions ---
-// --- Companions ---
     companions: [],         // array of companion objects
+
+    // --- Quests ---
+    boardQuests:     [],    // postings on the current region's board
+    activeQuests:    [],    // accepted quests (max 3)
+    completedQuests: [],
+
+    // --- World / travel ---
+    knownRegions:    [],    // regions revealed by advance quests
+    visitedRegions:  [],
+
+    // --- Gear & magic ---
+    craftedGear:     [],
+    spells:          [],
+    lastDefeatedEnemyLoot: null,
+    restedSinceAction:     false,
 
     // --- Status Effects ---
     statusEffects: [],      // array of { type, target, remaining, damage, source }
@@ -168,8 +182,12 @@ function validateState(state) {
   }
 
   // Arrays
-  if (!Array.isArray(state.inventory))  state.inventory  = [];
-  if (!Array.isArray(state.companions)) state.companions = [];
+  for (const key of ['inventory', 'companions', 'boardQuests', 'activeQuests', 'completedQuests', 'knownRegions', 'visitedRegions', 'craftedGear', 'spells', 'statusEffects', 'conversationHistory']) {
+    if (!Array.isArray(state[key])) state[key] = [];
+  }
+  // Older saves stored a creation phase of 0 for brand-new states, which
+  // could never progress. Treat it as the first question.
+  if (state.creation && (!state.creation.phase || state.creation.phase < 1)) state.creation.phase = 1;
 
   // Objects
   if (!state.reputation      || typeof state.reputation      !== 'object') state.reputation      = {};

@@ -18,8 +18,11 @@ const { serializeState, deserializeState } = require('../game/state');
 // DATABASE SETUP
 // =============================================
 // Use Railway volume (/data) if available, otherwise local ./data directory
-const DB_DIR  = fs.existsSync('/data') ? '/data' : path.join(__dirname, '..', 'data');
-const DB_PATH = path.join(DB_DIR, 'emberandash.db');
+// EMBER_DB_PATH overrides everything (used by tests and local experiments).
+const DB_PATH = process.env.EMBER_DB_PATH
+  ? path.resolve(process.env.EMBER_DB_PATH)
+  : path.join(fs.existsSync('/data') ? '/data' : path.join(__dirname, '..', 'data'), 'emberandash.db');
+const DB_DIR  = path.dirname(DB_PATH);
 
 console.log(`[DB] Database directory: ${DB_DIR}`);
 console.log(`[DB] Database path: ${DB_PATH}`);
@@ -101,6 +104,16 @@ function initializeSchema() {
       token        TEXT    UNIQUE NOT NULL,
       created_at   TEXT    NOT NULL DEFAULT (datetime('now')),
       expires_at   TEXT    NOT NULL DEFAULT (datetime('now', '+30 days'))
+    );
+
+    -- Player sessions table
+    -- Maps a logged-in session ID to its account + save slot so a session
+    -- survives server restarts and idle eviction from the in-memory store.
+    CREATE TABLE IF NOT EXISTS player_sessions (
+      session_id   TEXT    PRIMARY KEY,
+      player_id    INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+      slot         INTEGER NOT NULL DEFAULT 1,
+      updated_at   TEXT    NOT NULL DEFAULT (datetime('now'))
     );
 
     -- Indexes for common queries
@@ -249,7 +262,7 @@ function cleanExpiredRememberTokens() {
 // Save game state to a slot
 function saveGame(playerId, slot, state) {
   const level     = state.totalXP ? require('../game/character').getPlayerLevel(state.totalXP) : 1;
-  const charName  = state.character ? state.character.description : null;
+  const charName  = state.character ? (state.character.name || null) : null;
   const region    = state.character ? state.character.region : null;
   const stateJson = serializeState(state);
 
@@ -265,8 +278,9 @@ function saveGame(playerId, slot, state) {
   `);
 
   try {
-    const result = stmt.run(playerId, slot, charName, region, level, stateJson);
-    return { success: true, saveId: result.lastInsertRowid };
+    stmt.run(playerId, slot, charName, region, level, stateJson);
+    // lastInsertRowid is stale on the UPDATE branch of an upsert — look the row up.
+    return { success: true, saveId: getSaveId(playerId, slot) };
   } catch (err) {
     console.error('[DB] saveGame error:', err.message);
     return { success: false, error: 'Failed to save game.' };
@@ -352,6 +366,41 @@ function getSaveId(playerId, slot) {
   `);
   const row = stmt.get(playerId, slot);
   return row ? row.id : null;
+}
+
+
+// =============================================
+// PLAYER SESSIONS
+// =============================================
+function storePlayerSession(sessionId, playerId, slot) {
+  db.prepare(`
+    INSERT INTO player_sessions (session_id, player_id, slot, updated_at)
+    VALUES (?, ?, ?, datetime('now'))
+    ON CONFLICT(session_id) DO UPDATE SET
+      player_id  = excluded.player_id,
+      slot       = excluded.slot,
+      updated_at = datetime('now')
+  `).run(sessionId, playerId, slot);
+}
+
+function getPlayerSession(sessionId) {
+  return db.prepare(`
+    SELECT session_id, player_id, slot FROM player_sessions
+    WHERE session_id = ? AND updated_at > datetime('now', '-30 days')
+  `).get(sessionId) || null;
+}
+
+function deletePlayerSession(sessionId) {
+  db.prepare('DELETE FROM player_sessions WHERE session_id = ?').run(sessionId);
+}
+
+// Most recently updated save for a player, or null.
+function getLatestSave(playerId) {
+  const row = db.prepare(`
+    SELECT slot FROM saves WHERE player_id = ?
+    ORDER BY updated_at DESC, slot ASC LIMIT 1
+  `).get(playerId);
+  return row ? loadGame(playerId, row.slot) : null;
 }
 
 
@@ -477,6 +526,7 @@ function cleanExpiredGuestSessions() {
 function runMaintenance() {
   cleanExpiredGuestSessions();
   cleanExpiredRememberTokens();
+  db.prepare(`DELETE FROM player_sessions WHERE updated_at < datetime('now', '-30 days')`).run();
 
   // Trim history for all saves to keep DB lean
   const saves = db.prepare('SELECT id FROM saves').all();
@@ -512,8 +562,8 @@ initializeSchema();
 // Run guest session cleanup on startup
 cleanExpiredGuestSessions();
 
-// Schedule maintenance every 6 hours
-setInterval(runMaintenance, 6 * 60 * 60 * 1000);
+// Schedule maintenance every 6 hours (unref so tests/scripts can exit)
+setInterval(runMaintenance, 6 * 60 * 60 * 1000).unref();
 
 
 module.exports = {
@@ -540,6 +590,12 @@ module.exports = {
   loadSave,       // alias for loadSaveById
   deleteSave,
   getSaveId,
+  getLatestSave,
+
+  // Player sessions
+  storePlayerSession,
+  getPlayerSession,
+  deletePlayerSession,
 
   // History
   appendStoryHistory,

@@ -89,47 +89,74 @@ function changeCompanionLoyalty(state, nameOrId, amount) {
 }
 
 const COMPANION_JOIN_KEYWORDS = [
-  'join me', 'travel with', 'come with', 'follow me', 'accompany',
-  'party up', 'team up', 'hire', 'recruit', 'bring along'
+  'join me', 'travel with me', 'come with me', 'follow me', 'accompany me',
+  'party up', 'team up', 'hire', 'recruit', 'bring along', 'join my party',
+  'join us', 'come with us', 'travel together'
 ];
 
-const COMPANION_LEAVE_KEYWORDS = [
-  'leave', 'dismiss', 'part ways', 'let go', 'send away', 'fire',
-  'goodbye', 'farewell', 'stay here', 'wait here'
+// Leaving must be explicit — "leave the tavern" or "fire an arrow" must
+// never dismiss a companion.
+const COMPANION_LEAVE_PATTERNS = [
+  /\bdismiss\s+(\w+)/i,
+  /\bpart ways with\s+(\w+)/i,
+  /\bsend\s+(\w+)\s+away\b/i,
+  /\blet\s+(\w+)\s+go\b/i,
+  /\btell\s+(\w+)\s+to\s+(?:leave|go home|go away)\b/i,
+  /\b(\w+)\s*,?\s+(?:you(?:'re| are) dismissed|leave the party)\b/i
 ];
+
+const NON_NAMES = new Set(['you','me','us','him','her','them','it','my','the','a','an','i','we','they','this','that','with','to','along','together','someone','anyone']);
+
+function cleanName(word) {
+  const w = String(word || '').replace(/[^a-z'-]/gi, '');
+  return w && !NON_NAMES.has(w.toLowerCase()) ? w : null;
+}
 
 function detectCompanionIntent(text, state) {
-  const t = text.toLowerCase();
+  const t = String(text || '');
+  const lower = t.toLowerCase();
 
-  const isJoin = COMPANION_JOIN_KEYWORDS.some(kw => t.includes(kw));
-  const isLeave = COMPANION_LEAVE_KEYWORDS.some(kw => t.includes(kw));
-
-  if (!isJoin && !isLeave) return null;
-
-  let npcName = null;
-  if (state.currentNPC) {
-    npcName = state.currentNPC;
-  }
-
-  const namePatterns = [
-    /(?:ask|tell|invite)\s+(\w+)\s+to/i,
-    /(\w+)\s+(?:join|come|travel|accompany)/i,
-    /(?:with|dismiss|goodbye)\s+(\w+)/i,
-    /(?:let|send)\s+(\w+)\s+(?:go|away)/i
-  ];
-
-  for (const pattern of namePatterns) {
-    const match = t.match(pattern);
-    if (match && match[1]) {
-      npcName = match[1];
-      break;
+  for (const pattern of COMPANION_LEAVE_PATTERNS) {
+    const m = t.match(pattern);
+    const name = m && cleanName(m[1]);
+    if (name && (state.companions || []).some(c => c.name.toLowerCase().startsWith(name.toLowerCase()))) {
+      return { intent: 'leave', npcName: name };
     }
   }
 
-  return {
-    intent: isLeave ? 'leave' : 'join',
-    npcName
-  };
+  if (!COMPANION_JOIN_KEYWORDS.some(kw => lower.includes(kw))) return null;
+
+  let npcName = null;
+  const namePatterns = [
+    /(?:ask|tell|invite|hire|recruit)\s+(\w+)\s+(?:to|if)/i,
+    /(?:hire|recruit)\s+(\w+)/i,
+    /(\w+)\s*,\s*(?:will|would|do|can)\s+you\s+(?:join|come|travel|accompany)/i
+  ];
+  for (const pattern of namePatterns) {
+    const match = t.match(pattern);
+    const name  = match && cleanName(match[1]);
+    if (name) { npcName = name; break; }
+  }
+  if (!npcName && state.currentNPC) npcName = state.currentNPC;
+
+  return { intent: 'join', npcName };
+}
+
+// Social interaction with the NPC currently in the scene builds rapport.
+const SOCIAL_PATTERN = /\b(talk|ask|tell|say|chat|thank|help|give|share|drink|laugh|compliment|listen|offer|buy (?:him|her|them) a|smile|joke|comfort|apologi[sz]e|greet|introduce|trade stories|toast)\b/i;
+
+function applySocialRapport(state, input) {
+  if (!state.currentNPC || state.inCombat) return null;
+  if (!SOCIAL_PATTERN.test(String(input || ''))) return null;
+  const key = state.currentNPC.toLowerCase().replace(/\s+/g, '_');
+  if (!state.npcRelationships) state.npcRelationships = {};
+  const rel = state.npcRelationships[key] || { rapport: 10, metBefore: true };
+  const cha = (state.stats && state.stats.cha) || 10;
+  const gain = Math.max(2, 4 + Math.floor((cha - 10) / 3));
+  rel.rapport   = Math.min(100, (rel.rapport || 0) + gain);
+  rel.metBefore = true;
+  state.npcRelationships[key] = rel;
+  return { npc: state.currentNPC, rapport: rel.rapport, gain };
 }
 
 function getLoyaltyLabel(loyalty) {
@@ -164,6 +191,7 @@ module.exports = {
   getCompanion,
   changeCompanionLoyalty,
   detectCompanionIntent,
+  applySocialRapport,
   getCompanionsDisplay,
   getLoyaltyLabel
 };

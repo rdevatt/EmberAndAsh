@@ -16,8 +16,33 @@ module.exports = function registerSaveRoutes(app, deps) {
     buildRightPanelData,
     buildEconomyPanelData,
     equipCraftedItem,
-    sellCraftedItem
+    sellCraftedItem,
+    newCreationState,
+    isInCreation,
+    buildProgressionPanelData,
+    buildBoardDisplayData,
+    getPlayerLevel
   } = deps;
+
+  function panels(state) {
+    return {
+      character:   buildCharacterPanelData(state),
+      progression: buildProgressionPanelData(state),
+      economy:     buildEconomyPanelData(state),
+      rightPanel:  buildRightPanelData(state),
+      board:       buildBoardDisplayData(state),
+      inCreation:  isInCreation(state)
+    };
+  }
+
+  // Clears per-action undo/retry data that belongs to a different state.
+  function clearActionHistory(session) {
+    session.stateSnapshot = null;
+    session.lastInput     = null;
+    session.lastOutput    = null;
+    session.lastEvents    = null;
+    session.lastCombatLog = null;
+  }
 
   app.get('/api/saves', requireSession, (req, res) => {
     if (!req.session.playerId) {
@@ -27,22 +52,28 @@ module.exports = function registerSaveRoutes(app, deps) {
     res.json({ success: true, slots });
   });
 
-  app.post('/api/saves/load', requireSession, (req, res) => {
-    const { slot } = req.body;
+  app.post('/api/saves/load', requireSession, async (req, res) => {
     if (!req.session.playerId) return res.status(401).json({ error: 'Must be logged in.' });
+    const slotNum = parseInt((req.body || {}).slot, 10) || 1;
+    if (slotNum < 1 || slotNum > 3) return res.status(400).json({ error: 'Slot must be 1, 2, or 3.' });
 
-    const save = db.loadGame(req.session.playerId, slot || 1);
+    // Save the current game before switching away from it.
+    await persistSession(req.sessionId);
+
+    const save = db.loadGame(req.session.playerId, slotNum);
     if (!save) return res.status(404).json({ error: 'No save found in that slot.' });
 
-    req.session.state = save.state;
-    req.session.saveSlot = slot || 1;
-    req.session.saveId = save.saveId;
+    req.session.state    = save.state;
+    req.session.saveSlot = slotNum;
+    req.session.saveId   = save.saveId;
+    clearActionHistory(req.session);
     setSession(req.sessionId, req.session);
+    await persistSession(req.sessionId);
 
     res.json({
       success: true,
-      character: buildCharacterPanelData(save.state),
-      rightPanel: buildRightPanelData(save.state),
+      slot: slotNum,
+      ...panels(save.state),
       storySummary: save.state.storySummary || ''
     });
   });
@@ -63,9 +94,12 @@ module.exports = function registerSaveRoutes(app, deps) {
       return res.status(400).json({ error: 'Slot must be 1, 2, or 3.' });
     }
 
-    db.saveGame(req.session.playerId, slotNum, req.session.state);
+    const result = db.saveGame(req.session.playerId, slotNum, req.session.state);
+    if (!result.success) return res.status(500).json({ error: result.error || 'Failed to save.' });
     req.session.saveSlot = slotNum;
+    req.session.saveId   = result.saveId;
     setSession(req.sessionId, req.session);
+    await persistSession(req.sessionId);
 
     res.json({ success: true, slot: slotNum });
   });
@@ -81,14 +115,15 @@ module.exports = function registerSaveRoutes(app, deps) {
       if (save && save.state) {
         const s = save.state;
         const c = s.character || {};
-        const lvl = s.totalXP ? Math.floor(Math.sqrt(s.totalXP / 10)) + 1 : 1;
+        const { BACKGROUNDS, REGIONS } = require('../../../game/constants');
         slots.push({
           slot: i,
           empty: false,
+          inCreation: isInCreation(s),
           name: c.name || 'Unnamed',
-          background: c.background || '—',
-          level: Math.min(lvl, 100),
-          region: c.region || '—',
+          background: (BACKGROUNDS[c.background] && BACKGROUNDS[c.background].label) || c.background || '—',
+          level: getPlayerLevel(s.totalXP || 0),
+          region: (REGIONS[c.region] && REGIONS[c.region].label) || c.region || '—',
           saveId: save.saveId,
           updatedAt: save.updatedAt || null
         });
@@ -100,32 +135,45 @@ module.exports = function registerSaveRoutes(app, deps) {
     res.json({ success: true, slots, currentSlot: req.session.saveSlot || 1 });
   });
 
+  // Starts a new character in the current slot (the client confirms first).
   app.post('/api/game/reset', requireSession, async (req, res) => {
-    const freshState = createFreshState();
-    freshState.creation.phase = 1;
-    freshState.creationPrompt = buildOpeningPrompt();
+    const freshState = newCreationState();
+    if (req.session.state && req.session.state.nsfwEnabled === false) freshState.nsfwEnabled = false;
 
-    req.session.state = freshState;
-    req.session.saveSlot = req.session.saveSlot || 1;
-    req.session.saveId = null;
+    req.session.state    = freshState;
+    req.session.saveSlot = req.session.playerId ? (req.session.saveSlot || 1) : null;
+    req.session.saveId   = null;
+    clearActionHistory(req.session);
     setSession(req.sessionId, req.session);
+    await persistSession(req.sessionId);
 
-    if (req.session.playerId && req.session.saveSlot) {
-      db.saveGame(req.session.playerId, req.session.saveSlot, freshState);
-    } else {
-      db.saveGuestSession(req.sessionId, freshState);
-    }
-
-    res.json({ success: true, output: buildOpeningPrompt() });
+    res.json({ success: true, sessionId: req.sessionId, output: buildOpeningPrompt(), ...panels(freshState) });
   });
 
-  app.post('/api/game/equip-crafted', requireSession, (req, res) => {
+  // Creation "Back" button: rewind the server to an earlier creation phase
+  // so the client and server never disagree about which question is next.
+  app.post('/api/creation/back', requireSession, async (req, res) => {
+    const state = req.session.state;
+    if (!isInCreation(state)) return res.status(400).json({ error: 'Character creation is already complete.' });
+    const target = parseInt((req.body || {}).phase, 10);
+    if (!target || target < 1 || target >= (state.creation.phase || 1)) {
+      return res.status(400).json({ error: 'Can only go back to an earlier creation step.' });
+    }
+    state.creation.phase = target;
+    if (target <= 3) delete state.creation.customGear;
+    setSession(req.sessionId, req.session);
+    await persistSession(req.sessionId);
+    res.json({ success: true, creationPhase: target });
+  });
+
+  app.post('/api/game/equip-crafted', requireSession, async (req, res) => {
     const normalizedItemName = stripTrailingPunctuation(req.body.itemName);
     if (!normalizedItemName) return res.status(400).json({ error: 'itemName required.' });
 
     const state = req.session.state;
     const result = equipCraftedItem(state, normalizedItemName);
     setSession(req.sessionId, req.session);
+    if (result.success) await persistSession(req.sessionId);
 
     res.json({
       success: result.success,
@@ -135,13 +183,14 @@ module.exports = function registerSaveRoutes(app, deps) {
     });
   });
 
-  app.post('/api/game/sell-crafted', requireSession, (req, res) => {
+  app.post('/api/game/sell-crafted', requireSession, async (req, res) => {
     const normalizedItemName = stripTrailingPunctuation(req.body.itemName);
     if (!normalizedItemName) return res.status(400).json({ error: 'itemName required.' });
 
     const state = req.session.state;
     const result = sellCraftedItem(state, normalizedItemName);
     setSession(req.sessionId, req.session);
+    if (result.success) await persistSession(req.sessionId);
 
     res.json({
       success: result.success,

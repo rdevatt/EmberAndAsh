@@ -67,39 +67,47 @@ const CRAFTABLE_ARMOR = {
   scout:      ['leather armor','cloak','hood','soft armor','padded vest','face wrap']
 };
 
+// Idioms that use a crafting verb without crafting anything.
+const CRAFT_IDIOMS = /\b(make (?:my|your|our|their|his|her) way|make sure|make camp|make do|make sense|make peace|make love|make a deal|make a run|make an escape|make it|work (?:on|out|through|for|with)|prepare (?:to|for|myself|yourself)|build up|shape up)\b/i;
+
 function detectCraftingIntent(input, profKey) {
   const t = input.toLowerCase();
-  const hasCraftVerb = CRAFTING_DETECT_KEYWORDS.some(k => t.includes(k));
-  if (!hasCraftVerb) return null;
+  if (CRAFT_IDIOMS.test(t)) return null;
 
   const weaponList = CRAFTABLE_WEAPONS[profKey] || [];
   const armorList  = CRAFTABLE_ARMOR[profKey]   || [];
 
-  const isProfWeapon = weaponList.some(w => t.includes(w));
-  const isProfArmor  = armorList.some(a => t.includes(a));
+  // The crafted object must be the direct object of the craft verb:
+  // "forge a sharp sword", "carve a crude spear from the branch".
+  // Take up to five words after the verb, stopping at prepositions.
+  let phrase = null;
+  for (const verb of CRAFTING_DETECT_KEYWORDS) {
+    const m = t.match(new RegExp(`\\b${verb}(?:s|ed|ing)?\\s+(?:myself\\s+|me\\s+)?(?:a|an|the|some|my)?\\s*([a-z' -]+)`));
+    if (!m) continue;
+    // "work the hide into a cloak" -> the product is "a cloak"
+    const raw = m[1].includes(' into ') ? m[1].split(' into ').pop().replace(/^(a|an|the)\s+/, '') : m[1];
+    phrase = raw
+      .split(/\s+(?:from|with|out|using|for|to|in|on|at|and|then|by|of)\b/)[0]
+      .split(/\s+/).slice(0, 5).join(' ').trim();
+    if (phrase) break;
+  }
+  if (!phrase) return null;
 
-  const isUniversalWeapon = !isProfWeapon && UNIVERSAL_WEAPONS.some(w => t.includes(w));
-  const isUniversalArmor  = !isProfArmor  && UNIVERSAL_ARMOR.some(a => t.includes(a));
+  const isProfWeapon = weaponList.some(w => phrase.includes(w));
+  const isProfArmor  = armorList.some(a => phrase.includes(a));
+
+  const isUniversalWeapon = !isProfWeapon && UNIVERSAL_WEAPONS.some(w => phrase.includes(w));
+  const isUniversalArmor  = !isProfArmor  && UNIVERSAL_ARMOR.some(a => phrase.includes(a));
 
   const isWeapon = isProfWeapon || isUniversalWeapon;
   const isArmor  = isProfArmor  || isUniversalArmor;
 
   if (!isWeapon && !isArmor) return null;
 
-  let itemName = null;
-  for (const verb of CRAFTING_DETECT_KEYWORDS) {
-    const idx = t.indexOf(verb);
-    if (idx !== -1) {
-      const after = t.slice(idx + verb.length).trim().split(/\s+/).slice(0, 5).join(' ');
-      itemName = after.replace(/^(a|an|the)\s+/i,'').trim();
-      break;
-    }
-  }
-
   return {
     isArmor:    isArmor && !isWeapon,
     isPrimitive: !isProfWeapon && !isProfArmor,
-    itemName:   itemName || (isArmor ? 'improvised armor' : 'improvised weapon')
+    itemName:   phrase || (isArmor ? 'improvised armor' : 'improvised weapon')
   };
 }
 

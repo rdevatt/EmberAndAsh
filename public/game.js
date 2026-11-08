@@ -10,5 +10,6 @@
   };
 
   load('game/core.js');
+  load('game/ui.js');
   load('game/creation.js');
 })();

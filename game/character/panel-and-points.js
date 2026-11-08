@@ -84,7 +84,8 @@ function buildCharacterPanelData(state, deps) {
     : 0;
 
   return {
-    name: state.character ? state.character.description : null,
+    name: state.character ? (state.character.name || null) : null,
+    description: state.character ? (state.character.description || null) : null,
     age: state.character ? state.character.age : null,
     gender: state.character ? state.character.gender : null,
     background: bg ? bg.label : null,
@@ -93,6 +94,7 @@ function buildCharacterPanelData(state, deps) {
     totalXP: state.totalXP || 0,
     xpToNext,
     stats: { ...state.stats },
+    effectiveStats: deps.getEffectiveStats ? deps.getEffectiveStats(state) : { ...state.stats },
     hp: state.hp,
     maxHp: state.maxHp,
     hpLabel: getHPLabel(state.hp, state.maxHp),

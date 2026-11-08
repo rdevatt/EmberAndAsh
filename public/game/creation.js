@@ -193,8 +193,8 @@ function cwBuildStep2() {
     client.creation.heightText = val;
   });
 
-  // Default height: 5'9" (average)
-  const defHeight = el.cwHeightList.querySelector('[data-value="5\'9\'\'"]');
+  // Default height: 5'9" (average) — match by value; quotes make CSS selectors fragile.
+  const defHeight = [...el.cwHeightList.querySelectorAll('.cw-option')].find(o => o.dataset.value === `5'9"`);
   if (defHeight) {
     defHeight.click();
     setTimeout(() => defHeight.scrollIntoView({ block:'center' }), 50);
@@ -343,6 +343,32 @@ function cwInit() {
   cwShowStep(1);
 }
 
+// ---- Resume a creation already in progress on the server ----
+// Phase 3 needs the background list, which only arrives with the phase-2
+// answer, so a phase-3 resume rewinds one step to rebuild it.
+async function cwResume(phase) {
+  cwInit();
+  let step = Math.max(1, Math.min(4, phase || 1));
+  if (step === 3 && CW_BG_CACHE.length === 0) {
+    const { ok } = await apiCall('POST', '/creation/back', { phase: 2 });
+    if (ok) step = 2;
+  }
+  cwShowStep(step);
+}
+
+// ---- Back button: rewind the server so both sides agree on the step ----
+async function cwGoBack(step) {
+  if (client.isLoading) return;
+  setLoading(true);
+  const { ok, data } = await apiCall('POST', '/creation/back', { phase: step });
+  setLoading(false);
+  if (!ok) {
+    appendSystemMessage(data.error || 'Could not go back.');
+    return;
+  }
+  cwShowStep(step);
+}
+
 // ---- Wizard teardown ----
 function cwDismiss() {
   el.creationWizard.classList.add('hidden');
@@ -454,51 +480,41 @@ function cwNormalizeSubmissionInput(text) {
 async function cwSendAndAdvance(text, onSuccess) {
   const normalizedText = cwNormalizeSubmissionInput(text);
   if (!normalizedText) {
-    appendStory(null, 'Input required.', true);
+    appendSystemMessage('Input required.');
     return;
   }
 
   setLoading(true);
-
-  let ok, data;
-  try {
-    ({ ok, data } = await apiCall('POST', '/action', { input: normalizedText }));
-  } catch (e) {
-    setLoading(false);
-    appendStory(null, 'Connection error. Please try again.', true);
-    return;
-  }
-
+  const { ok, data } = await apiCall('POST', '/action', { input: normalizedText });
   setLoading(false);
 
   if (!ok) {
     const errMsg = data.detail
       ? `${data.error || 'Something went wrong.'} [${data.detail}]`
       : (data.error || 'Something went wrong.');
-    appendStory(null, errMsg, true);
-    // Show a manual dismiss button so the player can't get permanently stuck
-    showCreationFallback();
+    appendSystemMessage(errMsg);
     return;
   }
 
   if (data.output) {
-    appendStory(null, data.output, true);
+    appendStory(null, data.output, !!data.inCreation);
   }
-
-  try {
-    if (data.character)   updateCharacterPanel(data.character);
-    if (data.progression) updateProgressionPanel(data.progression);
-    if (data.economy)     updateEconomyPanel(data.economy);
-    if (data.rightPanel)  updateRightPanel(data.rightPanel);
-  if (data.board)       updateBoardPanel(data.board);
-  } catch (e) {
-    console.warn('[CW] Panel update error (non-fatal):', e);
-  }
+  applyPanels(data);
 
   if (!data.inCreation) {
     // Creation complete — dismiss wizard and reveal the input area
     client.inCreation = false;
     cwDismiss();
+    return;
+  }
+
+  // The server rejected this answer: stay on the current step.
+  if (data.creationError) {
+    const errEl = { 1: el.cwStep1Error, 3: el.cwStep3Error, 4: el.cwStep4Error }[client.creationStep];
+    if (errEl) {
+      errEl.textContent = 'That answer could not be used — see the message in the story, adjust, and try again.';
+      errEl.classList.remove('hidden');
+    }
     return;
   }
 
@@ -561,9 +577,9 @@ el.cwNext2.addEventListener('click', cwSubmitStep2);
 el.cwNext3.addEventListener('click', cwSubmitStep3);
 el.cwNext4.addEventListener('click', cwSubmitStep4);
 
-el.cwBack2.addEventListener('click', () => cwShowStep(1));
-el.cwBack3.addEventListener('click', () => cwShowStep(2));
-el.cwBack4.addEventListener('click', () => cwShowStep(3));
+el.cwBack2.addEventListener('click', () => cwGoBack(1));
+el.cwBack3.addEventListener('click', () => cwGoBack(2));
+el.cwBack4.addEventListener('click', () => cwGoBack(3));
 
 // Allow Enter on wizard text inputs to advance
 el.cwName.addEventListener('keydown', e => {
@@ -600,6 +616,8 @@ el.btnShowLogin.addEventListener('click', () => {
 });
 
 el.toggleNsfw.addEventListener('change', handleNsfwToggle);
+const elBtnLogout = document.getElementById('btn-logout');
+if (elBtnLogout) elBtnLogout.addEventListener('click', handleLogout);
 el.btnSave.addEventListener('click', handleSave);
 
 // Login on Enter key in password field
@@ -635,9 +653,9 @@ async function refreshSaveSlots() {
       const infoEl = document.querySelector(`#save-slot-${i} .save-slot-info`);
       const loadBtn = document.querySelector(`#save-slot-${i} .save-slot-load`);
       const saveBtn = document.querySelector(`#save-slot-${i} .save-slot-save`);
-      if (infoEl) infoEl.textContent = i === 1 ? 'Guest auto-save slot' : 'Requires account';
-      if (loadBtn) loadBtn.disabled = i !== 1;
-      if (saveBtn) saveBtn.disabled = i !== 1;
+      if (infoEl) infoEl.textContent = i === 1 ? 'Guest progress saves automatically' : 'Requires account';
+      if (loadBtn) loadBtn.disabled = true;
+      if (saveBtn) saveBtn.disabled = true;
     }
     return;
   }
@@ -648,9 +666,15 @@ async function refreshSaveSlots() {
     const slotEl  = document.getElementById(`save-slot-${slot.slot}`);
     const infoEl  = slotEl && slotEl.querySelector('.save-slot-info');
     if (!infoEl) continue;
+    const loadBtn = slotEl.querySelector('.save-slot-load');
+    const saveBtn = slotEl.querySelector('.save-slot-save');
+    if (loadBtn) loadBtn.disabled = !!slot.empty || slot.slot === data.currentSlot;
+    if (saveBtn) saveBtn.disabled = false;
 
     if (slot.empty) {
       infoEl.textContent = 'Empty';
+    } else if (slot.inCreation) {
+      infoEl.textContent = 'New character (creation in progress)';
     } else {
       const updated = slot.updatedAt ? new Date(slot.updatedAt).toLocaleDateString() : '';
       infoEl.innerHTML = `<strong>${escHtml(slot.name)}</strong> — Level ${slot.level}<br>
@@ -676,6 +700,9 @@ document.querySelectorAll('.save-slot-save').forEach(btn => {
   btn.addEventListener('click', async () => {
     if (!client.isLoggedIn) { openSettings(); return; }
     const slot = parseInt(btn.dataset.slot);
+    const slotInfo = document.querySelector(`#save-slot-${slot} .save-slot-info`);
+    const occupied = slotInfo && !/^Empty$/.test(slotInfo.textContent.trim());
+    if (occupied && !btn.closest('.active-slot') && !confirm(`Overwrite save slot ${slot}?`)) return;
     const { ok } = await apiCall('POST', '/saves/save-to-slot', { slot });
     if (ok) {
       btn.textContent = 'SAVED!';
@@ -690,20 +717,16 @@ document.querySelectorAll('.save-slot-load').forEach(btn => {
   btn.addEventListener('click', async () => {
     if (!client.isLoggedIn) { openSettings(); return; }
     const slot = parseInt(btn.dataset.slot);
+    setLoading(true);
     const { ok, data } = await apiCall('POST', '/saves/load', { slot });
+    setLoading(false);
     if (ok && data.success) {
       closeSavesModal();
-      if (data.character)   updateCharacterPanel(data.character);
-      if (data.rightPanel)  updateRightPanel(data.rightPanel);
-  if (data.board)       updateBoardPanel(data.board);
-      const resume = data.storySummary
-        ? `— Loaded slot ${slot} —\n\n${data.storySummary}`
-        : `Save slot ${slot} loaded.`;
-      appendStory(null, resume, false);
-      client.inCreation = false;
-      document.getElementById('creation-wizard').classList.add('hidden');
-      document.getElementById('input-area').classList.remove('hidden');
-      el.playerInput.focus();
+      el.storyContent.innerHTML = '';
+      localStorage.removeItem('storyHistory');
+      await enterSession(data, `— Loaded slot ${slot} —`);
+    } else {
+      showToast(data.error || 'Could not load that slot.');
     }
   });
 });
@@ -734,24 +757,19 @@ async function handleReset() {
   setLoading(false);
 
   if (!ok) {
-    appendStory(null, '[Reset failed. Try again.]', false);
+    appendSystemMessage('[Reset failed. Try again.]');
     return;
   }
 
-  // Clear story
+  // Clear story (the session itself is kept — it now holds the new character)
   el.storyContent.innerHTML = '';
-  localStorage.removeItem('sessionId');
   localStorage.removeItem('storyHistory');
 
   // Reinitialize
-  client.inCreation  = true;
   client.creationStep = 1;
   client.creation    = { name:'', age:null, gender:null, heightText:'', buildKey:'', features:'', bgKey:null, bgIndex:null, bgFreeform:'', envKey:null, envIndex:null };
-
-  appendStory(null, data.output || '', true);
-  document.getElementById('creation-wizard').classList.remove('hidden');
-  document.getElementById('input-area').classList.add('hidden');
-  cwInit();
+  CW_BG_CACHE.length = 0;
+  await enterSession(data, null);
 }
 
 elBtnResetGame.addEventListener('click', openResetModal);
@@ -788,8 +806,6 @@ mobileNavBtns.forEach(btn => {
   btn.addEventListener('click', () => setMobilePanel(btn.dataset.panel));
 });
 
-// When AI responds on mobile, auto-switch to story panel
-const _origAppendStory = appendStory;
 
 
 // =============================================

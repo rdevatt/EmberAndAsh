@@ -26,9 +26,11 @@ const {
   SCOUT_TEMPLATES,
   ADVANCE_QUESTS,
   getNextTierRegions,
+  getRegionConnections,
 } = require('./constants');
 
-const { getPlayerLevel } = require('./character');
+const { getPlayerLevel, grantXP } = require('./character');
+const { enemyMatchesTarget } = require('./combat');
 const { addCoin, formatCoin: fmtCoin } = require('./economy');
 
 
@@ -109,8 +111,10 @@ function generateBoardQuests(state) {
   const huntTpl  = huntPool[huntPool.length - 1] || HUNT_TEMPLATES[0];
 
   const diff1 = playerLevel < areaMin ? 'hard' : playerLevel > areaMax ? 'easy' : 'normal';
-  const target1 = huntTpl.targets[Math.floor(Math.random() * huntTpl.targets.length)];
-  const count1  = huntTpl.counts[Math.floor(Math.random() * huntTpl.counts.length)];
+  // Hunt something that actually lives (and spawns) in this region.
+  const regionTargets = (region.monsters && region.monsters.length) ? region.monsters : huntTpl.targets;
+  const target1 = regionTargets[Math.floor(Math.random() * regionTargets.length)];
+  const count1  = Math.min(5, huntTpl.counts[Math.floor(Math.random() * huntTpl.counts.length)]);
   const giver1  = huntTpl.givers[Math.floor(Math.random() * huntTpl.givers.length)];
 
   quests.push({
@@ -176,18 +180,28 @@ function generateBoardQuests(state) {
       label:      `Retrieve: ${rtpl.item} from ${rtpl.location}`,
       desc:       `${rtpl.giver} will pay ${fmtCoin(calculateQuestReward(tier,'normal').coin)} for the ${rtpl.item} recovered from ${rtpl.location}. Expect resistance.`,
       target:     rtpl.item,
+      location:   rtpl.location,
       targetCount:1,
       progress:   0,
       giver:      rtpl.giver,
       regionKey,
       reward:     calculateQuestReward(tier, 'normal'),
-      hint:       `[QUEST ACTIVE — Retrieve: bring back the ${rtpl.item} from ${rtpl.location}. Narrate the retrieval naturally. Mark complete when item is secured.]`
+      hint:       `[QUEST ACTIVE — Retrieve: bring back the ${rtpl.item} from ${rtpl.location}. Something guards it. Narrate naturally.]`
     });
   }
 
   // ---- ESCORT or SCOUT ----
   if (Math.random() < 0.5) {
-    const etpl = ESCORT_TEMPLATES.filter(t => t.tier <= tier).pop() || ESCORT_TEMPLATES[0];
+    const etplBase = ESCORT_TEMPLATES.filter(t => t.tier <= tier).pop() || ESCORT_TEMPLATES[0];
+    // Escort destinations must be a different, directly reachable region.
+    const neighbours = getRegionConnections(regionKey).filter(k => {
+      const r = REGIONS[k];
+      return r && (r.tier || 1) <= tier;
+    });
+    const destKey = (etplBase.to && etplBase.to !== regionKey && neighbours.includes(etplBase.to))
+      ? etplBase.to
+      : (neighbours.length ? neighbours[Math.floor(Math.random() * neighbours.length)] : null);
+    const etpl = { ...etplBase, to: destKey };
     const destRegion = etpl.to ? REGIONS[etpl.to] : null;
     quests.push({
       id:         `q_${idCounter++}`,
@@ -203,7 +217,7 @@ function generateBoardQuests(state) {
       giver:      etpl.giver,
       regionKey,
       reward:     calculateQuestReward(tier, 'hard'),
-      hint:       `[QUEST ACTIVE — Escort: keep ${etpl.npc} alive on the road to ${destRegion ? destRegion.label : 'their destination'}. Narrate travel and hazards naturally. Mark complete on safe arrival.]`
+      hint:       `[QUEST ACTIVE — Escort: keep ${etpl.npc} alive on the road to ${destRegion ? destRegion.label : 'their destination'}. Narrate travel and hazards naturally. Completes on arrival (travel there).]`
     });
   } else {
     const stpl = SCOUT_TEMPLATES.filter(t => t.tier <= tier).pop() || SCOUT_TEMPLATES[0];
@@ -215,6 +229,7 @@ function generateBoardQuests(state) {
       label:      `Scout: ${stpl.location}`,
       desc:       `${stpl.giver} offers ${fmtCoin(calculateQuestReward(tier,'hard').coin)} (plus ${stpl.reward}) for a full report on ${stpl.location}. Go in. Come back.`,
       target:     stpl.location,
+      location:   stpl.location,
       targetCount:1,
       progress:   0,
       giver:      stpl.giver,
@@ -226,7 +241,23 @@ function generateBoardQuests(state) {
 
   // ---- ADVANCE QUEST (fires when player is 1+ level over area cap) ----
   if (playerLevel >= areaMax + 1) {
-    const advPool = ADVANCE_QUESTS[tier];
+    // Only offer destinations reachable by road from here; otherwise
+    // build a generic advance quest toward a connected next-tier region.
+    // Advance exactly one tier: some regions also connect to tiers further
+    // up, which would send a freshly-advanced player somewhere lethal.
+    const allNext  = getNextTierRegions(regionKey);
+    const oneUp    = allNext.filter(k => (REGIONS[k].tier || 1) === tier + 1);
+    const minTier  = Math.min(...allNext.map(k => REGIONS[k].tier || 1));
+    const nextKeys = oneUp.length ? oneUp : allNext.filter(k => (REGIONS[k].tier || 1) === minTier);
+    let advPool    = (ADVANCE_QUESTS[tier] || []).filter(a => nextKeys.includes(a.dest));
+    if (advPool.length === 0 && nextKeys.length > 0) {
+      advPool = nextKeys.map(k => ({
+        label:  `The Road to ${REGIONS[k].label}`,
+        dest:   k,
+        task:   `Word has come from ${REGIONS[k].label}: they need capable hands, and this region has nothing left to teach you.`,
+        reward: 'triple coin + safe passage'
+      }));
+    }
     if (advPool && advPool.length > 0) {
       const adv         = advPool[Math.floor(Math.random() * advPool.length)];
       const destRegion  = REGIONS[adv.dest];
@@ -262,15 +293,34 @@ function generateBoardQuests(state) {
 // Accepted quests move to state.activeQuests.
 // Completed quests move to state.completedQuests.
 // =============================================
+const BOARD_REFRESH_ACTIONS = 30;   // new postings go up every so often
+
 function refreshBoard(state) {
-  state.boardQuests = generateBoardQuests(state);
+  state.boardQuests      = generateBoardQuests(state);
+  state.boardGeneratedAt = state.actionCount || 0;
+  state.boardRegion      = state.character ? state.character.region : null;
   return state.boardQuests;
 }
 
-function getBoardQuests(state) {
-  if (!state.boardQuests || state.boardQuests.length === 0) {
-    return refreshBoard(state);
+// The board refreshes when it's empty, stale, from another region, or when
+// the player has outgrown the region and no "move on" posting is up yet.
+function boardNeedsRefresh(state) {
+  if (!state.boardQuests || state.boardQuests.length === 0) return true;
+  const region = state.character ? state.character.region : null;
+  if (state.boardRegion && state.boardRegion !== region) return true;
+  if ((state.actionCount || 0) - (state.boardGeneratedAt || 0) >= BOARD_REFRESH_ACTIONS) return true;
+  const r = region ? REGIONS[region] : null;
+  if (r && r.levelRange) {
+    const outgrown   = getPlayerLevel(state.totalXP || 0) >= r.levelRange[1] + 1;
+    const hasAdvance = state.boardQuests.some(q => q.type === QUEST_TYPES.ADVANCE) ||
+                       (state.activeQuests || []).some(q => q.type === QUEST_TYPES.ADVANCE);
+    if (outgrown && !hasAdvance) return true;
   }
+  return false;
+}
+
+function getBoardQuests(state) {
+  if (boardNeedsRefresh(state)) return refreshBoard(state);
   return state.boardQuests;
 }
 
@@ -289,6 +339,12 @@ function acceptQuest(state, questId) {
 
   if (!state.activeQuests) state.activeQuests = [];
   state.activeQuests.push({ ...quest, acceptedAt: state.actionCount || 0 });
+
+  // Accepting an advance quest reveals the road to its destination.
+  if (quest.type === QUEST_TYPES.ADVANCE && quest.destination) {
+    if (!state.knownRegions) state.knownRegions = [];
+    if (!state.knownRegions.includes(quest.destination)) state.knownRegions.push(quest.destination);
+  }
   state.boardQuests.splice(idx, 1);
 
   return {
@@ -300,7 +356,8 @@ function acceptQuest(state, questId) {
 }
 
 function acceptQuestByIndex(state, displayIndex) {
-  const quests = getBoardQuests(state);
+  // Use the postings the player last saw; only generate if there are none.
+  const quests = (state.boardQuests && state.boardQuests.length) ? state.boardQuests : getBoardQuests(state);
   const idx    = displayIndex - 1;
   if (idx < 0 || idx >= quests.length) {
     return { success:false, message:`No quest numbered ${displayIndex}.` };
@@ -323,73 +380,115 @@ function abandonQuest(state, questId) {
 // are active quests. Checks whether any quest
 // conditions have been met.
 // =============================================
+const LOCATION_STOPWORDS = new Set(['the','of','a','an','from','to','in','on','at','north','south','east','west','old','near']);
+
+function significantWords(text) {
+  return String(text || '').toLowerCase().split(/[^a-z']+/)
+    .filter(w => w.length > 2 && !LOCATION_STOPWORDS.has(w));
+}
+
+// True when the input clearly references a quest location ("search the bandit camp").
+function mentionsLocation(input, location) {
+  const words = significantWords(location);
+  if (!words.length) return false;
+  const t      = String(input || '').toLowerCase();
+  const hits   = words.filter(w => t.includes(w)).length;
+  return hits >= Math.min(2, words.length);
+}
+
+/**
+ * Quest progress is driven by game events, not by keywords the player can
+ * type at will:
+ *   hunt/clear — kill events whose label matches the target
+ *   retrieve   — reach the location, defeat its guardian, item secured
+ *   scout      — reach the location, then report back
+ *   patrol     — stay on duty for 5 actions in the quest's region
+ *   escort / advance — arrive (travel) at the destination region
+ * gameEvents: [{type:'enemyDefeated', enemyLabel}, {type:'arrived', region}]
+ */
 function checkQuestProgress(state, playerInput, gameEvents) {
   if (!state.activeQuests || state.activeQuests.length === 0) return [];
 
   const updates = [];
-  const t       = playerInput.toLowerCase();
+  const t       = String(playerInput || '').toLowerCase();
+  const events  = gameEvents || [];
+  const kills   = events.filter(e => e.type === 'kill' || e.type === 'enemyDefeated');
+  const arrival = events.find(e => e.type === 'arrived');
+  const here    = state.character ? state.character.region : null;
 
   for (const quest of state.activeQuests) {
-    // --- HUNT / CLEAR: check combat kill events ---
+    if ((quest.progress || 0) >= (quest.targetCount || 1)) continue;
+
     if (quest.type === QUEST_TYPES.HUNT || quest.type === QUEST_TYPES.CLEAR) {
-      const killEvents = (gameEvents || []).filter(e => e.type === 'kill' || e.type === 'enemyDefeated');
-      for (const evt of killEvents) {
-        const enemyLabel = evt.enemyLabel || evt.enemy || '';
-        const targetWords = quest.target.toLowerCase().split(' ');
-        const matches = targetWords.some(word => enemyLabel.toLowerCase().includes(word));
-        if (matches) {
+      for (const evt of kills) {
+        const label = evt.enemyLabel || evt.enemy || '';
+        if (enemyMatchesTarget(label, quest.target)) {
           quest.progress = Math.min(quest.targetCount, (quest.progress || 0) + 1);
-          updates.push({ questId:quest.id, type:'progress', progress:quest.progress, total:quest.targetCount });
+          updates.push({ questId:quest.id, label:quest.label, type:'progress', progress:quest.progress, total:quest.targetCount });
         }
       }
     }
 
-    // --- PATROL: time-based — mark complete after N actions ---
     if (quest.type === QUEST_TYPES.PATROL) {
-      const actionsOnQuest = (state.actionCount || 0) - (quest.acceptedAt || 0);
-      if (actionsOnQuest >= 5 && quest.progress < 1) {
-        quest.progress = 1;
-        updates.push({ questId:quest.id, type:'progress', progress:1, total:1 });
+      if (!quest.regionKey || quest.regionKey === here) {
+        quest.dutyActions = (quest.dutyActions || 0) + 1;
+        if (quest.dutyActions >= 5) {
+          quest.progress = 1;
+          updates.push({ questId:quest.id, label:quest.label, type:'progress', progress:1, total:1 });
+        }
       }
     }
 
-    // --- RETRIEVE / SCOUT: keyword detection in player input ---
-    if (quest.type === QUEST_TYPES.RETRIEVE || quest.type === QUEST_TYPES.SCOUT) {
-      const targetWords = quest.target.toLowerCase().split(' ');
-      const retrieved   = targetWords.some(w => t.includes(w));
-      const returnWords = ['return','back','report','bring back','come back','heading back'];
-      const returning   = returnWords.some(w => t.includes(w));
-      if ((retrieved || returning) && quest.progress < 1) {
+    if (quest.type === QUEST_TYPES.RETRIEVE) {
+      const location = quest.location || quest.target;
+      if (quest.guardianPending && kills.length > 0) {
+        quest.guardianPending = false;
         quest.progress = 1;
-        updates.push({ questId:quest.id, type:'progress', progress:1, total:1 });
+        updates.push({ questId:quest.id, label:quest.label, type:'progress', progress:1, total:1, message:`You recover the ${quest.target}.` });
+      } else if (!quest.guardianPending && !state.inCombat && (mentionsLocation(t, location) || mentionsLocation(t, quest.target))) {
+        // Reaching the site triggers a guardian fight (spawned by the caller).
+        quest.guardianPending = true;
+        updates.push({ questId:quest.id, label:quest.label, type:'guardian', location });
       }
     }
 
-    // --- ESCORT: detect arrival keywords ---
-    if (quest.type === QUEST_TYPES.ESCORT) {
-      const arrivalWords = ['arrived','made it','safe','delivered','we\'re here','at the destination'];
-      if (arrivalWords.some(w => t.includes(w)) && quest.progress < 1) {
+    if (quest.type === QUEST_TYPES.SCOUT) {
+      if (!quest.scouted && mentionsLocation(t, quest.location || quest.target)) {
+        quest.scouted = true;
+        updates.push({ questId:quest.id, label:quest.label, type:'stage', message:'You have seen enough. Report back to collect your pay.' });
+      } else if (quest.scouted && /\b(report|return|head back|go back|come back|turn in|hand in)\b/.test(t)) {
         quest.progress = 1;
-        updates.push({ questId:quest.id, type:'progress', progress:1, total:1 });
+        updates.push({ questId:quest.id, label:quest.label, type:'progress', progress:1, total:1 });
       }
     }
 
-    // --- ADVANCE: detect travel to destination ---
-    if (quest.type === QUEST_TYPES.ADVANCE && quest.destination) {
-      const destRegion = REGIONS[quest.destination];
-      const destWords  = destRegion
-        ? destRegion.label.toLowerCase().split(' ')
-        : [quest.destination.toLowerCase()];
-      const traveling  = ['travel to','head to','go to','journey to','set out for','leaving for','depart for'].some(w => t.includes(w));
-      const mentions   = destWords.some(w => t.includes(w));
-      if (traveling && mentions && quest.progress < 1) {
+    if ((quest.type === QUEST_TYPES.ESCORT || quest.type === QUEST_TYPES.ADVANCE) && quest.destination) {
+      if (arrival && arrival.region === quest.destination) {
         quest.progress = 1;
-        updates.push({ questId:quest.id, type:'progress', progress:1, total:1 });
+        updates.push({ questId:quest.id, label:quest.label, type:'progress', progress:1, total:1 });
+      }
+    }
+
+    // Escort without a destination: deliver once the road is behind you.
+    if (quest.type === QUEST_TYPES.ESCORT && !quest.destination) {
+      if (arrival || /\b(arrived|delivered|we're here|we are here)\b/.test(t)) {
+        quest.progress = 1;
+        updates.push({ questId:quest.id, label:quest.label, type:'progress', progress:1, total:1 });
       }
     }
   }
 
   return updates;
+}
+
+// Labels the spawner should favour while hunt/clear quests are active.
+function getQuestTargets(state) {
+  const here = state.character ? state.character.region : null;
+  return (state.activeQuests || [])
+    .filter(q => (q.type === QUEST_TYPES.HUNT || q.type === QUEST_TYPES.CLEAR) && (q.progress || 0) < (q.targetCount || 1))
+    .filter(q => !q.regionKey || q.regionKey === here)
+    .map(q => q.target)
+    .filter(Boolean);
 }
 
 
@@ -410,7 +509,7 @@ function processQuestCompletions(state) {
       // Apply rewards
       const reward = quest.reward || { coin:0, xp:0 };
       addCoin(state, reward.coin);
-      state.totalXP = (state.totalXP || 0) + reward.xp;
+      const levelUp = grantXP(state, reward.xp);
 
       // Track completion
       if (!state.completedQuests) state.completedQuests = [];
@@ -433,6 +532,7 @@ function processQuestCompletions(state) {
       completed.push({
         quest,
         reward,
+        levelUp,
         hint: _buildCompletionHint(quest, reward)
       });
     }
@@ -471,12 +571,24 @@ function buildBoardDisplayData(state) {
   const regionKey = state.character && state.character.region;
   const region    = regionKey ? REGIONS[regionKey] : null;
 
+  const activeQuestsDisplay = (state.activeQuests || []).map(q => ({
+    id:          q.id,
+    label:       q.label,
+    type:        q.type,
+    progress:    q.progress || 0,
+    targetCount: q.targetCount || 1,
+    isComplete:  (q.progress || 0) >= (q.targetCount || 1),
+    coinDisplay: fmtCoin((q.reward || {}).coin || 0),
+    status:      _questStatus(q)
+  }));
+
   if (!region || !region.hasBountyBoard) {
     return {
       available:    false,
       boardLabel:   null,
+      regionLabel:  region ? region.label : null,
       quests:       [],
-      activeQuests: state.activeQuests || []
+      activeQuests: activeQuestsDisplay
     };
   }
 
@@ -498,15 +610,7 @@ function buildBoardDisplayData(state) {
       coinDisplay: fmtCoin(q.reward.coin),
       isAdvance:  !!q.isAdvance
     })),
-    activeQuests: (state.activeQuests || []).map(q => ({
-      id:          q.id,
-      label:       q.label,
-      type:        q.type,
-      progress:    q.progress || 0,
-      targetCount: q.targetCount || 1,
-      isComplete:  (q.progress || 0) >= (q.targetCount || 1),
-      coinDisplay: fmtCoin((q.reward || {}).coin || 0)
-    }))
+    activeQuests: activeQuestsDisplay
   };
 }
 
@@ -561,6 +665,41 @@ const LANDMARKS = {
   4: ['inner sanctum','ancient gate','ritual circle','dead camp','the deep reaches'],
 };
 
+// One-line "what do I do next" for each active quest (journal + panel).
+function _questStatus(q) {
+  const dest = q.destination && REGIONS[q.destination] ? REGIONS[q.destination].label : null;
+  switch (q.type) {
+    case QUEST_TYPES.HUNT:
+    case QUEST_TYPES.CLEAR:
+      return `Defeat ${q.target} (${q.progress || 0}/${q.targetCount || 1}). Pick fights in ${REGIONS[q.regionKey] ? REGIONS[q.regionKey].label : 'the area'}.`;
+    case QUEST_TYPES.PATROL:
+      return `Stay on duty in ${REGIONS[q.regionKey] ? REGIONS[q.regionKey].label : 'the area'} (${Math.min(5, q.dutyActions || 0)}/5 actions).`;
+    case QUEST_TYPES.RETRIEVE:
+      return q.guardianPending
+        ? `Defeat whatever guards the ${q.target}.`
+        : `Go to ${q.location || 'the site'} and recover the ${q.target}.`;
+    case QUEST_TYPES.SCOUT:
+      return q.scouted ? 'Report back to collect your pay.' : `Scout ${q.location || q.target}.`;
+    case QUEST_TYPES.ESCORT:
+    case QUEST_TYPES.ADVANCE:
+      return dest ? `Travel to ${dest} (type "travel to ${dest}").` : 'Reach your destination safely.';
+    default:
+      return '';
+  }
+}
+
+function buildQuestJournal(state) {
+  const quests = state.activeQuests || [];
+  if (!quests.length) return 'QUEST JOURNAL\nNo active quests. Check the bounty board ("check board") for work.';
+  const lines = ['QUEST JOURNAL'];
+  quests.forEach((q, i) => {
+    lines.push(`${i + 1}. ${q.label} — reward ${fmtCoin((q.reward || {}).coin || 0)} + ${(q.reward || {}).xp || 0} XP`);
+    lines.push(`   ${_questStatus(q)}`);
+  });
+  lines.push('Type "abandon quest N" to drop one.');
+  return lines.join('\n');
+}
+
 function _getRandomLandmark(tier) {
   const pool = LANDMARKS[Math.min(tier, 4)] || LANDMARKS[1];
   return pool[Math.floor(Math.random() * pool.length)];
@@ -586,6 +725,7 @@ module.exports = {
 
   // Board management
   refreshBoard,
+  boardNeedsRefresh,
   getBoardQuests,
   acceptQuest,
   acceptQuestByIndex,
@@ -594,11 +734,14 @@ module.exports = {
   // Progress tracking
   checkQuestProgress,
   processQuestCompletions,
+  getQuestTargets,
+  mentionsLocation,
 
   // Hint builders
   buildActiveQuestContext,
   buildBoardInspectHint,
 
   // UI
-  buildBoardDisplayData
+  buildBoardDisplayData,
+  buildQuestJournal
 };

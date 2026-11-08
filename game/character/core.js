@@ -72,6 +72,46 @@ function getXPToNextLevel(totalXP) {
   return getXPForLevel(level + 1) - totalXP;
 }
 
+/**
+ * Single entry point for awarding character XP (kills, quests, etc.).
+ * Handles level-ups: free points + resource recalculation.
+ * Returns a levelUp event object or null.
+ */
+function grantXP(state, amount, { classXP = false } = {}) {
+  const gain = Math.max(0, Math.floor(amount || 0));
+  if (gain <= 0) return null;
+  const prevLevel = getPlayerLevel(state.totalXP || 0);
+  state.totalXP   = (state.totalXP || 0) + gain;
+  if (classXP) state.classXP = (state.classXP || 0) + gain;
+  const newLevel  = getPlayerLevel(state.totalXP);
+  if (newLevel <= prevLevel) return null;
+  const pts        = newLevel - prevLevel;
+  state.freePoints = (state.freePoints || 0) + pts;
+  recalculateResources(state);
+  // A level-up is a second wind: top up a share of the new maximums.
+  state.hp      = Math.min(state.maxHp,      state.hp      + Math.ceil(state.maxHp * 0.25));
+  state.stamina = Math.min(state.maxStamina, state.stamina + Math.ceil(state.maxStamina * 0.25));
+  return { type: 'levelUp', prevLevel, newLevel, freePointsAwarded: pts };
+}
+
+/**
+ * Base stats plus stat mods from equipped, usable gear.
+ * Gear mods are never written into state.stats, so equipping and
+ * unequipping can't permanently inflate or drain attributes.
+ */
+function getEffectiveStats(state) {
+  const stats = { ...(state.stats || {}) };
+  const level = getPlayerLevel(state.totalXP || 0);
+  for (const slot of ['weapon', 'armor']) {
+    const item = state.gear && state.gear[slot];
+    if (!item || !item.statMods || level < (item.levelReq || 1)) continue;
+    for (const [stat, val] of Object.entries(item.statMods)) {
+      stats[stat] = (stats[stat] || 0) + (Number(val) || 0);
+    }
+  }
+  return stats;
+}
+
 function getProfessionLevel(profXP) {
   if (!profXP || profXP <= 0) return 1;
   for (let i = PROF_LEVEL_XP.length - 1; i >= 1; i--) {
@@ -100,7 +140,7 @@ function calculateMaxStamina(vit, dex, level) {
 }
 
 function recalculateResources(state) {
-  const s     = state.stats;
+  const s     = getEffectiveStats(state);
   const level = getPlayerLevel(state.totalXP || 0);
 
   const newMaxHp      = calculateMaxHP(s.vit, level);
@@ -413,10 +453,10 @@ function processPhase2(state, input) {
   }
 
   // NSFW detection — any explicit content in description enables mature scenes
+  // Adult content is never enabled for characters under 18.
   const nsfwDetected = detectNSFW(input);
-  if (nsfwDetected) {
+  if (nsfwDetected && (state.creation.age || 0) >= 18) {
     state.nsfwEnabled = true;
-    // No announcement — just quietly enable it
   }
 
   // Build detection
@@ -470,8 +510,10 @@ function processPhase3(state, input) {
   const t            = input.toLowerCase().trim();
   let chosenKey      = null;
 
-  // 1. Try number selection
-  const numMatch = input.match(/\b(\d+)\b/);
+  // 1. Try number selection — only when the input is a selection like
+  //    "3", "#3", "number 3" or "option 3", not free text such as
+  //    "I served 10 years in the army".
+  const numMatch = input.trim().match(/^(?:#|no\.?\s*|number\s+|option\s+|background\s+)?(\d+)[.!)]?$/i);
   if (numMatch) {
     const idx = parseInt(numMatch[1]) - 1;
     if (idx >= 0 && idx < availEntries.length) chosenKey = availEntries[idx][0];
@@ -569,8 +611,8 @@ function processPhase4(state, input) {
   const t          = input.toLowerCase().trim();
   let chosenEnvKey = null;
 
-  // Number match
-  const numMatch = input.match(/\b(\d+)\b/);
+  // Number match (selection-style input only)
+  const numMatch = input.trim().match(/^(?:#|no\.?\s*|number\s+|option\s+)?(\d+)[.!)]?$/i);
   if (numMatch) {
     const idx = parseInt(numMatch[1]) - 1;
     if (idx >= 0 && idx < envEntries.length) chosenEnvKey = envEntries[idx][0];
@@ -646,8 +688,10 @@ function processPhase4(state, input) {
   state.shopOpen        = false;
   state.sceneContext    = 'neutral';
   state.storySummary    = '';
-  state.nsfwEnabled     = state.nsfwEnabled || false;
+  state.nsfwEnabled     = age >= 18 ? (state.nsfwEnabled || false) : false;
   state.coin            = env.startingCoin || 150;
+  state.lastSettlement  = state.character.region;
+  state.visitedRegions  = [state.character.region];
   state.freeformSkills  = {};  // tracks player-invented skills and their use count
 
   // =============================================
@@ -858,6 +902,7 @@ function spendFreePoint(state, input) {
 function buildCharacterPanelData(state) {
   return buildCharacterPanelDataHelper(state, {
     getPlayerLevel,
+    getEffectiveStats,
     getXPToNextLevel,
     BACKGROUNDS,
     REGIONS
@@ -869,6 +914,8 @@ module.exports = {
   // XP & levels
   getXPForLevel,
   getPlayerLevel,
+  grantXP,
+  getEffectiveStats,
   getXPToNextLevel,
   getProfessionLevel,
 

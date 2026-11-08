@@ -6,19 +6,22 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
+    "test": "node --test",
     "audit:enemies": "node -e \"const { ENEMIES } = require('./game/constants/data'); const regions=['thornwick','ironport','ashwood','dustfall','sunkenfen','blackstone','frozennorth','veldrath']; const added={}; for (const r of regions) added[r]=Object.keys(ENEMIES).filter(k=>k.startsWith(r+'_')).length; console.log(JSON.stringify({ totalEnemies: Object.keys(ENEMIES).length, addedPerRegion: added }, null, 2));\""
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
-    "dependencies": {
-      "bcryptjs": "^3.0.3",
-      "better-sqlite3": "^12.6.2",
-      "cors": "^2.8.5",
-      "dotenv": "^17.3.1",
-      "express": "^5.2.1",
-      "groq-sdk": "^0.37.0",
-      "uuid": "^13.0.0"
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "better-sqlite3": "^12.6.2",
+    "cors": "^2.8.5",
+    "dotenv": "^17.3.1",
+    "express": "^5.2.1",
+    "groq-sdk": "^0.37.0"
+  },
+  "engines": {
+    "node": ">=18.17"
   }
 }

@@ -12,7 +12,7 @@ const QUEST_TYPES = {
 
 const QUEST_REWARD_BASE = {
   coin: 80,
-  xp:   15
+  xp:   40   // per tier; quests should matter next to kill XP
 };
 
 const QUEST_DIFFICULTY = {

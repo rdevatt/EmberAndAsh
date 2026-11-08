@@ -66,6 +66,10 @@ const {
   CLASS_LEVEL_XP,
 } = requireFirst('progression', ['./data/progression.js', './data/progression/index.js']);
 
+// Give every region spawnable enemies built from its monster lists.
+const { createRegionMonsterPack } = require('./data/world/region-monsters');
+Object.assign(ENEMIES, createRegionMonsterPack(REGIONS, ENEMIES));
+
 if (process.env.NODE_ENV === 'production') {
   console.info('[constants:data] resolved modules', resolvedDataModules);
 }

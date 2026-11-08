@@ -165,7 +165,7 @@ const BACKGROUND_KEYWORDS = {
   trapper:    ['trapper', 'fur trapper', 'pelts', 'trap lines', 'snares', 'fur trade'],
   shepherd:   ['shepherd', 'shepherding', 'herded sheep', 'goatherd', 'watched flocks', 'pasture'],
   fisherman:  ['fisherman', 'fishing', 'sea fishing', 'nets', 'caught fish', 'fishing village'],
-  farmer:     ['farmer', 'tilled fields', 'grew crops', 'farmhand', 'agriculture', 'harvest'],
+  farmer:     ['farmer', 'farming', 'farm work', 'on a farm', 'tilled fields', 'grew crops', 'farmhand', 'agriculture', 'harvest'],
   woodcutter: ['woodcutter', 'lumberjack', 'felled trees', 'logging', 'lumber trade', 'axes and trees'],
   herbalist:  ['herbalist', 'herb gathering', 'healer herbs', 'apothecary', 'plant medicine', 'remedies'],
   blacksmith: ['blacksmith', 'forge', 'smithing', 'worked iron', 'worked steel', 'metalworking', 'anvil'],

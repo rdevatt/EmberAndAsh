@@ -30,26 +30,15 @@ function createCraftedGearHandlers({ addCoin, formatCoin, recalculateResources, 
     const isArmor  = item.armorLevel > 0 && item.weaponBonus === 0;
     const slot     = isArmor ? 'armor' : 'weapon';
 
+    // Gear stat mods are applied dynamically via getEffectiveStats(),
+    // never written into base stats.
     const oldGear = state.gear[slot];
-    if (oldGear && oldGear.statMods) {
-      for (const [stat, val] of Object.entries(oldGear.statMods)) {
-        state.stats[stat] = (state.stats[stat] || 5) - val;
-      }
-      recalculateResources(state);
-    }
-
     if (oldGear) {
       addItem(state, oldGear);
     }
 
     state.gear[slot] = item;
-
-    if (item.statMods) {
-      for (const [stat, val] of Object.entries(item.statMods)) {
-        state.stats[stat] = (state.stats[stat] || 5) + val;
-      }
-      recalculateResources(state);
-    }
+    recalculateResources(state);
 
     state.craftedGear.splice(idx, 1);
 

@@ -61,6 +61,18 @@ function checkProfessionLevelUp(state) {
 }
 
 
+// Whole-word yes/no detection. Substring matching treated "north" or
+// "know" as "no" and "eyes" as "yes", silently resolving offers.
+const YES_PATTERN = /^\s*(?:y|yes|yeah|yep|sure|ok|okay|accept|i accept|take it|unlock it|i want it|confirm|claim it)\b/i;
+const NO_PATTERN  = /^\s*(?:n|no|nope|refuse|decline|not yet|skip|pass|dismiss|reject|no thanks)\b/i;
+
+function parseOfferAnswer(input) {
+  const t = String(input || '').trim();
+  if (YES_PATTERN.test(t)) return 'yes';
+  if (NO_PATTERN.test(t))  return 'no';
+  return null;
+}
+
 // =============================================
 // CLASS OFFER FLOW
 // =============================================
@@ -86,6 +98,7 @@ function buildClassOffer(classKey) {
       '',
       '  Type "yes" to accept.',
       '  Type "no" to decline and reset.',
+      '  (Anything else continues play; the offer waits.)',
       '========================================'
     ].join('\n')
   };
@@ -95,10 +108,10 @@ function processClassOfferResponse(state, input) {
   const key = state.pendingClassOffer;
   if (!key) return { handled: false };
 
-  const cls   = CLASSES[key];
-  const t     = input.toLowerCase().trim();
-  const isYes = ['yes', 'accept', 'take it', 'i accept', 'unlock it', 'i want it', 'confirm'].some(w => t.includes(w));
-  const isNo  = ['no', 'refuse', 'decline', 'not yet', 'skip', 'pass', 'dismiss', 'reject'].some(w => t.includes(w));
+  const cls    = CLASSES[key];
+  const answer = parseOfferAnswer(input);
+  const isYes  = answer === 'yes';
+  const isNo   = answer === 'no';
 
   if (isYes) {
     state.combatClass         = key;
@@ -134,13 +147,9 @@ function processClassOfferResponse(state, input) {
     };
   }
 
-  // Neither yes nor no — remind them offer is pending
-  return {
-    handled:  true,
-    accepted: null,
-    pending:  true,
-    message:  buildClassOffer(key).prompt
-  };
+  // Neither yes nor no — don't block play; the offer stays pending
+  // (shown in the progression panel) until answered.
+  return { handled: false, pending: true };
 }
 
 
@@ -177,10 +186,10 @@ function processProfessionOfferResponse(state, input) {
   const key = state.pendingProfOffer;
   if (!key) return { handled: false };
 
-  const prof  = PROFESSIONS[key];
-  const t     = input.toLowerCase().trim();
-  const isYes = ['yes', 'accept', 'take it', 'i accept', 'unlock it', 'i want it', 'confirm'].some(w => t.includes(w));
-  const isNo  = ['no', 'refuse', 'decline', 'not yet', 'skip', 'pass', 'dismiss', 'reject'].some(w => t.includes(w));
+  const prof   = PROFESSIONS[key];
+  const answer = parseOfferAnswer(input);
+  const isYes  = answer === 'yes';
+  const isNo   = answer === 'no';
 
   if (isYes) {
     state.profession      = key;
@@ -228,13 +237,8 @@ function processProfessionOfferResponse(state, input) {
     };
   }
 
-  // Pending reminder
-  return {
-    handled:  true,
-    accepted: null,
-    pending:  true,
-    message:  buildProfessionOffer(key).prompt
-  };
+  // Not an answer — keep playing; the offer stays pending.
+  return { handled: false, pending: true };
 }
 
 
@@ -265,17 +269,24 @@ function detectProfessionTaskLevel(text, profKey) {
 // Scales XP by task difficulty vs current profession level.
 // Higher risk = higher reward. Too far above = failure chance.
 // =============================================
+// Profession ranks run 1-5 while task difficulty runs 1-95; each rank
+// covers ~20 task levels. Compare tasks against this skill rating.
+function getProfessionSkillRating(professionLevel) {
+  return Math.max(1, professionLevel || 1) * 20;
+}
+
 function calculateProfessionTaskXP(taskLevel, professionLevel) {
-  const gap = taskLevel - professionLevel;
+  const skill = getProfessionSkillRating(professionLevel);
+  const gap   = taskLevel - skill;
 
   // Completely impossible — zero XP
   if (gap > 20) return 0;
 
-  // Below current level — reduced XP
-  if (gap <= 0) return Math.max(1, Math.floor(taskLevel * 0.5));
+  // At or below skill — steady XP that grows with task difficulty
+  if (gap <= 0) return Math.max(4, Math.round(4 + taskLevel * 0.3));
 
-  // Above current level — bonus XP
-  return Math.round(taskLevel * (1 + gap * 0.05));
+  // Above skill — bonus XP
+  return Math.round((4 + taskLevel * 0.3) * (1 + gap * 0.05));
 }
 
 
@@ -333,11 +344,12 @@ function resolveSecondarySkillTask(state, input) {
     if (!state.secondarySkills[profKey]) state.secondarySkills[profKey] = 0;
 
     const secondaryLevel = Math.floor(state.secondarySkills[profKey] / 100) + 1;
-    // Secondary level capped at 60% of primary prof level
+    // Secondary skill is capped at 60% of the primary profession's level
+    // (but never below 1, so secondary work is always possible).
     const primaryLevel   = getProfessionLevel(state.profXP || 0);
     const secondaryCap   = Math.max(1, Math.floor(primaryLevel * 0.6));
 
-    if (secondaryLevel >= secondaryCap) continue; // capped out
+    if (secondaryLevel > secondaryCap) continue; // capped out
 
     const rawXP  = calculateProfessionTaskXP(bestTask.level, secondaryLevel);
     const xpGain = Math.max(1, Math.round(rawXP * SECONDARY_SKILL_RATE));
@@ -406,7 +418,7 @@ function resolveProfessionTask(state, input) {
     };
   }
 
-  const taskGap = taskLevel - profLvl;
+  const taskGap = taskLevel - getProfessionSkillRating(profLvl);
 
   // Task above skill level — chance of failure
   if (taskGap > 0) {
@@ -595,7 +607,11 @@ module.exports = {
   buildProfessionOffer,
   processProfessionOfferResponse,
 
+  // Offers
+  parseOfferAnswer,
+
   // Task resolution
+  getProfessionSkillRating,
   detectProfessionTaskLevel,
   calculateProfessionTaskXP,
   resolveProfessionTask,

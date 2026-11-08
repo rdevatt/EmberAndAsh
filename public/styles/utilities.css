@@ -382,3 +382,22 @@ button.retry-btn:not(.story-btn):hover {
   font-size: 14px;
   padding-left: 4px;
 }
+
+/* --- Added: character name, quest buttons, command output --- */
+#char-name {
+  font-size: 15px;
+  letter-spacing: 1px;
+  color: var(--gold, #c9a227);
+  margin-bottom: 2px;
+}
+
+.quest-action-btn {
+  margin-top: 4px;
+  font-size: 10px;
+  padding: 2px 8px;
+}
+
+.command-entry .command-output,
+.system-entry .announcement {
+  white-space: pre-wrap;
+}

@@ -17,6 +17,7 @@ const {
 
 const {
   getPlayerLevel,
+  getEffectiveStats,
   getActiveWeapon,
   getActiveArmor,
   getHPLabel,
@@ -166,7 +167,7 @@ function updateActionProgress(state, text) {
 // =============================================
 // ENEMY SPAWNING
 // =============================================
-function spawnEnemy(regionKey, playerLevel) {
+function spawnEnemy(regionKey, playerLevel, options = {}) {
   const region = REGIONS[regionKey];
   if (!region) return null;
 
@@ -184,18 +185,55 @@ function spawnEnemy(regionKey, playerLevel) {
 
   if (!validEnemies.length) return null;
 
-  const [key, enemy]  = validEnemies[Math.floor(Math.random() * validEnemies.length)];
+  // Prefer enemies whose own level band is near the player's level so a
+  // level-1 character doesn't draw a level-8 brute just because both live
+  // in the same region. Widen the window until something qualifies.
+  let pool = validEnemies;
+  for (const spread of [2, 4, 8]) {
+    const near = validEnemies.filter(([, e]) => e.levelRange[0] <= playerLevel + spread && e.levelRange[1] >= playerLevel - spread);
+    if (near.length) { pool = near; break; }
+  }
+
+  // Active hunt/clear quests bias spawns toward their targets so bounties
+  // are actually completable.
+  // Rare/named enemies only appear when a quest names them exactly
+  // ("Clear: Cave Troll"), never as a by-product of a broad hunt.
+  const targets = options.preferTargets || [];
+  const isNamedTarget = (e) => targets.some(t => normalizeLabel(e.label) === normalizeLabel(t));
+  const allowed = ([, e]) => !e.isRare || isNamedTarget(e);
+
+  pool = pool.filter(allowed);
+  if (!pool.length) pool = validEnemies.filter(allowed);
+  if (!pool.length) pool = validEnemies;
+
+  if (targets.length && Math.random() < 0.6) {
+    const matches = ([, e]) => targets.some(t => enemyMatchesTarget(e.label, t)) && allowed([null, e]);
+    // Prefer level-appropriate matches; fall back to any matching enemy.
+    const wanted = pool.filter(matches);
+    const anyWanted = wanted.length ? wanted : validEnemies.filter(matches);
+    if (anyWanted.length) pool = anyWanted;
+  }
+
+  const [key, enemy]  = pool[Math.floor(Math.random() * pool.length)];
   const [eMin, eMax]  = enemy.levelRange;
   const lvlMin        = Math.max(eMin, rMin);
   const lvlMax        = Math.min(eMax, rMax);
+  // Spawn within a window centred on the player's level (-2..+2).
   const targetLevel   = Math.max(lvlMin, Math.min(lvlMax,
-    playerLevel + Math.floor(Math.random() * 5 - 1)
+    playerLevel + Math.floor(Math.random() * 5) - 2
   ));
 
+  return buildEnemyInstance(key, enemy, targetLevel);
+}
+
+// Turns an ENEMIES template into a live combat instance at a given level.
+// Balance target: an even-level fight lasts ~5-8 rounds and a careful
+// player wins most of the time while losing a meaningful chunk of HP.
+function buildEnemyInstance(key, enemy, targetLevel) {
   const effectiveStr  = 5 + (enemy.mods.str || 0) + Math.floor(targetLevel * 0.5);
   const effectiveDex  = 5 + (enemy.mods.dex || 0) + Math.floor(targetLevel * 0.3);
   const effectiveVit  = 5 + (enemy.mods.vit || 0) + Math.floor(targetLevel * 0.4);
-  const maxHP         = enemy.hpBase + effectiveVit * 5 + targetLevel * 3;
+  const maxHP         = Math.max(8, Math.round(enemy.hpBase * 0.6 + effectiveVit * 3 + targetLevel * 2));
 
   return {
     key,
@@ -208,8 +246,36 @@ function spawnEnemy(regionKey, playerLevel) {
     maxHP,
     effectiveStr,
     effectiveDex,
-    effectiveVit
+    effectiveVit,
+    isRare:       !!enemy.isRare
   };
+}
+
+// Loose match between an enemy label ("Forest Wolf") and a quest target
+// ("wolves", "Road Wolves", "Cave Troll"). Compares singularized words.
+function singularize(word) {
+  const w = String(word || '').toLowerCase();
+  if (w.endsWith('ves') && w.length > 4) return w.slice(0, -3) + 'f';   // wolves -> wolf
+  if (w.endsWith('ies') && w.length > 4) return w.slice(0, -3) + 'y';
+  if (/(ss|us)$/.test(w)) return w;
+  if (w.endsWith('es') && /(ch|sh|x)es$/.test(w)) return w.slice(0, -2);
+  if (w.endsWith('s') && w.length > 3) return w.slice(0, -1);
+  return w;
+}
+
+function normalizeLabel(text) {
+  return String(text || '').toLowerCase().split(/[\s-]+/).map(singularize).join(' ').trim();
+}
+
+const GENERIC_TARGET_WORDS = new Set(['the', 'of', 'a', 'an', 'and', 'dead', 'ancient', 'giant', 'great', 'dire', 'elder', 'wild', 'swarm', 'pack', 'corrupted', 'spawn']);
+
+function enemyMatchesTarget(enemyLabel, target) {
+  const labelWords  = String(enemyLabel || '').toLowerCase().split(/[\s-]+/).map(singularize);
+  const targetWords = String(target || '').toLowerCase().split(/[\s-]+/).map(singularize).filter(w => w && !GENERIC_TARGET_WORDS.has(w));
+  if (!targetWords.length) return false;
+  // Full label match (e.g. "Cave Troll" === "cave troll") or the target's head noun appears in the label.
+  const head = targetWords[targetWords.length - 1];
+  return labelWords.includes(head) || targetWords.every(w => labelWords.includes(w));
 }
 
 function isEnemyUnbeatable(enemyLevel, playerLevel) {
@@ -304,11 +370,48 @@ function resolveCompanionAttacks(state, enemy) {
 }
 
 // =============================================
+// SPELLS
+// =============================================
+function detectSpellCast(state, input) {
+  const spells = Array.isArray(state.spells) ? state.spells : [];
+  if (!spells.length) return null;
+  const t = String(input || '').toLowerCase();
+  const named = spells.find(sp => sp && sp.label && t.includes(sp.label.toLowerCase()));
+  if (named) return { spell: named };
+  if (/\b(cast|spell|bolt|channel|invoke|conjure|smite)\b/.test(t)) return { spell: spells[0] };
+  return null;
+}
+
+function applySpellToResult(result, spell, stats, quality, playerLevel, enemy) {
+  const isHoly     = spell.type === 'holy' || spell.type === 'divine';
+  const castStat   = isHoly ? (stats.wis || 10) : (stats.int || 10);
+  const qualityMod = { crude: -0.1, basic: -0.05, decent: 0, skilled: 0.05, masterful: 0.1 }[quality] || 0;
+  const hitChance  = Math.min(0.95, Math.max(0.3, 0.75 + (castStat - 10) / 40 + qualityMod));
+  const hit        = Math.random() < hitChance;
+  const dmgRange   = spell.damage || { min: 4, max: 8 };
+  const base       = dmgRange.min + Math.floor(Math.random() * (dmgRange.max - dmgRange.min + 1));
+  const undeadBonus = (spell.bonusVsUndead && /skeleton|zombie|ghoul|wraith|lich|undead|dead|shade|spectre|revenant|husk|bone/i.test(enemy.label || ''))
+    ? spell.bonusVsUndead : 0;
+  const damage     = hit ? Math.max(1, Math.round(base + undeadBonus + Math.max(0, castStat - 10) * 0.75 + Math.floor(playerLevel / 2))) : 0;
+  result.playerHit    = hit;
+  result.playerCrit   = false;
+  result.playerDamage = damage;
+  result.hitChance    = Math.round(hitChance * 100);
+  result.spellCast    = spell.label;
+  result.staminaCost  = 0;
+  result.bodyPart     = 'body';
+}
+
+function getCombatStaminaCost(dex) {
+  return Math.max(2, 7 - Math.floor((dex || 10) / 5));
+}
+
+// =============================================
 // COMBAT ROUND RESOLUTION
 // Returns a result object — never modifies state directly.
 // Caller is responsible for applying results to state.
 // =============================================
-function resolveCombatRound(playerStats, actionQuality, bodyPartKey, weaponBonus, hasArmor, armorLevel, stamina, maxStamina, enemy) {
+function resolveCombatRound(playerStats, actionQuality, bodyPartKey, weaponBonus, hasArmor, armorLevel, stamina, maxStamina, enemy, playerLevel = 1) {
   const bp           = BODY_PARTS[bodyPartKey] || BODY_PARTS.torso;
   const staminaPct   = maxStamina > 0 ? stamina / maxStamina : 1;
   const staminaMod   = staminaPct < 0.15 ? -0.3 : staminaPct < 0.4 ? -0.15 : 0;
@@ -326,11 +429,13 @@ function resolveCombatRound(playerStats, actionQuality, bodyPartKey, weaponBonus
   const playerHit    = Math.random() < hitChance;
   const critChance   = Math.min(0.5, playerStats.dex / 200 + bp.critBonus); // dex/200 for base-10 scale
   const playerCrit   = playerHit && Math.random() < critChance;
+  // Level adds a little raw power so progression is felt even before gear/points.
+  const levelBonus   = Math.floor(Math.max(1, playerLevel) / 2);
   const rawPlayerDmg = Math.max(1, Math.round(
-    (Math.max(0, playerStats.str - 8) + weaponBonus) * bp.damageMod * (playerCrit ? 2 : 1)
+    (Math.max(1, playerStats.str - 7) + weaponBonus + levelBonus) * bp.damageMod * (playerCrit ? 2 : 1)
   ));
   const playerDamage = playerHit ? rawPlayerDmg : 0;
-  const staminaCost  = Math.max(2, Math.floor(15 - playerStats.dex * 0.25)); // adjusted for base-10 dex
+  const staminaCost  = getCombatStaminaCost(playerStats.dex);
 
   // Enemy counterattack
   const enemyHitChance = Math.min(0.85, Math.max(0.1,
@@ -339,7 +444,7 @@ function resolveCombatRound(playerStats, actionQuality, bodyPartKey, weaponBonus
   const enemyHit       = Math.random() < enemyHitChance;
   const armorReduce    = (hasArmor && armorLevel) ? armorLevel * 2 : 0;
   const rawEnemyDmg    = Math.max(1, Math.round(
-    enemy.effectiveStr * 1.5 * (Math.random() * 0.5 + 0.75)
+    (enemy.effectiveStr * 1.5 + (enemy.level || 1) * 0.5) * (Math.random() * 0.5 + 0.75)
   ));
   const enemyDamage    = enemyHit ? Math.max(0, rawEnemyDmg - armorReduce) : 0;
 
@@ -389,15 +494,27 @@ function applyCombatRound(state, input) {
     };
   }
 
-  // Stamina drain
-  const staminaCost = Math.max(2, Math.floor(15 - state.stats.dex * 0.5));
-  state.stamina     = Math.max(0, state.stamina - staminaCost);
-
+  const stats        = getEffectiveStats(state);
   const activeWeapon = getActiveWeapon(state);
   const activeArmor  = getActiveArmor(state);
 
+  // Spellcasting: if the player invokes a known spell and has the mana,
+  // the spell replaces the weapon attack for this round.
+  const spellAttempt = detectSpellCast(state, input);
+  let spell = null;
+  if (spellAttempt && spellAttempt.spell) {
+    if ((state.mana || 0) >= spellAttempt.spell.manaCost) {
+      spell = spellAttempt.spell;
+      state.mana = Math.max(0, state.mana - spell.manaCost);
+    }
+  }
+
+  // Stamina drain (spells cost mana instead)
+  const staminaCost = spell ? 0 : getCombatStaminaCost(stats.dex);
+  state.stamina     = Math.max(0, state.stamina - staminaCost);
+
   const result = resolveCombatRound(
-    state.stats,
+    stats,
     score.quality,
     bodyPartKey,
     activeWeapon ? activeWeapon.weaponBonus : 0,
@@ -405,8 +522,12 @@ function applyCombatRound(state, input) {
     activeArmor ? activeArmor.armorLevel : 0,
     state.stamina,
     state.maxStamina,
-    enemy
+    enemy,
+    playerLevel
   );
+
+  if (spell) applySpellToResult(result, spell, stats, score.quality, playerLevel, enemy);
+  if (spellAttempt && spellAttempt.spell && !spell) result.spellFailed = 'mana';
 
   // Apply player damage
   if (result.playerHit) {
@@ -487,7 +608,7 @@ function applyCombatRound(state, input) {
 function applyFleeAttempt(state) {
   const enemy      = state.currentEnemy;
   const fleeChance = Math.min(0.85, Math.max(0.15,
-    0.5 + (state.stats.dex - enemy.effectiveDex) / 20
+    0.5 + (getEffectiveStats(state).dex - enemy.effectiveDex) / 20
   ));
   const success    = Math.random() < fleeChance;
 
@@ -634,7 +755,14 @@ function buildCombatLog(result, enemy, playerHP, maxHP, playerStamina, maxStamin
   }
 
   // Player action
-  if (result.playerHit) {
+  if (result.spellFailed === 'mana') {
+    lines.push(`✧ Not enough mana to cast — you fall back on a physical attack`);
+  }
+  if (result.spellCast) {
+    lines.push(result.playerHit
+      ? `✧ ${result.spellCast} strikes the ${enemy.label} — ${result.playerDamage} damage`
+      : `✧ ${result.spellCast} misses — ${result.hitChance}% hit chance`);
+  } else if (result.playerHit) {
     const crit = result.playerCrit ? ' ⚡ CRITICAL HIT' : '';
     lines.push(`▶ You strike the ${enemy.label}'s ${result.bodyPart}${crit}`);
     lines.push(`  Damage dealt: ${result.playerDamage}`);
@@ -718,7 +846,11 @@ function buildCombatNarrativeHint(result, enemy, playerHP, maxHP, stamina, maxSt
   }
 
   if (result) {
-    if (result.playerHit) {
+    if (result.spellCast) {
+      lines.push(result.playerHit
+        ? `[SPELL HIT — the player's ${result.spellCast} struck the ${enemy.label}. Describe the magic landing.]`
+        : `[SPELL MISSED — the player's ${result.spellCast} went wide. Do NOT describe it hitting.]`);
+    } else if (result.playerHit) {
       const critNote = result.playerCrit ? ' — a CRITICAL strike, devastating impact' : '';
       lines.push(`[PLAYER HIT — MANDATORY: The attack LANDED on the ${enemy.label}'s ${result.bodyPart}${critNote}. Describe solid contact, impact, pain reaction. The player SUCCEEDED.]`);
       if (result.appliedBleed) {
@@ -812,6 +944,9 @@ module.exports = {
 
   // Spawning
   spawnEnemy,
+  buildEnemyInstance,
+  enemyMatchesTarget,
+  singularize,
   isEnemyUnbeatable,
   calculateEnemyXP,
 
@@ -823,6 +958,9 @@ module.exports = {
 
   // Companions
   resolveCompanionAttacks,
+
+  // Spells
+  detectSpellCast,
 
   // Status Effects
   applyStatusEffects,

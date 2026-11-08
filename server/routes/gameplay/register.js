@@ -2,10 +2,40 @@
 
 const { buildOpeningHint } = require('./utils');
 const { resolveCorpseLoot } = require('../../../game/loot');
+const { createStateSnapshot, restoreStateSnapshot } = require('../../../game/state');
+const { grantXP, getXPForLevel } = require('../../../game/character');
+const { getQuestTargets, buildQuestJournal, abandonQuest } = require('../../../game/quests');
+const { detectTravelIntent, travelTo, buildMapText, getRevivalRegion } = require('../../../game/travel');
+const { applySocialRapport, describeUpgrade } = require('../../../game/economy');
+const { buildShopText, buyItem, drinkPotion } = require('../../../game/shop');
+
+const MAX_INPUT_LENGTH = 2000;
 
 function stripTrailingPunctuation(value) {
   return String(value || '').trim().replace(/[.!?]+$/g, '').trim();
 }
+
+const HELP_TEXT = [
+  'HOW TO PLAY',
+  'Describe what you do in plain words — "I search the abandoned cart", "I ask the innkeeper about work".',
+  'Detailed, tactical combat actions ("I feint left and slash at its knee") hit more often than "attack".',
+  '',
+  'Combat:   attack / fight <target> · flee · inspect (Scouts read enemies) · cast <spell>',
+  'After:    loot the body · recover gear (where you died)',
+  'Rest:     rest (short) · make camp (full heal, risk of ambush) · rent a room at the inn (safe, costs coin)',
+  'Trade:    shop · buy <item> · drink potion · sell <item>',
+  'Quests:   check board · accept quest N · quests · abandon quest N',
+  'Travel:   map · travel to <region>',
+  'Gear:     gear / backpack · equip <item> · unequip <item> · sell <item> · drop <item>',
+  'Growth:   stats · spend point on <stat>   (offers: answer "yes" or "no")',
+  'Party:    companions · ask <name> to join you · dismiss <name>',
+  'Shop:     open shop · close shop'
+].join('\n');
+
+// Words that follow "take"/"grab" in actions that are not item pickups.
+const NON_PICKUP_OBJECTS = /^(?:a |an |the |my |some |another )?(?:swing|swipe|stab|shot|break|breath|deep breath|rest|look|peek|glance|step|steps|seat|moment|minute|chance|aim|cover|position|stance|quest|job|contract|bounty|notice|it easy|care|note|turn|walk|stroll|nap|sip|drink|bite|hold|heart|time|offer|deal|lead|charge|point|route|road|path|stairs|risk|guard|watch|stock|aim at|hit|knee)\b/i;
+
+const MAX_LOOSE_COIN = 25; // copper per free-form "take the coins" pickup
 
 module.exports = function registerGameplayRoutes(app, deps) {
   const {
@@ -16,13 +46,10 @@ module.exports = function registerGameplayRoutes(app, deps) {
     setSession,
     isInCreation,
     isDead,
-    isReady,
-    createFreshState,
     processCreationInput,
     buildCharacterPanelData,
     getPlayerLevel,
     spendFreePoint,
-    recalculateResources,
     detectCombatIntent,
     detectFleeIntent,
     isPassiveAction,
@@ -47,7 +74,6 @@ module.exports = function registerGameplayRoutes(app, deps) {
     recoverGear,
     saveGearAtDeath,
     buildEconomyPanelData,
-    checkIntimacyAvailable,
     changeReputation,
     formatCoin,
     detectEquipIntent,
@@ -65,7 +91,6 @@ module.exports = function registerGameplayRoutes(app, deps) {
     buildRightPanelData,
     detectBoardIntent,
     detectQuestAccept,
-    refreshBoard,
     getBoardQuests,
     acceptQuestByIndex,
     acceptQuest,
@@ -76,30 +101,200 @@ module.exports = function registerGameplayRoutes(app, deps) {
     buildActiveQuestContext
   } = deps;
 
+  // ---------------------------------------------
+  // Response helpers
+  // ---------------------------------------------
+  function allPanels(state) {
+    return {
+      character:   buildCharacterPanelData(state),
+      progression: buildProgressionPanelData(state),
+      economy:     buildEconomyPanelData(state),
+      rightPanel:  buildRightPanelData(state),
+      board:       buildBoardDisplayData(state),
+      inCreation:  isInCreation(state)
+    };
+  }
+
+  // Instant (non-narrative) command reply. Every command returns full panels
+  // so the UI never shows stale HP/coin/inventory.
+  async function sendCommand(req, res, output, commandType, { persist = true } = {}) {
+    const state = req.session.state;
+    if (persist) await persistSession(req.sessionId);
+    req.session.lastEvents = [];
+    req.session.lastCombatLog = null;
+    setSession(req.sessionId, req.session);
+    return res.json({ success: true, output, isCommand: true, commandType, ...allPanels(state) });
+  }
+
+  function appendHint(state, hint) {
+    if (!hint) return;
+    state.pendingContextHint = state.pendingContextHint ? `${state.pendingContextHint}\n\n${hint}` : hint;
+  }
+
+  // ---------------------------------------------
+  // Shared game-flow helpers
+  // ---------------------------------------------
+
+  // Applies death: level loss, gear left at the death site, revive.
+  // Lose 1 level per death, rising to 3 for repeated deaths in a short span
+  // (based on recent deaths — a lifetime count made long runs unrecoverable).
+  const RECENT_DEATH_WINDOW = 50; // actions
+  function applyDeath(state, events) {
+    const playerLevel = getPlayerLevel(state.totalXP || 0);
+    const now         = state.actionCount || 0;
+    state.deathCount  = (state.deathCount || 0) + 1;
+    state.recentDeaths = (state.recentDeaths || []).filter(a => now - a < RECENT_DEATH_WINDOW);
+    state.recentDeaths.push(now);
+    const levelsLost  = Math.min(3, state.recentDeaths.length);
+    const newLevel    = Math.max(1, playerLevel - levelsLost);
+    state.totalXP     = getXPForLevel(newLevel);
+    state.inCombat     = false;
+    state.currentEnemy = null;
+    state.statusEffects = [];
+    state.pendingEnemyKill = null;
+
+    const hadGear = saveGearAtDeath(state);   // also recalculates resources
+    state.hp      = state.maxHp;
+    state.stamina = state.maxStamina;
+    state.mana    = state.maxMana;
+    changeReputation(state, state.character.region, -5);
+
+    // Wake at the nearest settlement rather than in a hostile wild.
+    const revival = getRevivalRegion(state);
+    if (revival && revival !== state.character.region) {
+      state.character.region = revival;
+      state.boardQuests      = [];
+      state.currentLocation  = null;
+      state.currentNPC       = null;
+      state.shopOpen         = false;
+    }
+    state.lastDefeatedEnemyLoot = null;
+
+    const regionLabel = buildCharacterPanelData(state).region || 'the region';
+    events.push({ type: 'death', deathCount: state.deathCount, levelsLost: Math.min(levelsLost, playerLevel - 1), newLevel, hadGear, regionLabel });
+    appendHint(state, `[DEATH — the player was killed and revived at the nearest citadel in ${regionLabel}. Describe waking cold and diminished. Their gear was left where they fell.]`);
+  }
+
+  // Applies an enemy kill: XP + level-ups, corpse loot, quest progress.
+  function applyKill(state, events, input) {
+    const kill = state.pendingEnemyKill;
+    if (!kill) return;
+    state.pendingEnemyKill = null;
+
+    events.push({ type: 'enemyKill', label: kill.label, xp: kill.xp });
+    state.lastDefeatedEnemyLoot = { label: kill.label, level: kill.level || 1, looted: false, ts: Date.now() };
+
+    const levelUp = grantXP(state, kill.xp, { classXP: true });
+    if (levelUp) events.push(levelUp);
+
+    applyQuestUpdates(state, events, input, [{ type: 'enemyDefeated', enemyLabel: kill.label }]);
+  }
+
+  function applyQuestUpdates(state, events, input, gameEvents) {
+    if (!state.activeQuests || state.activeQuests.length === 0) return;
+    const updates = checkQuestProgress(state, input, gameEvents);
+    for (const u of updates) {
+      if (u.type === 'guardian') {
+        spawnGuardian(state, u);
+      } else {
+        events.push({ ...u, updateType: u.type, type: 'questProgress' });
+      }
+    }
+    for (const c of processQuestCompletions(state)) {
+      events.push({ type: 'questComplete', quest: c.quest, reward: c.reward, hint: c.hint });
+      if (c.levelUp) events.push(c.levelUp);
+      appendHint(state, c.hint);
+    }
+  }
+
+  // Retrieve quests: reaching the site starts a fight with its guardian.
+  function spawnGuardian(state, update) {
+    if (state.inCombat || !state.character) return;
+    const level = getPlayerLevel(state.totalXP || 0);
+    const enemy = spawnEnemy(state.character.region, level + 1);
+    if (!enemy) return;
+    state.inCombat     = true;
+    state.currentEnemy = enemy;
+    appendHint(state, `[QUEST SITE — the player reached ${update.location}. A ${enemy.label} guards what they came for and attacks. ${enemy.desc}]`);
+  }
+
+  function startEncounter(state, enemy, hint) {
+    state.inCombat     = true;
+    state.currentEnemy = enemy;
+    appendHint(state, hint);
+  }
+
+  async function narrateAndRespond(req, res, input, events, extra = {}) {
+    const state     = req.session.state;
+    const progress  = processPendingProgressEvents(state);
+    events.push(...progress);
+
+    const narrative = await processNarrative(state, input, events);
+    await persistSession(req.sessionId);
+
+    const output = extra.combatLog ? (narrative.fullOutput || '') + extra.combatLog : narrative.fullOutput;
+
+    req.session.lastOutput       = output;
+    req.session.lastCombatLog    = extra.combatLog || null;
+    req.session.lastCombatResult = extra.combatLog ? state.pendingCombatResult : null;
+    req.session.lastEvents       = events;
+    setSession(req.sessionId, req.session);
+
+    if (req.session.saveId) {
+      db.appendStoryHistory(req.session.saveId, state.actionCount || 0, input, narrative.narrative || '', state.sceneContext || 'neutral');
+    }
+
+    return res.json({ success: true, output, ...allPanels(state), rightPanel: narrative.rightPanel });
+  }
+
+  // Runs one combat round (or flee) and narrates it. Shared by /action and /edit-action.
+  async function handleCombatTurn(req, res, input, events) {
+    const state = req.session.state;
+
+    if (detectFleeIntent(input)) {
+      const fleeResult = applyFleeAttempt(state);
+      state.pendingContextHint = fleeResult.hint;
+      if (isDead(state)) applyDeath(state, events);
+      return narrateAndRespond(req, res, input, events);
+    }
+
+    const combatResult = applyCombatRound(state, input);
+    state.pendingContextHint = combatResult.hint;
+    updateActionProgress(state, input);
+
+    if (combatResult.enemyKilled) applyKill(state, events, input);
+    if (isDead(state)) applyDeath(state, events);
+
+    return narrateAndRespond(req, res, input, events, { combatLog: combatResult.combatLog });
+  }
+
+  // ---------------------------------------------
+  // MAIN ACTION ROUTE
+  // ---------------------------------------------
   app.post('/api/action', requireSession, async (req, res) => {
-    const { input } = req.body;
+    const { input } = req.body || {};
     if (!input || typeof input !== 'string' || input.trim().length === 0) {
       return res.status(400).json({ error: 'Input required.' });
     }
 
-    const state = req.session.state;
-
-    const cleanInput = input.trim();
+    const state      = req.session.state;
+    const cleanInput = input.trim().slice(0, MAX_INPUT_LENGTH);
     const events     = [];
 
-    const { createStateSnapshot } = require('../../../game/state');
     req.session.stateSnapshot = createStateSnapshot(state);
-    req.session.lastInput = cleanInput;
+    req.session.lastInput     = cleanInput;
 
     try {
+      // =========================================
+      // CHARACTER CREATION
+      // =========================================
       if (isInCreation(state)) {
+        if (!state.creation.phase || state.creation.phase < 1) state.creation.phase = 1;
         const result = processCreationInput(state, cleanInput);
 
         if (!result) {
           console.error('[Creation] processCreationInput returned null for phase', state.creation.phase, 'input:', JSON.stringify(cleanInput));
-          return res.status(500).json({
-            error: `Creation phase ${state.creation.phase} returned no result. Check console.`
-          });
+          return res.status(500).json({ error: `Creation phase ${state.creation.phase} returned no result. Check console.` });
         }
 
         if (result.done) {
@@ -113,892 +308,551 @@ module.exports = function registerGameplayRoutes(app, deps) {
         await persistSession(req.sessionId);
 
         return res.json({
-          success:    true,
-          output:     narrative.fullOutput,
-          character:  buildCharacterPanelData(state),
-          rightPanel: narrative.rightPanel,
-          inCreation: isInCreation(state)
+          success:       true,
+          output:        narrative.fullOutput,
+          creationError: !!result.error,
+          creationPhase: state.creation.phase,
+          ...allPanels(state),
+          rightPanel:    narrative.rightPanel
         });
       }
 
-      if (state.pendingClassOffer) {
-        const result = processClassOfferResponse(state, cleanInput);
-        if (result.handled) {
-          if (result.accepted === true)  events.push({ type: 'classAccepted',  message: result.message, key: result.key });
-          if (result.accepted === false) events.push({ type: 'classDeclined',  message: result.message });
-          if (result.pending)            events.push({ type: 'statScreen',     content: result.message });
+      // States saved mid-death by older versions: resolve before anything else.
+      if (isDead(state)) applyDeath(state, events);
 
-          const narrative = await processNarrative(state, cleanInput, events);
-          await persistSession(req.sessionId);
-          return res.json({
-            success:     true,
-            output:      narrative.fullOutput,
-            character:   buildCharacterPanelData(state),
-            progression: buildProgressionPanelData(state),
-            rightPanel:  narrative.rightPanel
-          });
-        }
+      // =========================================
+      // PENDING CLASS / PROFESSION OFFERS
+      // Only a clear yes/no answers an offer; anything else keeps playing.
+      // =========================================
+      for (const [pending, processor, acceptedType, declinedType] of [
+        ['pendingClassOffer', processClassOfferResponse, 'classAccepted', 'classDeclined'],
+        ['pendingProfOffer',  processProfessionOfferResponse, 'professionAccepted', 'professionDeclined']
+      ]) {
+        if (!state[pending]) continue;
+        const result = processor(state, cleanInput);
+        if (!result.handled) continue;
+        if (result.accepted === true)  events.push({ type: acceptedType, message: result.message, key: result.key });
+        if (result.accepted === false) events.push({ type: declinedType, message: result.message });
+        // An offer reply is a short beat; narrate it and stop here.
+        return narrateAndRespond(req, res, cleanInput, events);
       }
 
-      if (state.pendingProfOffer) {
-        const result = processProfessionOfferResponse(state, cleanInput);
-        if (result.handled) {
-          if (result.accepted === true)  events.push({ type: 'professionAccepted', message: result.message, key: result.key });
-          if (result.accepted === false) events.push({ type: 'professionDeclined', message: result.message });
-          if (result.pending)            events.push({ type: 'statScreen',         content: result.message });
+      const t   = cleanInput.toLowerCase().trim();
+      const cmd = stripTrailingPunctuation(t);
 
-          const narrative = await processNarrative(state, cleanInput, events);
-          await persistSession(req.sessionId);
-          return res.json({
-            success:     true,
-            output:      narrative.fullOutput,
-            character:   buildCharacterPanelData(state),
-            progression: buildProgressionPanelData(state),
-            rightPanel:  narrative.rightPanel
-          });
-        }
+      // =========================================
+      // INFORMATION COMMANDS
+      // =========================================
+      if (['help', 'commands', '?', 'how to play'].includes(cmd)) {
+        return sendCommand(req, res, HELP_TEXT, 'help', { persist: false });
       }
 
-      const t = cleanInput.toLowerCase().trim();
-
-      if (['rest', 'sleep', 'recover', 'take a break', 'catch my breath', 'sit down', 'rest up'].includes(t) ||
-          t.startsWith('rest ') || t.includes('rest for') || t.includes('take a rest')) {
-        if (state.inCombat) {
-          return res.json({ success: true, output: "You can't rest while in combat!", isCommand: true });
-        }
-
-        const staminaRecovery = Math.floor(state.maxStamina * 0.5);
-        const hpRecovery = Math.floor(state.maxHp * 0.25);
-        const manaRecovery = Math.floor(state.maxMana * 0.25);
-
-        const oldStamina = state.stamina;
-        const oldHp = state.hp;
-        const oldMana = state.mana;
-
-        state.stamina = Math.min(state.maxStamina, state.stamina + staminaRecovery);
-        state.hp = Math.min(state.maxHp, state.hp + hpRecovery);
-        state.mana = Math.min(state.maxMana, state.mana + manaRecovery);
-
-        const staminaGained = state.stamina - oldStamina;
-        const hpGained = state.hp - oldHp;
-        const manaGained = state.mana - oldMana;
-
-        await persistSession(req.sessionId);
-
-        return res.json({
-          success: true,
-          output: `You take a moment to rest and recover.\n\n` +
-                  `Stamina: +${staminaGained} (${state.stamina}/${state.maxStamina})\n` +
-                  `HP: +${hpGained} (${state.hp}/${state.maxHp})\n` +
-                  `Mana: +${manaGained} (${state.mana}/${state.maxMana})`,
-          character: buildCharacterPanelData(state),
-          isCommand: true,
-          commandType: 'rest'
-        });
+      if (['quests', 'quest log', 'journal', 'my quests', 'active quests', 'check quests'].includes(cmd)) {
+        return sendCommand(req, res, buildQuestJournal(state), 'quests', { persist: false });
       }
 
-      if (['long rest', 'sleep', 'make camp', 'set up camp', 'camp', 'full rest', 'rest fully'].includes(t) ||
-          t.includes('long rest') || t.includes('make camp') || t.includes('set up camp')) {
-        if (state.inCombat) {
-          return res.json({ success: true, output: "You can't rest while in combat!", isCommand: true });
-        }
+      const abandonMatch = cmd.match(/^(?:abandon|drop|cancel) (?:quest|the quest|bounty)\s*#?(\d+)$/);
+      if (abandonMatch) {
+        const idx   = parseInt(abandonMatch[1], 10) - 1;
+        const quest = (state.activeQuests || [])[idx];
+        if (!quest) return sendCommand(req, res, `No active quest numbered ${abandonMatch[1]}. Type "quests" to see your journal.`, 'quests', { persist: false });
+        abandonQuest(state, quest.id);
+        return sendCommand(req, res, `Abandoned: ${quest.label}.`, 'quests');
+      }
 
-        const safeKeywords = ['inn', 'tavern', 'temple', 'church', 'home', 'house', 'bedroom',
-                              'sanctuary', 'safehouse', 'barracks', 'guild', 'shelter', 'cabin',
-                              'lodge', 'hostel', 'room', 'quarters', 'bed', 'rented', 'paid for'];
-        const currentLoc = (state.currentLocation || '').toLowerCase();
-        const recentContext = (state.sceneContext || '').toLowerCase();
-        const lastStory = (state.storySummary || '').toLowerCase();
-        const playerInput = cleanInput.toLowerCase();
+      if (['check stats', 'status', 'character sheet', 'view stats', 'my stats', 'stats'].includes(cmd)) {
+        return sendCommand(req, res, null, 'stats', { persist: false });
+      }
 
-        const isSafe = safeKeywords.some(loc =>
-          currentLoc.includes(loc) ||
-          recentContext.includes(loc) ||
-          lastStory.includes(loc) ||
-          playerInput.includes(loc)
-        );
+      if (['check gear', 'gear', 'inventory', 'check inventory', 'my inventory', 'equipment', 'my gear', 'inv', 'i'].includes(cmd)) {
+        return sendCommand(req, res, buildBackpackSummary(state), 'gear', { persist: false });
+      }
 
-        let ambushed = false;
-        if (!isSafe) {
-          const region = REGIONS[state.character.region];
-          const dangerMod = region && region.levelRange ? (region.levelRange[1] / 100) : 0;
-          const ambushChance = 0.15 + dangerMod;
-          ambushed = Math.random() < ambushChance;
-        }
+      if (['backpack', 'my backpack', 'check backpack', 'open backpack'].includes(cmd)) {
+        return sendCommand(req, res, buildBackpackSummary(state), 'backpack', { persist: false });
+      }
 
-        if (ambushed) {
-          const playerLevel = getPlayerLevel(state.totalXP || 0);
-          const enemy = spawnEnemy(state.character.region, playerLevel);
+      if (['companions', 'check companions', 'my companions', 'party', 'my party'].includes(cmd)) {
+        const companionData = getCompanionsDisplay(state);
+        return sendCommand(req, res, companionData.hasCompanions ? `Your companions: ${companionData.display}` : 'You are traveling alone.', 'companions', { persist: false });
+      }
 
-          if (enemy) {
-            state.inCombat = true;
-            state.currentEnemy = enemy;
+      // =========================================
+      // TRAVEL
+      // =========================================
+      const travelIntent = detectTravelIntent(cleanInput);
+      if (travelIntent && travelIntent.type === 'map') {
+        return sendCommand(req, res, buildMapText(state), 'map', { persist: false });
+      }
+      if (travelIntent && travelIntent.type === 'travel') {
+        const result = travelTo(state, travelIntent.destination);
+        if (!result.success) return sendCommand(req, res, result.message, 'travel', { persist: false });
 
-            state.stamina = Math.min(state.maxStamina, state.stamina + Math.floor(state.maxStamina * 0.3));
-            state.hp = Math.min(state.maxHp, state.hp + Math.floor(state.maxHp * 0.15));
-            state.mana = Math.min(state.maxMana, state.mana + Math.floor(state.maxMana * 0.15));
+        events.push({ type: 'travel', from: result.from, to: result.to, message: result.message });
+        state.pendingContextHint = result.hint;
+        applyQuestUpdates(state, events, cleanInput, [{ type: 'arrived', region: result.to }]);
 
-            await persistSession(req.sessionId);
-
-            return res.json({
-              success: true,
-              output: `You settle down to rest, but your sleep is cut short—\n\n` +
-                      `A ${enemy.label} has found you!\n\n` +
-                      `You scramble to your feet, still groggy from interrupted sleep.`,
-              character: buildCharacterPanelData(state),
-              rightPanel: buildRightPanelData(state),
-              isCommand: false
-            });
+        // The road is not always quiet.
+        if (Math.random() < 0.25) {
+          const enemy = spawnEnemy(result.to, getPlayerLevel(state.totalXP || 0), { preferTargets: getQuestTargets(state) });
+          if (enemy && (enemy.level - getPlayerLevel(state.totalXP || 0)) < 20) {
+            startEncounter(state, enemy, `[ROAD ENCOUNTER — on arrival, a ${enemy.label} blocks the way. ${enemy.desc} Behavior: ${enemy.behavior}.]`);
           }
         }
-
-        state.stamina = state.maxStamina;
-        state.hp = state.maxHp;
-        state.mana = state.maxMana;
-
-        await persistSession(req.sessionId);
-
-        const restMessage = isSafe
-          ? `You settle in for a peaceful night's rest.\n\nThe ${currentLoc || 'shelter'} keeps you safe through the night.`
-          : `You find a spot to rest, keeping one eye open.\n\nHours pass. You wake feeling restored.`;
-
-        return res.json({
-          success: true,
-          output: `${restMessage}\n\n` +
-                  `Stamina: ${state.stamina}/${state.maxStamina} (full)\n` +
-                  `HP: ${state.hp}/${state.maxHp} (full)\n` +
-                  `Mana: ${state.mana}/${state.maxMana} (full)`,
-          character: buildCharacterPanelData(state),
-          isCommand: true,
-          commandType: 'longRest'
-        });
+        return narrateAndRespond(req, res, cleanInput, events);
       }
 
-      if (['check stats', 'status', 'character sheet', 'view stats', 'my stats'].includes(t)) {
-        const panel = buildCharacterPanelData(state);
-        return res.json({ success: true, output: null, character: panel, isCommand: true, commandType:'stats' });
+      // =========================================
+      // MERCHANTS & POTIONS
+      // =========================================
+      if (['shop', 'browse', 'browse wares', 'merchant', 'visit merchant', 'visit the merchant', 'wares', 'market', 'trade'].includes(cmd)) {
+        return sendCommand(req, res, buildShopText(state), 'shop', { persist: false });
+      }
+      const buyMatch = cleanInput.match(/^(?:i\s+)?(?:buy|purchase)\s+(.+)/i);
+      if (buyMatch) {
+        const result = buyItem(state, buyMatch[1]);
+        if (!result.notStocked) return sendCommand(req, res, result.message, 'buy', { persist: result.success });
+      }
+      if (/^(?:i\s+)?(?:drink|quaff|use|down)\s+(?:a\s+|the\s+|my\s+)?(?:healing\s+)?potion\b/i.test(cleanInput)) {
+        const result = drinkPotion(state);
+        return sendCommand(req, res, result.message, 'potion', { persist: result.success });
       }
 
-      if (['check gear', 'gear', 'inventory', 'check inventory', 'my inventory', 'equipment', 'my gear'].includes(t)) {
-        const panel = buildEconomyPanelData(state);
-        return res.json({
-          success: true,
-          output: buildBackpackSummary(state),
-          economy: panel,
-          isCommand: true,
-          commandType:'gear'
-        });
+      // =========================================
+      // RESTING (long rest checked first — "sleep" is a long rest)
+      // =========================================
+      const isLongRest = ['long rest', 'sleep', 'make camp', 'set up camp', 'camp', 'full rest', 'rest fully', 'go to sleep', 'sleep for the night'].includes(cmd) ||
+        t.includes('long rest') || t.includes('make camp') || t.includes('set up camp') ||
+        /\b(rent a room|get a room|take a room|sleep at the|stay the night|sleep in the|rest at the inn|rest at the tavern)\b/.test(t);
+      const isShortRest = !isLongRest && (['rest', 'recover', 'take a break', 'catch my breath', 'sit down', 'rest up', 'short rest'].includes(cmd) ||
+        t.startsWith('rest ') || t.includes('rest for') || t.includes('take a rest'));
+
+      if (isLongRest || isShortRest) {
+        if (state.inCombat) {
+          return sendCommand(req, res, "You can't rest while in combat!", 'rest', { persist: false });
+        }
       }
 
-      if (['backpack', 'my backpack', 'check backpack', 'open backpack'].includes(t)) {
-        const panel = buildEconomyPanelData(state);
-        return res.json({
-          success: true,
-          output: buildBackpackSummary(state),
-          economy: panel,
-          isCommand: true,
-          commandType: 'backpack'
-        });
-      }
-
-      if (t.startsWith('set companion ') || t.startsWith('add companion ')) {
-        const name = stripTrailingPunctuation(cleanInput.replace(/^(set|add) companion\s+/i, '').trim());
-        if (!name) {
-          return res.json({ success: true, output: 'Specify a companion name. Example: set companion Elara', isCommand: true });
+      if (isLongRest) {
+        // Safe rest: a paid room in a settlement (regions with a town or board).
+        // Anywhere else is the wild, with a tier-scaled (capped) ambush chance.
+        const region      = REGIONS[state.character.region] || {};
+        const hasTown     = !!(region.cityPresent || region.hasBountyBoard);
+        const wantsRoom   = /\b(inn|tavern|room|bed|lodge|hostel|barracks|guild|temple|sanctuary|shelter|safehouse)\b/.test(t);
+        const roomCost    = 20 * (region.tier || 1);
+        let isSafe = false;
+        let roomNote = '';
+        if (wantsRoom && hasTown) {
+          if ((state.coin || 0) >= roomCost) {
+            state.coin -= roomCost;
+            isSafe = true;
+            roomNote = ` (${formatCoin(roomCost)} for the room)`;
+          } else {
+            roomNote = `\n\nYou can't afford a room (${formatCoin(roomCost)}), so you sleep rough.`;
+          }
+        } else if (wantsRoom && !hasTown) {
+          roomNote = '\n\nThere is no inn out here — you make camp in the wild.';
         }
 
+        if (!isSafe) {
+          const ambushChance = Math.min(0.35, 0.10 + (region.tier || 1) * 0.025);
+          if (Math.random() < ambushChance) {
+            const playerLevel = getPlayerLevel(state.totalXP || 0);
+            const enemy = spawnEnemy(state.character.region, playerLevel);
+            if (enemy) {
+              state.inCombat     = true;
+              state.currentEnemy = enemy;
+              state.stamina = Math.min(state.maxStamina, state.stamina + Math.floor(state.maxStamina * 0.3));
+              state.hp      = Math.min(state.maxHp, state.hp + Math.floor(state.maxHp * 0.15));
+              state.mana    = Math.min(state.maxMana, state.mana + Math.floor(state.maxMana * 0.15));
+              return sendCommand(req, res,
+                `You settle down to rest, but your sleep is cut short—${roomNote}\n\nA ${enemy.label} has found you!\n\nYou scramble to your feet, still groggy from interrupted sleep.`,
+                'ambush');
+            }
+          }
+        }
+        const currentLoc = isSafe ? 'inn' : '';
+
+        state.stamina = state.maxStamina;
+        state.hp      = state.maxHp;
+        state.mana    = state.maxMana;
+        state.restedSinceAction = true;
+
+        const restMessage = isSafe
+          ? `You settle in for a peaceful night's rest${roomNote}.\n\nThe ${currentLoc || 'shelter'} keeps you safe through the night.`
+          : `You find a spot to rest, keeping one eye open.${roomNote}\n\nHours pass. You wake feeling restored.`;
+        return sendCommand(req, res,
+          `${restMessage}\n\nStamina: ${state.stamina}/${state.maxStamina} (full)\nHP: ${state.hp}/${state.maxHp} (full)\nMana: ${state.mana}/${state.maxMana} (full)`,
+          'longRest');
+      }
+
+      if (isShortRest) {
+        if (state.restedSinceAction) {
+          return sendCommand(req, res, "You've rested as much as a short break allows. Do something first, or make camp for a long rest.", 'rest', { persist: false });
+        }
+        const oldStamina = state.stamina, oldHp = state.hp, oldMana = state.mana;
+        state.stamina = Math.min(state.maxStamina, state.stamina + Math.floor(state.maxStamina * 0.5));
+        state.hp      = Math.min(state.maxHp,      state.hp      + Math.floor(state.maxHp * 0.25));
+        state.mana    = Math.min(state.maxMana,    state.mana    + Math.floor(state.maxMana * 0.25));
+        state.restedSinceAction = true;
+        return sendCommand(req, res,
+          `You take a moment to rest and recover.\n\n` +
+          `Stamina: +${state.stamina - oldStamina} (${state.stamina}/${state.maxStamina})\n` +
+          `HP: +${state.hp - oldHp} (${state.hp}/${state.maxHp})\n` +
+          `Mana: +${state.mana - oldMana} (${state.mana}/${state.maxMana})`,
+          'rest');
+      }
+
+      // =========================================
+      // CHARACTER / SETTINGS COMMANDS
+      // =========================================
+      if (t.startsWith('set companion ') || t.startsWith('add companion ')) {
+        const name = stripTrailingPunctuation(cleanInput.replace(/^(set|add) companion\s+/i, '').trim());
+        if (!name) return sendCommand(req, res, 'Specify a companion name. Example: set companion Elara', 'companion', { persist: false });
         const result = addCompanion(state, {
           name: name.charAt(0).toUpperCase() + name.slice(1).toLowerCase(),
           description: 'A companion who joined your journey.',
           role: 'ally'
         });
-
-        await persistSession(req.sessionId);
-        return res.json({
-          success: true,
-          output: result.success ? `${result.companion.name} has joined your party.` : result.message,
-          economy: buildEconomyPanelData(state),
-          isCommand: true,
-          commandType: 'companion'
-        });
-      }
-
-      if (['companions', 'check companions', 'my companions', 'party', 'my party'].includes(t)) {
-        const companionData = getCompanionsDisplay(state);
-        return res.json({
-          success: true,
-          output: companionData.hasCompanions ? `Your companions: ${companionData.display}` : 'You are traveling alone.',
-          economy: buildEconomyPanelData(state),
-          isCommand: true,
-          commandType: 'companions'
-        });
+        return sendCommand(req, res, result.success ? `${result.companion.name} has joined your party.` : result.message, 'companion');
       }
 
       if (/\b(spend|allocate|put|add)\b/.test(t) && /\b(str|strength|dex|dexterity|vit|vitality|int|intelligence|wis|wisdom|cha|charisma)\b/.test(t)) {
         const result = spendFreePoint(state, cleanInput);
-        events.push({ type: 'freePointSpent', ...result });
-        return res.json({ success: true, output: result.message, character: buildCharacterPanelData(state), isCommand: true, commandType: 'freePoint' });
+        return sendCommand(req, res, result.message, 'freePoint', { persist: result.success });
       }
 
-      if (t === 'nsfw on' || t === 'nsfw off' || t === 'enable nsfw' || t === 'disable nsfw') {
-        const enabled = t.includes('on') || t.includes('enable');
+      if (['nsfw on', 'nsfw off', 'enable nsfw', 'disable nsfw'].includes(cmd)) {
+        const enabled = cmd.includes('on') || cmd.includes('enable');
+        if (enabled && (state.character.age || 0) < 18) {
+          return sendCommand(req, res, '[Adult content is unavailable for characters under 18.]', 'nsfw', { persist: false });
+        }
         state.nsfwEnabled = enabled;
         if (req.session.playerId) db.setNSFWSetting(req.session.playerId, enabled);
-        return res.json({
-          success: true,
-          output: enabled
-            ? '[Adult content enabled. Intimate scenes will play out fully when earned.]'
-            : '[Adult content disabled. Intimate scenes will fade to black.]',
-          isCommand: true,
-          commandType:'nsfw'
-        });
+        return sendCommand(req, res, enabled
+          ? '[Adult content enabled. Intimate scenes will play out fully when earned.]'
+          : '[Adult content disabled. Intimate scenes will fade to black.]', 'nsfw');
       }
 
-      if (['inspect', 'size up', 'assess', 'read the enemy', 'study enemy'].some(w => t.includes(w))) {
+      // =========================================
+      // ENEMY INSPECTION (only meaningful in a fight)
+      // =========================================
+      if (state.inCombat && ['inspect', 'size up', 'assess', 'read the enemy', 'study enemy'].some(w => t.includes(w))) {
         const inspectData = buildEnemyInspectData(state);
         events.push({ type: 'inspect', content: formatInspectResult(inspectData) });
-        const narrative = await processNarrative(state, cleanInput, events);
-        return res.json({ success: true, output: narrative.fullOutput, rightPanel: narrative.rightPanel });
+        return narrateAndRespond(req, res, cleanInput, events);
       }
 
       if ((t.includes('recover') || t.includes('retrieve')) && (t.includes('gear') || t.includes('equipment') || t.includes('belongings'))) {
         const result = recoverGear(state);
-        if (result.success) {
-          events.push({ type: 'gearRecovered', ...result });
-        }
-        const narrative = await processNarrative(state, cleanInput, events);
-        await persistSession(req.sessionId);
-        return res.json({ success: true, output: narrative.fullOutput, economy: buildEconomyPanelData(state), rightPanel: narrative.rightPanel });
+        if (!result.success) return sendCommand(req, res, result.message, 'recoverGear', { persist: false });
+        events.push({ type: 'gearRecovered', ...result });
+        return narrateAndRespond(req, res, cleanInput, events);
       }
 
+      // =========================================
+      // SHOP
+      // =========================================
       if (t.includes('open shop') || t.includes('set up shop') || t.includes('open stall')) {
         const result = tryOpenShop(state);
-        if (!result.success) {
-          return res.json({ success: true, output: result.message, isCommand: true });
-        }
+        if (!result.success) return sendCommand(req, res, result.message, 'shop', { persist: false });
+        appendHint(state, `[SHOP OPENED — the player set up a market stall. ${result.message}]`);
       }
 
       if (t.includes('close shop') || t.includes('pack up shop')) {
         const result = tryCloseShop(state);
-        return res.json({ success: true, output: result.message, isCommand: true });
+        return sendCommand(req, res, result.message, 'shop', { persist: result.success });
       }
 
-      const corpseLootIntent = (t.includes('loot') || t.includes('search') || t.includes('take'))
-        && /(corpse|body|bandit|guard|cultist|raider|thug|enemy)/i.test(t);
-
-      function normalizeCommandEntity(value) {
-        return stripTrailingPunctuation(value);
-      }
-
-      if (/^(show|inspect|examine)\s+(?:the\s+)?(.+)/i.test(cleanInput)) {
-        const match = cleanInput.match(/^(show|inspect|examine)\s+(?:the\s+)?(.+)/i);
-        const itemName = normalizeCommandEntity(match && match[2] ? match[2] : '');
-        if (itemName && hasItem(state, itemName)) {
-          return res.json({ success: true, output: `In your backpack: ${itemName}.`, economy: buildEconomyPanelData(state), isCommand: true, commandType: 'inventory' });
+      // =========================================
+      // INVENTORY COMMANDS
+      // =========================================
+      const showMatch = cleanInput.match(/^(?:show|examine|inspect)\s+(?:the\s+|my\s+)?(.+)/i);
+      if (showMatch && !state.inCombat) {
+        const itemName = stripTrailingPunctuation(showMatch[1]);
+        const item = itemName ? findInventoryItem(state, itemName) : null;
+        if (item) {
+          const name = typeof item === 'string' ? item : item.name;
+          return sendCommand(req, res, `In your backpack: ${name}.`, 'inventory', { persist: false });
         }
-        return res.json({ success: true, output: itemName ? `You do not have "${itemName}" in your backpack.` : 'Show what item?', isCommand: true, commandType: 'inventory' });
+        // Not an item — "examine the strange door" is a story action.
       }
 
-      if (/^(drop|discard|throw away|remove)\s+(?:the\s+)?(.+)/i.test(cleanInput)) {
-        const match = cleanInput.match(/^(drop|discard|throw away|remove)\s+(?:the\s+)?(.+)/i);
-        const itemName = normalizeCommandEntity(match && match[2] ? match[2] : '');
-        if (!itemName) {
-          return res.json({ success: true, output: 'Drop what item?', isCommand: true, commandType: 'inventory' });
-        }
+      const dropMatch = cleanInput.match(/^(?:drop|discard|throw away)\s+(?:the\s+|my\s+)?(.+)/i);
+      if (dropMatch && !state.inCombat) {
+        const itemName = stripTrailingPunctuation(dropMatch[1]);
+        if (!itemName) return sendCommand(req, res, 'Drop what item?', 'inventory', { persist: false });
         const removed = removeItem(state, itemName);
-        if (!removed) {
-          return res.json({ success: true, output: `You do not have "${itemName}" in your backpack.`, economy: buildEconomyPanelData(state), isCommand: true, commandType: 'inventory' });
-        }
-        await persistSession(req.sessionId);
-        return res.json({ success: true, output: `Dropped from backpack: ${itemName}.`, economy: buildEconomyPanelData(state), character: buildCharacterPanelData(state), isCommand: true, commandType: 'inventory' });
+        if (!removed) return sendCommand(req, res, `You do not have "${itemName}" in your backpack.`, 'inventory', { persist: false });
+        return sendCommand(req, res, `Dropped from backpack: ${itemName}.`, 'inventory');
       }
 
-      if (/^sell\s+(?:the\s+)?(.+)/i.test(cleanInput)) {
-        const match = cleanInput.match(/^sell\s+(?:the\s+)?(.+)/i);
-        const itemName = normalizeCommandEntity(match && match[1] ? match[1] : '');
-        if (!itemName) {
-          return res.json({ success: true, output: 'Sell what item?', isCommand: true, commandType: 'inventory' });
-        }
-
-        function computeSellValue(item) {
-          if (item && typeof item === 'object') {
-            const tier = Math.max(0, item.tier || 0);
-            const weaponScore = Math.max(0, item.weaponBonus || 0) * 15;
-            const armorScore = Math.max(0, item.armorLevel || 0) * 18;
-            const modScore = item.statMods
-              ? Object.values(item.statMods).reduce((sum, value) => sum + Math.max(0, Number(value) || 0), 0) * 20
-              : 0;
-            return Math.max(10, 15 + tier * 12 + weaponScore + armorScore + modScore);
-          }
-
-          const name = String(item || '').toLowerCase();
-          if (/sword|blade|axe|mace|hammer|spear|staff|bow|weapon|knife|dagger/.test(name)) return 80;
-          if (/armor|armour|leather|mail|plate|tunic|tabard|boots|shield|helm/.test(name)) return 60;
-          if (/pouch|coin|ring|gem|relic|focus|charm/.test(name)) return 100;
-          return 20;
-        }
-
-        let soldName = null;
-        let soldValue = 0;
-
-        const invItem = findInventoryItem(state, itemName);
-        if (invItem) {
-          soldName = typeof invItem === 'string' ? invItem : invItem.name;
-          soldValue = computeSellValue(invItem);
-          removeItem(state, soldName);
-        } else {
-          const equippedWeapon = state.gear && state.gear.weapon;
-          const equippedArmor = state.gear && state.gear.armor;
-
-          if (equippedWeapon && equippedWeapon.name.toLowerCase().includes(itemName.toLowerCase())) {
-            soldName = equippedWeapon.name;
-            soldValue = computeSellValue(equippedWeapon);
-            state.gear.weapon = null;
-          } else if (equippedArmor && equippedArmor.name.toLowerCase().includes(itemName.toLowerCase())) {
-            soldName = equippedArmor.name;
-            soldValue = computeSellValue(equippedArmor);
-            state.gear.armor = null;
-          }
-        }
-
-        if (!soldName) {
-          return res.json({ success: true, output: `You do not have "${itemName}" in your backpack or equipped gear.`, economy: buildEconomyPanelData(state), isCommand: true, commandType: 'inventory' });
-        }
-
-        addCoin(state, soldValue);
-
-        await persistSession(req.sessionId);
-        return res.json({
-          success: true,
-          output: `Sold ${soldName} for ${formatCoin(soldValue)}.`,
-          economy: buildEconomyPanelData(state),
-          character: buildCharacterPanelData(state),
-          isCommand: true,
-          commandType: 'inventory'
-        });
+      const sellMatch = cleanInput.match(/^sell\s+(?:the\s+|my\s+)?(.+)/i);
+      if (sellMatch && !state.inCombat) {
+        const itemName = stripTrailingPunctuation(sellMatch[1]);
+        if (!itemName) return sendCommand(req, res, 'Sell what item?', 'inventory', { persist: false });
+        const sold = sellInventoryOrEquipped(state, itemName);
+        if (!sold) return sendCommand(req, res, `You do not have "${itemName}" in your backpack or equipped gear.`, 'inventory', { persist: false });
+        addCoin(state, sold.value);
+        return sendCommand(req, res, `Sold ${sold.name} for ${formatCoin(sold.value)}.`, 'inventory');
       }
+
+      // =========================================
+      // LOOTING THE LAST KILL
+      // =========================================
+      const lastLoot = state.lastDefeatedEnemyLoot;
+      const labelWords = lastLoot && lastLoot.label ? lastLoot.label.toLowerCase().split(/\s+/).filter(w => w.length > 2) : [];
+      const corpseLootIntent =
+        (/\b(loot|search|take|strip|rummage|check)\b/.test(t) && /(corpse|body|bodies|remains|carcass|bandit|guard|cultist|raider|thug|enemy)/i.test(t)) ||
+        (/\b(loot|search)\b/.test(t) && lastLoot && !lastLoot.looted && (labelWords.some(w => t.includes(w)) || /\b(it|them|him|her)\b/.test(t) || cmd === 'loot'));
 
       if (corpseLootIntent) {
         if (state.inCombat && state.currentEnemy && state.currentEnemy.currentHP > 0) {
-          return res.json({ success: true, output: 'You cannot loot a body while still in active combat.', isCommand: true, commandType: 'loot' });
+          return sendCommand(req, res, 'You cannot loot a body while still in active combat.', 'loot', { persist: false });
         }
+        if (!lastLoot || !lastLoot.label) return sendCommand(req, res, 'There is no recently defeated body to loot.', 'loot', { persist: false });
+        if (lastLoot.looted) return sendCommand(req, res, 'You already looted that body.', 'loot', { persist: false });
 
-        const lootState = state.lastDefeatedEnemyLoot;
-        if (!lootState || !lootState.label) {
-          return res.json({ success: true, output: 'There is no recently defeated body to loot.', isCommand: true, commandType: 'loot' });
-        }
-
-        if (lootState.looted) {
-          return res.json({ success: true, output: 'You already looted that body.', isCommand: true, commandType: 'loot' });
-        }
-
-        const resolvedLoot = resolveCorpseLoot(lootState.label);
-        const items = resolvedLoot.items;
-        const coinReward = resolvedLoot.coinReward;
+        const resolvedLoot = resolveCorpseLoot(lastLoot.label);
+        const items        = resolvedLoot.items;
+        // Coin scales gently with the enemy's level.
+        const coinReward   = Math.round(resolvedLoot.coinReward * (1 + (lastLoot.level || 1) / 10));
 
         for (const item of items) addItem(state, item);
         if (coinReward > 0) addCoin(state, coinReward);
-
         state.lastDefeatedEnemyLoot.looted = true;
-        state.pendingContextHint = `[LOOT ACQUIRED — player looted ${lootState.label}: ${items.join(', ')}${coinReward > 0 ? ` and ${formatCoin(coinReward)}` : ''}. Narrate this naturally.]`;
+        appendHint(state, `[LOOT ACQUIRED — player looted ${lastLoot.label}: ${items.join(', ')}${coinReward > 0 ? ` and ${formatCoin(coinReward)}` : ''}. Narrate this naturally.]`);
 
-        await persistSession(req.sessionId);
-        return res.json({
-          success: true,
-          output: `Looted ${lootState.label}: ${items.join(', ')}.${coinReward > 0 ? ` Added to coin pouch: ${formatCoin(coinReward)}.` : ''}`,
-          economy: buildEconomyPanelData(state),
-          character: buildCharacterPanelData(state),
-          isCommand: true,
-          commandType: 'loot'
-        });
+        // Point out gear that would beat what's equipped (loot scales to your level when equipped).
+        const upgrades = [];
+        const seenSlots = new Set();
+        for (const item of items) {
+          const up = describeUpgrade(state, item);
+          if (up && !seenSlots.has(up.slot)) { seenSlots.add(up.slot); upgrades.push(`"equip ${item}" (${up.slot})`); }
+        }
+        const upgradeNote = upgrades.length ? `\nUpgrade available — type ${upgrades.join(' or ')}.` : '';
+
+        return sendCommand(req, res,
+          `Looted ${lastLoot.label}: ${items.join(', ')}.${coinReward > 0 ? ` Added to coin pouch: ${formatCoin(coinReward)}.` : ''}${upgradeNote}`,
+          'loot');
       }
 
       if ((/\bput\s+all\b/.test(t) || /\bstash\b/.test(t) || /\bstore\b/.test(t)) && /\b(backpack|pack|bag)\b/.test(t)) {
         const moved = [];
-
-        if (state.gear && state.gear.weapon) {
-          moved.push(state.gear.weapon.name);
-          addItem(state, state.gear.weapon);
-          state.gear.weapon = null;
-        }
-
-        if (state.gear && state.gear.armor) {
-          moved.push(state.gear.armor.name);
-          addItem(state, state.gear.armor);
-          state.gear.armor = null;
-        }
-
-        await persistSession(req.sessionId);
-
-        return res.json({
-          success: true,
-          output: moved.length
-            ? `Moved to backpack: ${moved.join(', ')}.`
-            : 'Nothing equipped to move into your backpack.',
-          economy: buildEconomyPanelData(state),
-          character: buildCharacterPanelData(state),
-          isCommand: true,
-          commandType: 'backpackStash'
-        });
+        if (state.gear && state.gear.weapon) { moved.push(state.gear.weapon.name); addItem(state, state.gear.weapon); state.gear.weapon = null; }
+        if (state.gear && state.gear.armor)  { moved.push(state.gear.armor.name);  addItem(state, state.gear.armor);  state.gear.armor  = null; }
+        deps.recalculateResources(state);
+        return sendCommand(req, res, moved.length ? `Moved to backpack: ${moved.join(', ')}.` : 'Nothing equipped to move into your backpack.', 'backpackStash');
       }
 
-      const takePatterns = [
-        /^(?:take|loot|pick up|grab)\s+(?:the\s+)?(.+?)(?:\s+from.+)?$/i
-      ];
-
-      const maybeTakeSegments = cleanInput
-        .split(',')
-        .map(s => s.trim())
-        .filter(Boolean);
-
-      const takenItems = [];
-      let coinGained = 0;
-
-      function isInvalidLootName(itemName) {
-        return /^(bandit|guard|cultist|raider|thug|enemy|corpse|body)$/i.test((itemName || '').trim());
-      }
-
-      function parseCoinLoot(itemName) {
-        const lower = itemName.toLowerCase();
-        const isCoinLike = /(coin|coins|pouch|silver|gold|copper)/i.test(lower);
-        if (!isCoinLike) return 0;
-
-        let total = 0;
-        const goldMatch = lower.match(/(\d+)\s*gold/);
-        const silverMatch = lower.match(/(\d+)\s*silver/);
-        const copperMatch = lower.match(/(\d+)\s*copper/);
-
-        if (goldMatch) total += parseInt(goldMatch[1], 10) * 10000;
-        if (silverMatch) total += parseInt(silverMatch[1], 10) * 100;
-        if (copperMatch) total += parseInt(copperMatch[1], 10);
-
-        if (total > 0) return total;
-
-        if (/gold/.test(lower)) return 10000;
-        if (/silver/.test(lower)) return 100;
-        if (/copper/.test(lower)) return 1;
-
-        if (/pouch|coins?/.test(lower)) return 50;
-        return 0;
-      }
-
-      for (const segment of maybeTakeSegments) {
-        for (const pattern of takePatterns) {
-          const match = segment.match(pattern);
-          if (!match || !match[1]) continue;
-
-          const raw = match[1].trim().replace(/\s*(from|off of|off)\s+.*/i, '');
-          const phraseParts = raw.split(/\s+and\s+/i).map(p => p.trim()).filter(Boolean);
-
-          for (const phrase of phraseParts) {
-            const itemName = phrase.replace(/^(a|an|the)\s+/i, '').trim();
-            if (itemName.length > 0 && itemName.length < 50) {
-              if (isInvalidLootName(itemName)) continue;
-
-              const coinFromItem = parseCoinLoot(itemName);
-              if (coinFromItem > 0) {
-                addCoin(state, coinFromItem);
-                coinGained += coinFromItem;
-                events.push({ type: 'coinEarned', amount: coinFromItem, message: `You collected ${formatCoin(coinFromItem)}.` });
-              } else {
-                addItem(state, itemName);
-                takenItems.push(itemName);
-                events.push({ type: 'itemTaken', item: itemName, message: `You picked up: ${itemName}` });
-              }
+      // =========================================
+      // FREE-FORM PICKUPS ("take the lantern, the rope and the coins")
+      // =========================================
+      if (!state.inCombat && !detectCombatIntent(cleanInput) && !detectQuestAccept(stripTrailingPunctuation(cleanInput))) {
+        const pickup = parsePickup(cleanInput);
+        if (pickup) {
+          const takenItems = [];
+          let coinGained = 0;
+          for (const phrase of pickup) {
+            // Money: "coins", "a purse", "10 gold", "silver pieces" — but not "silver locket".
+            if (/\b(coins?|purse|coin pouch)\b/i.test(phrase) || /^(?:\d+\s*)?(?:gold|silver|copper)(?:\s+(?:pieces?|marks?|crowns?))?$/i.test(phrase)) {
+              const amount = Math.max(0, MAX_LOOSE_COIN - coinGained);
+              if (amount > 0) { coinGained += amount; }
+            } else {
+              addItem(state, phrase);
+              takenItems.push(phrase);
             }
           }
+          if (coinGained > 0) addCoin(state, coinGained);
 
-          break;
+          if (takenItems.length > 0 || coinGained > 0) {
+            const hints = [];
+            if (takenItems.length > 0) hints.push(`player now has ${takenItems.map(i => `"${i}"`).join(', ')} in their inventory`);
+            if (coinGained > 0) hints.push(`player found ${formatCoin(coinGained)} in loose coin`);
+            appendHint(state, `[ITEM ACQUIRED — ${hints.join(' and ')}. Narrate this naturally.]`);
+
+            const parts = [];
+            if (takenItems.length > 0) parts.push(`Added to backpack: ${takenItems.join(', ')}.`);
+            if (coinGained > 0) parts.push(`Added to coin pouch: ${formatCoin(coinGained)} (loose change).`);
+            return sendCommand(req, res, parts.join(' '), 'loot');
+          }
         }
       }
 
-      if (takenItems.length > 0 || coinGained > 0) {
-        const hints = [];
-        if (takenItems.length > 0) {
-          hints.push(`player now has ${takenItems.map(i => `"${i}"`).join(', ')} in their inventory`);
-        }
-        if (coinGained > 0) {
-          hints.push(`player gained ${formatCoin(coinGained)}`);
-        }
-        state.pendingContextHint = `[ITEM ACQUIRED — ${hints.join(' and ')}. Narrate this naturally.]`;
-        await persistSession(req.sessionId);
-
-        const outputParts = [];
-        if (takenItems.length > 0) outputParts.push(`Added to backpack: ${takenItems.join(', ')}.`);
-        if (coinGained > 0) outputParts.push(`Added to coin pouch: ${formatCoin(coinGained)}.`);
-
-        return res.json({
-          success: true,
-          output: outputParts.join(' '),
-          economy: buildEconomyPanelData(state),
-          character: buildCharacterPanelData(state),
-          isCommand: true,
-          commandType: 'loot'
-        });
-      }
-
-      const equipIntent = detectEquipIntent(cleanInput);
-      if (equipIntent) {
-        const equipResult = processEquipCommand(state, equipIntent);
+      // =========================================
+      // EQUIP / UNEQUIP (command-style input only, never mid-attack)
+      // =========================================
+      if (!detectCombatIntent(cleanInput) &&
+          /^(?:i\s+)?(?:equip|unequip|wear|wield|put on|don|strap on|switch to|swap|replace|take off|stow|sheathe|unwield|remove)\b/i.test(cleanInput)) {
+        const equipIntent = detectEquipIntent(cleanInput);
+        const equipResult = equipIntent ? processEquipCommand(state, equipIntent) : null;
         if (equipResult) {
           if (equipResult.success) {
-            events.push({
-              type: equipIntent.intent === 'equip' ? 'itemEquipped' : 'itemUnequipped',
-              item: equipResult.item,
-              slot: equipResult.slot,
-              message: equipResult.message
-            });
-            state.pendingContextHint = `[GEAR UPDATED — ${equipResult.message}. Narrate this naturally.]`;
-          } else if (equipResult.notFound) {
-            state.pendingContextHint = equipResult.hint;
-            events.push({ type: 'equipFailed', message: equipResult.message });
+            appendHint(state, `[GEAR UPDATED — ${equipResult.message}. Narrate this naturally.]`);
           }
-
-          await persistSession(req.sessionId);
-          return res.json({
-            success: true,
-            output: equipResult.message,
-            character: buildCharacterPanelData(state),
-            economy: buildEconomyPanelData(state),
-            rightPanel: buildRightPanelData(state),
-            isCommand: true,
-            commandType: equipIntent.intent === 'equip' ? 'equip' : 'unequip'
-          });
+          return sendCommand(req, res, equipResult.message, equipIntent.intent === 'equip' ? 'equip' : 'unequip', { persist: !!equipResult.success });
         }
       }
 
+      // =========================================
+      // COMPANIONS
+      // =========================================
       const companionIntent = detectCompanionIntent(cleanInput, state);
-      if (companionIntent && companionIntent.npcName) {
-        const normalizedNpcName = stripTrailingPunctuation(companionIntent.npcName);
-        if (!normalizedNpcName) {
-          return res.json({ success: true, output: 'Specify which companion you mean.', isCommand: true, commandType: 'companion' });
-        }
-
-        if (companionIntent.intent === 'join') {
-          const npcKey = normalizedNpcName.toLowerCase();
-          const rapport = state.npcRelationships && state.npcRelationships[npcKey]
-            ? state.npcRelationships[npcKey].rapport || 0
-            : 0;
-
+      if (companionIntent && companionIntent.npcName && !state.inCombat) {
+        const npcName = stripTrailingPunctuation(companionIntent.npcName);
+        if (companionIntent.intent === 'join' && npcName) {
+          const npcKey  = npcName.toLowerCase().replace(/\s+/g, '_');
+          const rapport = state.npcRelationships && state.npcRelationships[npcKey] ? state.npcRelationships[npcKey].rapport || 0 : 0;
           if (rapport >= 30) {
             const result = addCompanion(state, {
-              name: normalizedNpcName.charAt(0).toUpperCase() + normalizedNpcName.slice(1),
-              description: `A companion met in your travels.`,
+              name: npcName.charAt(0).toUpperCase() + npcName.slice(1),
+              description: 'A companion met in your travels.',
               role: 'ally'
             });
-
             if (result.success) {
               events.push({ type: 'companionJoined', companion: result.companion });
-              state.pendingContextHint = `[COMPANION JOINED — ${result.companion.name} has agreed to travel with the player. Narrate this naturally as a meaningful moment.]`;
+              appendHint(state, `[COMPANION JOINED — ${result.companion.name} has agreed to travel with the player. Narrate this naturally as a meaningful moment.]`);
             } else {
-              state.pendingContextHint = `[COMPANION LIMIT — ${result.message}]`;
+              appendHint(state, `[COMPANION LIMIT — ${result.message}]`);
             }
           } else {
-            state.pendingContextHint = `[COMPANION DECLINED — Not enough rapport (${rapport}/30) with ${normalizedNpcName}. They are not ready to commit to traveling together. Narrate a polite decline.]`;
+            appendHint(state, `[COMPANION DECLINED — ${npcName} doesn't know the player well enough yet (rapport ${rapport}/30). They are not ready to commit to traveling together. Narrate a polite decline.]`);
+            events.push({ type: 'companionDeclined', name: npcName, rapport });
           }
         } else if (companionIntent.intent === 'leave') {
-          const result = removeCompanion(state, normalizedNpcName);
+          const result = removeCompanion(state, npcName);
           if (result.success) {
             events.push({ type: 'companionLeft', companion: result.companion });
-            state.pendingContextHint = `[COMPANION LEFT — ${result.companion.name} has parted ways with the player. Narrate this farewell naturally.]`;
+            appendHint(state, `[COMPANION LEFT — ${result.companion.name} has parted ways with the player. Narrate this farewell naturally.]`);
           }
         }
       }
 
-      if (isDead(state)) {
-        const playerLevel  = getPlayerLevel(state.totalXP || 0);
-        const levelsLost   = state.deathCount + 1;
-        state.deathCount   = (state.deathCount || 0) + 1;
-        const newLevel     = Math.max(1, playerLevel - levelsLost);
-        const { getXPForLevel } = require('../../../game/character');
-        state.totalXP      = getXPForLevel(newLevel);
-        state.hp           = state.maxHp;
-        state.stamina      = state.maxStamina;
-        state.mana         = state.maxMana;
-        state.inCombat     = false;
+      // =========================================
+      // COMBAT
+      // =========================================
+      if (state.inCombat && state.currentEnemy && state.currentEnemy.currentHP <= 0) {
+        state.inCombat = false;
         state.currentEnemy = null;
-
-        const hadGear = saveGearAtDeath(state);
-        changeReputation(state, state.character.region, -5);
-
-        const regionLabel = buildCharacterPanelData(state).region || 'the region';
-
-        events.push({ type: 'death', deathCount: state.deathCount, levelsLost, newLevel, hadGear, regionLabel });
-      }
-
-      if (state.inCombat && state.currentEnemy && detectFleeIntent(cleanInput)) {
-        const fleeResult = applyFleeAttempt(state);
-        state.pendingContextHint = fleeResult.hint;
-
-        const narrative = await processNarrative(state, cleanInput, events);
-        await persistSession(req.sessionId);
-        return res.json({ success: true, output: narrative.fullOutput, character: buildCharacterPanelData(state), rightPanel: narrative.rightPanel });
       }
 
       if (state.inCombat && state.currentEnemy) {
-        if (state.currentEnemy.currentHP <= 0) {
-          console.log('[Combat] Clearing stale combat state - enemy already dead');
-          state.inCombat = false;
-          state.currentEnemy = null;
-        }
+        return handleCombatTurn(req, res, cleanInput, events);
       }
 
-      if (state.inCombat && state.currentEnemy && state.currentEnemy.currentHP > 0) {
-        const combatResult = applyCombatRound(state, cleanInput);
-        state.pendingContextHint = combatResult.hint;
-
-        updateActionProgress(state, cleanInput);
-
-        if (combatResult.enemyKilled) {
-          events.push({
-            type:  'enemyKill',
-            label: state.pendingEnemyKill ? state.pendingEnemyKill.label : 'Enemy',
-            xp:    state.pendingEnemyKill ? state.pendingEnemyKill.xp    : 0
-          });
-
-          state.lastDefeatedEnemyLoot = {
-            label: state.pendingEnemyKill ? state.pendingEnemyKill.label : 'Enemy',
-            looted: false,
-            ts: Date.now()
-          };
-
-          if (state.pendingEnemyKill) {
-            const { getPlayerLevel: gpl } = require('../../../game/character');
-            const prevLevel  = gpl(state.totalXP || 0);
-            state.totalXP    = (state.totalXP || 0) + state.pendingEnemyKill.xp;
-            state.classXP    = (state.classXP  || 0) + state.pendingEnemyKill.xp;
-            const newLevel   = gpl(state.totalXP);
-            state.pendingEnemyKill = null;
-
-            if (newLevel > prevLevel) {
-              const pts        = newLevel - prevLevel;
-              state.freePoints = (state.freePoints || 0) + pts;
-              recalculateResources(state);
-              events.push({ type: 'levelUp', prevLevel, newLevel, freePointsAwarded: pts });
-            }
-          }
-        }
-
-        const progressEvents = processPendingProgressEvents(state);
-        events.push(...progressEvents);
-
-        const narrative = await processNarrative(state, cleanInput, events);
-        await persistSession(req.sessionId);
-
-        const fullOutput = combatResult.combatLog
-          ? (narrative.fullOutput || '') + combatResult.combatLog
-          : narrative.fullOutput;
-
-        req.session.lastOutput = fullOutput;
-        req.session.lastCombatLog = combatResult.combatLog || null;
-        req.session.lastCombatResult = state.pendingCombatResult;
-        req.session.lastEvents = events;
-        setSession(req.sessionId, req.session);
-
-        return res.json({
-          success: true,
-          output: fullOutput,
-          character: buildCharacterPanelData(state),
-          progression: buildProgressionPanelData(state),
-          economy: buildEconomyPanelData(state),
-          rightPanel: narrative.rightPanel
-        });
-      }
-
+      // =========================================
+      // NON-COMBAT ACTION
+      // =========================================
+      state.restedSinceAction = false;
       const normalizedBoardInput = stripTrailingPunctuation(cleanInput);
 
-      if (!state.inCombat && detectBoardIntent(normalizedBoardInput)) {
-        state.pendingContextHint = buildBoardInspectHint(state);
+      if (detectBoardIntent(normalizedBoardInput)) {
+        appendHint(state, buildBoardInspectHint(state));
       }
 
-      if (!state.inCombat && detectQuestAccept(normalizedBoardInput) && state.boardQuests && state.boardQuests.length > 0) {
+      if (detectQuestAccept(normalizedBoardInput) && /\b(quest|job|bounty|contract|posting|notice|hunt|clear|escort|patrol|retrieve|scout|advance|move on|\d+)\b/i.test(normalizedBoardInput)) {
         const numMatch = normalizedBoardInput.match(/\b([1-9]\d*)\b/);
+        let result = null;
         if (numMatch) {
-          const result = acceptQuestByIndex(state, parseInt(numMatch[1], 10));
-          if (result.success) {
-            events.push({ type: 'questAccepted', quest: result.quest });
-            state.pendingContextHint = result.hint || `[QUEST ACCEPTED: "${result.quest.label}" — narrate naturally.]`;
-          }
+          result = acceptQuestByIndex(state, parseInt(numMatch[1], 10));
         } else {
           const t2 = normalizedBoardInput.toLowerCase();
-          const quests = getBoardQuests(state);
-          for (let i = 0; i < quests.length; i++) {
-            const q = quests[i];
-            if (
-              (t2.includes('hunt') && q.type === 'hunt') ||
-              (t2.includes('escort') && q.type === 'escort') ||
-              (t2.includes('patrol') && q.type === 'patrol') ||
-              (t2.includes('retrieve') && q.type === 'retrieve') ||
-              (t2.includes('scout') && q.type === 'scout') ||
-              (t2.includes('advance') && q.type === 'advance') ||
-              (t2.includes('move on') && q.type === 'advance')
-            ) {
-              const result = acceptQuest(state, q.id);
-              if (result.success) {
-                events.push({ type: 'questAccepted', quest: result.quest });
-                state.pendingContextHint = result.hint;
-                break;
-              }
-            }
-          }
+          const typeWords = { hunt: ['hunt'], clear: ['clear'], escort: ['escort'], patrol: ['patrol'], retrieve: ['retrieve'], scout: ['scout'], advance: ['advance', 'move on'] };
+          const shown = (state.boardQuests && state.boardQuests.length) ? state.boardQuests : getBoardQuests(state);
+          const q = shown.find(q => (typeWords[q.type] || []).some(w => t2.includes(w)));
+          if (q) result = acceptQuest(state, q.id);
+        }
+        if (result && result.success) {
+          events.push({ type: 'questAccepted', quest: result.quest });
+          appendHint(state, result.hint || `[QUEST ACCEPTED: "${result.quest.label}" — narrate naturally.]`);
+        } else if (result && !result.success) {
+          events.push({ type: 'questAcceptFailed', message: result.message });
         }
       }
 
-      if (state.activeQuests && state.activeQuests.length > 0) {
-        const killEvents = events.filter(e => e.type === 'enemyKill').map(e => ({ type:'enemyDefeated', enemyLabel: e.label || '' }));
-        const questUpdates = checkQuestProgress(state, cleanInput, killEvents);
-        if (questUpdates.length > 0) events.push(...questUpdates.map(u => ({ type:'questProgress', ...u })));
+      applyQuestUpdates(state, events, cleanInput, []);
 
-        const completions = processQuestCompletions(state);
-        for (const c of completions) {
-          events.push({ type:'questComplete', quest:c.quest, reward:c.reward, hint:c.hint });
-          state.pendingContextHint = (state.pendingContextHint ? state.pendingContextHint + '\n\n' : '') + c.hint;
-        }
-      }
-
-      if (detectCombatIntent(cleanInput) && state.character && !state.inCombat) {
+      if (!state.inCombat && detectCombatIntent(cleanInput) && state.character) {
         const playerLevel = getPlayerLevel(state.totalXP || 0);
-        const enemy       = spawnEnemy(state.character.region, playerLevel);
-
+        const enemy       = spawnEnemy(state.character.region, playerLevel, { preferTargets: getQuestTargets(state) });
         if (enemy) {
-          state.inCombat     = true;
-          state.currentEnemy = enemy;
-          const unbeatable   = (enemy.level - playerLevel) >= 20;
-          state.pendingContextHint = unbeatable
+          const unbeatable = (enemy.level - playerLevel) >= 20;
+          startEncounter(state, enemy, unbeatable
             ? `[ENEMY SPAWNED: ${enemy.label} — far beyond the player. Cannot be defeated. Narrate absolute dominance.]`
-            : `[ENEMY SPAWNED: ${enemy.label} Lv${enemy.level}. ${enemy.desc} Behavior: ${enemy.behavior}. Player attacked first. Begin the combat scene.]`;
+            : `[ENEMY SPAWNED: ${enemy.label} Lv${enemy.level}. ${enemy.desc} Behavior: ${enemy.behavior}. Player attacked first. Begin the combat scene.]`);
+          events.push({ type: 'combatStart', label: enemy.label, level: enemy.level });
         }
       }
 
       if (!state.inCombat && !isPassiveAction(cleanInput)) {
         const ambientEnemy = checkAmbientEncounter(state);
         if (ambientEnemy) {
-          state.inCombat     = true;
-          state.currentEnemy = ambientEnemy;
-          state.pendingContextHint = `[AMBIENT ENCOUNTER — a ${ambientEnemy.label} appears unexpectedly. ${ambientEnemy.desc} Behavior: ${ambientEnemy.behavior}. Player did not seek this fight — introduce naturally. They can fight, flee, or attempt to avoid it.]`;
+          startEncounter(state, ambientEnemy, `[AMBIENT ENCOUNTER — a ${ambientEnemy.label} appears unexpectedly. ${ambientEnemy.desc} Behavior: ${ambientEnemy.behavior}. Player did not seek this fight — introduce naturally. They can fight, flee, or attempt to avoid it.]`);
+          events.push({ type: 'combatStart', label: ambientEnemy.label, level: ambientEnemy.level, ambient: true });
         }
       }
 
       if (state.shopOpen && !state.inCombat) {
         const shopEvent = checkShopCustomerEvent(state);
-        if (shopEvent) {
-          state.pendingContextHint = shopEvent.hint;
-        }
-      }
-
-      if (state.profession && !state.inCombat) {
-        const taskResult = resolveProfessionTask(state, cleanInput);
-        if (taskResult) {
-          state.pendingContextHint = taskResult.hint;
-
-          if (state.pendingProfXP && state.pendingProfXP > 0) {
-            state.profXP         = (state.profXP || 0) + state.pendingProfXP;
-            state.pendingProfXP  = 0;
-          }
-        }
+        if (shopEvent) appendHint(state, shopEvent.hint);
       }
 
       if (!state.inCombat) {
+        const taskResult = resolveProfessionTask(state, cleanInput);
+        if (taskResult) {
+          appendHint(state, taskResult.hint);
+          if (taskResult.craftedItem) events.push({ type: 'itemCrafted', item: taskResult.craftedItem });
+          if (state.pendingProfXP && state.pendingProfXP > 0) {
+            state.profXP        = (state.profXP || 0) + state.pendingProfXP;
+            state.pendingProfXP = 0;
+          }
+        }
         updateActionProgress(state, cleanInput);
+        const social = applySocialRapport(state, cleanInput);
+        if (social) events.push({ type: 'rapport', ...social });
       }
 
       const coinIntent = detectCoinIntent(cleanInput);
-      if (coinIntent && coinIntent.intent === 'earn') {
-        state.pendingCoinGain  = (state.pendingCoinGain  || 0) + coinIntent.amount;
-      }
       if (coinIntent && coinIntent.intent === 'spend') {
         state.pendingCoinSpend = (state.pendingCoinSpend || 0) + coinIntent.amount;
       }
+      // Earning coin by *saying* so ("I receive 50 gold") is not a thing —
+      // coin comes from loot, quests, and sales.
 
-      const coinEvents = processPendingCoinEvents(state);
-      for (const ce of coinEvents) {
-        if (ce.type === 'coinSpend' && !ce.success) {
-          events.push({ type: 'coinSpendFailed', hint: ce.hint });
-          state.pendingContextHint = ce.hint;
+      for (const ce of processPendingCoinEvents(state)) {
+        if (ce.type === 'coinSpend') {
+          if (ce.success) events.push({ type: 'coinSpent', display: ce.display, total: ce.total });
+          else { events.push({ type: 'coinSpendFailed', hint: ce.hint }); appendHint(state, ce.hint); }
         }
       }
 
       if (!state.inCombat) {
-        const recovery = Math.floor((state.maxStamina || 10) * 0.15);
-        state.stamina  = Math.min(state.maxStamina, (state.stamina || state.maxStamina) + recovery);
+        state.stamina = Math.min(state.maxStamina, (state.stamina || 0) + Math.floor((state.maxStamina || 10) * 0.15));
+        state.mana    = Math.min(state.maxMana,    (state.mana    || 0) + Math.floor((state.maxMana    || 10) * 0.10));
       }
 
-      const progressEvents = processPendingProgressEvents(state);
-      events.push(...progressEvents);
-
-      const activeQuestCtx = buildActiveQuestContext(state);
-      if (activeQuestCtx) {
-        state.pendingContextHint = state.pendingContextHint
-          ? state.pendingContextHint + '\n\n' + activeQuestCtx
-          : activeQuestCtx;
-      }
-
-      const narrative = await processNarrative(state, cleanInput, events);
-
-      await persistSession(req.sessionId);
-
-      req.session.lastOutput = narrative.fullOutput;
-      req.session.lastCombatLog = null;
-      req.session.lastEvents = events;
-      setSession(req.sessionId, req.session);
-
-      if (req.session.saveId) {
-        db.appendStoryHistory(
-          req.session.saveId,
-          state.actionCount || 0,
-          cleanInput,
-          narrative.narrative || '',
-          state.sceneContext || 'neutral'
-        );
-      }
-
-      return res.json({
-        success: true,
-        output: narrative.fullOutput,
-        character: buildCharacterPanelData(state),
-        progression: buildProgressionPanelData(state),
-        economy: buildEconomyPanelData(state),
-        rightPanel: narrative.rightPanel,
-        board: buildBoardDisplayData(state),
-        inCreation: isInCreation(state)
-      });
+      appendHint(state, buildActiveQuestContext(state));
+      return narrateAndRespond(req, res, cleanInput, events);
     } catch (err) {
       console.error('[Action] Unhandled error:', err);
-      return res.status(500).json({
-        error:  'Something went wrong. Your progress has been saved.',
-        detail: err.message
-      });
+      return res.status(500).json({ error: 'Something went wrong processing that action.', detail: err.message });
     }
   });
 
   app.post('/api/retry-narrative', requireSession, async (req, res) => {
-    const state = req.session.state;
+    const state     = req.session.state;
     const lastInput = req.session.lastInput;
-
-    if (!lastInput) {
-      return res.status(400).json({ error: 'No previous action to retry.' });
-    }
+    if (!lastInput) return res.status(400).json({ error: 'No previous action to retry.' });
+    if (!req.session.lastEvents && !req.session.lastOutput) return res.status(400).json({ error: 'Nothing to retry.' });
 
     try {
-      const events = req.session.lastEvents || [];
+      const events    = req.session.lastEvents || [];
       const narrative = await processNarrative(state, lastInput, events);
-
-      const fullOutput = req.session.lastCombatLog
-        ? (narrative.fullOutput || '') + req.session.lastCombatLog
-        : narrative.fullOutput;
-
+      const fullOutput = req.session.lastCombatLog ? (narrative.fullOutput || '') + req.session.lastCombatLog : narrative.fullOutput;
       req.session.lastOutput = fullOutput;
       setSession(req.sessionId, req.session);
-
-      return res.json({
-        success: true,
-        output: fullOutput,
-        character: buildCharacterPanelData(state),
-        progression: buildProgressionPanelData(state),
-        economy: buildEconomyPanelData(state),
-        rightPanel: narrative.rightPanel,
-        board: buildBoardDisplayData(state)
-      });
+      await persistSession(req.sessionId);
+      return res.json({ success: true, output: fullOutput, ...allPanels(state), rightPanel: narrative.rightPanel });
     } catch (err) {
       console.error('[RetryNarrative] Error:', err);
       return res.status(500).json({ error: 'Failed to regenerate narrative.' });
@@ -1006,39 +860,29 @@ module.exports = function registerGameplayRoutes(app, deps) {
   });
 
   app.post('/api/undo', requireSession, async (req, res) => {
-    const { restoreStateSnapshot } = require('../../../game/state');
-
-    if (!req.session.stateSnapshot) {
-      return res.status(400).json({ error: 'Nothing to undo.' });
-    }
-
+    if (!req.session.stateSnapshot) return res.status(400).json({ error: 'Nothing to undo.' });
     try {
       restoreStateSnapshot(req.session.state, req.session.stateSnapshot);
-
       const undoneInput = req.session.lastInput;
-      req.session.stateSnapshot = null;
-      req.session.lastInput = null;
-      req.session.lastOutput = null;
-      req.session.lastCombatLog = null;
+      req.session.stateSnapshot   = null;
+      req.session.lastInput       = null;
+      req.session.lastOutput      = null;
+      req.session.lastCombatLog   = null;
       req.session.lastCombatResult = null;
-      req.session.lastEvents = null;
-
+      req.session.lastEvents      = null;
       setSession(req.sessionId, req.session);
       await persistSession(req.sessionId);
 
+      const state = req.session.state;
       return res.json({
         success: true,
         message: 'Action undone. You can try something different.',
-        undoneInput: undoneInput,
-        character: buildCharacterPanelData(req.session.state),
-        progression: buildProgressionPanelData(req.session.state),
-        economy: buildEconomyPanelData(req.session.state),
+        undoneInput,
+        ...allPanels(state),
         rightPanel: {
-          inCombat: req.session.state.inCombat || false,
-          enemy: req.session.state.currentEnemy ? buildEnemyPanelData(req.session.state) : null,
-          sceneContext:req.session.state.sceneContext || 'neutral'
-        },
-        board: buildBoardDisplayData(req.session.state)
+          ...buildRightPanelData(state),
+          enemy: state.currentEnemy ? buildEnemyPanelData(state) : null
+        }
       });
     } catch (err) {
       console.error('[Undo] Error:', err);
@@ -1046,104 +890,94 @@ module.exports = function registerGameplayRoutes(app, deps) {
     }
   });
 
+  // Replays the last action with new text. Combat and normal actions are
+  // re-run through the same handlers as /api/action.
   app.post('/api/edit-action', requireSession, async (req, res) => {
-    const { input } = req.body;
-    const { restoreStateSnapshot, createStateSnapshot } = require('../../../game/state');
-
+    const { input } = req.body || {};
     if (!input || typeof input !== 'string' || input.trim().length === 0) {
       return res.status(400).json({ error: 'New input required.' });
     }
-
-    if (!req.session.stateSnapshot) {
-      return res.status(400).json({ error: 'No previous action to edit.' });
-    }
+    if (!req.session.stateSnapshot) return res.status(400).json({ error: 'No previous action to edit.' });
+    if (isInCreation(req.session.state)) return res.status(400).json({ error: 'Cannot edit during character creation.' });
 
     try {
       restoreStateSnapshot(req.session.state, req.session.stateSnapshot);
-
       req.session.stateSnapshot = createStateSnapshot(req.session.state);
-      req.session.lastInput = input.trim();
-
+      const cleanInput = stripTrailingPunctuation(input.trim().slice(0, MAX_INPUT_LENGTH)) || input.trim();
+      req.session.lastInput = cleanInput;
       setSession(req.sessionId, req.session);
 
-      const state = req.session.state;
-      const cleanInput = input.trim();
-      const normalizedEditInput = stripTrailingPunctuation(cleanInput);
+      const state  = req.session.state;
       const events = [];
-
-      if (isInCreation(state)) {
-        return res.status(400).json({ error: 'Cannot edit during character creation.' });
+      if (state.inCombat && state.currentEnemy) {
+        return handleCombatTurn(req, res, cleanInput, events);
       }
-
-      if (state.inCombat && state.currentEnemy && !detectFleeIntent(normalizedEditInput)) {
-        const combatResult = applyCombatRound(state, normalizedEditInput);
-        state.pendingContextHint = combatResult.hint;
-        updateActionProgress(state, normalizedEditInput);
-
-        if (combatResult.enemyKilled && state.pendingEnemyKill) {
-          events.push({ type: 'enemyKill', label: state.pendingEnemyKill.label, xp: state.pendingEnemyKill.xp });
-
-          const { getPlayerLevel: gpl } = require('../../../game/character');
-          const prevLevel = gpl(state.totalXP || 0);
-          state.totalXP = (state.totalXP || 0) + state.pendingEnemyKill.xp;
-          state.classXP = (state.classXP || 0) + state.pendingEnemyKill.xp;
-          const newLevel = gpl(state.totalXP);
-          state.pendingEnemyKill = null;
-
-          if (newLevel > prevLevel) {
-            const pts = newLevel - prevLevel;
-            state.freePoints = (state.freePoints || 0) + pts;
-            recalculateResources(state);
-            events.push({ type: 'levelUp', prevLevel, newLevel, freePointsAwarded: pts });
-          }
-        }
-
-        const narrative = await processNarrative(state, cleanInput, events);
-        await persistSession(req.sessionId);
-
-        const fullOutput = combatResult.combatLog
-          ? (narrative.fullOutput || '') + combatResult.combatLog
-          : narrative.fullOutput;
-
-        req.session.lastOutput = fullOutput;
-        req.session.lastCombatLog = combatResult.combatLog || null;
-        req.session.lastCombatResult = state.pendingCombatResult;
-        req.session.lastEvents = events;
-        setSession(req.sessionId, req.session);
-
-        return res.json({
-          success: true,
-          output: fullOutput,
-          character: buildCharacterPanelData(state),
-          progression: buildProgressionPanelData(state),
-          economy: buildEconomyPanelData(state),
-          rightPanel: narrative.rightPanel
-        });
-      }
-
-      const narrative = await processNarrative(state, cleanInput, events);
-      await persistSession(req.sessionId);
-
-      req.session.lastOutput = narrative.fullOutput;
-      req.session.lastCombatLog = null;
-      req.session.lastEvents = events;
-      setSession(req.sessionId, req.session);
-
-      return res.json({
-        success: true,
-        output: narrative.fullOutput,
-        character: buildCharacterPanelData(state),
-        progression: buildProgressionPanelData(state),
-        economy: buildEconomyPanelData(state),
-        rightPanel: narrative.rightPanel,
-        board: buildBoardDisplayData(state)
-      });
+      appendHint(state, buildActiveQuestContext(state));
+      return narrateAndRespond(req, res, cleanInput, events);
     } catch (err) {
       console.error('[EditAction] Error:', err);
       return res.status(500).json({ error: 'Failed to process edited action.' });
     }
   });
+
+  // ---------------------------------------------
+  // Selling
+  // ---------------------------------------------
+  function computeSellValue(item) {
+    if (item && typeof item === 'object') {
+      const tier        = Math.max(0, item.tier || 0);
+      const weaponScore = Math.max(0, item.weaponBonus || 0) * 15;
+      const armorScore  = Math.max(0, item.armorLevel || 0) * 18;
+      const modScore    = item.statMods
+        ? Object.values(item.statMods).reduce((sum, value) => sum + Math.max(0, Number(value) || 0), 0) * 20
+        : 0;
+      return Math.max(10, 15 + tier * 12 + weaponScore + armorScore + modScore + (item.sellBonus || 0));
+    }
+    const name = String(item || '').toLowerCase();
+    if (/sword|blade|axe|mace|hammer|spear|staff|bow|weapon|knife|dagger/.test(name)) return 80;
+    if (/armor|armour|leather|mail|plate|tunic|tabard|boots|shield|helm/.test(name)) return 60;
+    if (/pouch|coin|ring|gem|relic|focus|charm|scale|fang|pelt|hide|tusk|claw|shard|core/.test(name)) return 100;
+    return 20;
+  }
+
+  function sellInventoryOrEquipped(state, itemName) {
+    const invItem = findInventoryItem(state, itemName);
+    if (invItem) {
+      const name = typeof invItem === 'string' ? invItem : invItem.name;
+      const value = computeSellValue(invItem);
+      removeItem(state, name);
+      return { name, value };
+    }
+    const crafted = (state.craftedGear || []).findIndex(g => g.name && g.name.toLowerCase().includes(itemName.toLowerCase()));
+    if (crafted !== -1) {
+      const item = state.craftedGear.splice(crafted, 1)[0];
+      return { name: item.name, value: computeSellValue(item) };
+    }
+    for (const slot of ['weapon', 'armor']) {
+      const equipped = state.gear && state.gear[slot];
+      if (equipped && equipped.name.toLowerCase().includes(itemName.toLowerCase())) {
+        state.gear[slot] = null;
+        deps.recalculateResources(state);
+        return { name: equipped.name, value: computeSellValue(equipped) };
+      }
+    }
+    return null;
+  }
 };
+
+// Parses "take the lantern, the rope and some coins" into item phrases,
+// or null when the input isn't a pickup ("take a swing", "take the quest").
+function parsePickup(input) {
+  const m = String(input || '').trim().match(/^(?:i\s+)?(?:take|pick up|grab|loot|pocket|collect)\s+(.+?)[.!?]*$/i);
+  if (!m) return null;
+  const body = m[1].replace(/\s+(?:from|off of|off|out of)\s+.*$/i, '');
+  if (NON_PICKUP_OBJECTS.test(body)) return null;
+  const phrases = body.split(/\s*,\s*|\s+and\s+/i)
+    .map(p => p.replace(/^(?:a|an|the|some|my|all the|all)\s+/i, '').trim())
+    .filter(p => p.length > 0 && p.length < 50)
+    .filter(p => !/^(bandit|guard|cultist|raider|thug|enemy|corpse|body|it|them|everything|all)$/i.test(p));
+  return phrases.length ? phrases : null;
+}
 
 function formatInspectResult(inspectData) {
   if (!inspectData.available) {
@@ -1179,3 +1013,5 @@ function formatInspectResult(inspectData) {
   lines.push('========================================', '');
   return lines.join('\n');
 }
+
+module.exports.parsePickup = parsePickup;

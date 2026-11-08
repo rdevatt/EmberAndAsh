@@ -11,7 +11,7 @@ require('dotenv').config();
 const express  = require('express');
 const cors     = require('cors');
 const path     = require('path');
-const { v4: uuidv4 } = require('uuid');
+const { randomUUID: uuidv4 } = require('crypto');
 const bcrypt   = require('bcryptjs');
 const { REGIONS } = require('../game/constants');
 // Game modules
@@ -87,10 +87,41 @@ async function persistSession(sessionId) {
   if (!session) return;
 
   if (session.playerId && session.saveSlot) {
-    db.saveGame(session.playerId, session.saveSlot, session.state);
+    const result = db.saveGame(session.playerId, session.saveSlot, session.state);
+    if (result && result.success && result.saveId) session.saveId = result.saveId;
+    db.storePlayerSession(sessionId, session.playerId, session.saveSlot);
   } else {
     db.saveGuestSession(sessionId, session.state);
   }
+}
+
+// Rebuild an in-memory session from the database after a restart or
+// idle eviction. Logged-in sessions map to their account + slot; guests
+// map to their guest_sessions row.
+function restoreSession(sessionId) {
+  const playerSession = db.getPlayerSession(sessionId);
+  if (playerSession) {
+    const save  = db.loadGame(playerSession.player_id, playerSession.slot);
+    const state = save ? save.state : newCreationState();
+    const data  = { state, playerId: playerSession.player_id, saveSlot: playerSession.slot, saveId: save ? save.saveId : null };
+    setSession(sessionId, data);
+    return data;
+  }
+  const guest = db.loadGuestSession(sessionId);
+  if (guest) {
+    const data = { state: guest.state, playerId: null, saveSlot: null, saveId: null };
+    setSession(sessionId, data);
+    return data;
+  }
+  return null;
+}
+
+// A fresh state positioned at the first creation question.
+function newCreationState() {
+  const state = createFreshState();
+  state.creation.phase = 1;
+  state.creationPrompt = buildOpeningPrompt();
+  return state;
 }
 
 // Clean idle sessions from memory every 30 minutes
@@ -102,7 +133,7 @@ setInterval(() => {
       sessions.delete(id);
     }
   }
-}, 30 * 60 * 1000);
+}, 30 * 60 * 1000).unref();
 
 
 // =============================================
@@ -122,8 +153,8 @@ function requireSession(req, res, next) {
   const sessionId = req.headers['x-session-id'];
   if (!sessionId) return res.status(401).json({ error: 'No session ID provided.' });
 
-  const session = getSession(sessionId);
-  if (!session) return res.status(401).json({ error: 'Session not found or expired.' });
+  const session = getSession(sessionId) || restoreSession(sessionId);
+  if (!session) return res.status(401).json({ error: 'Session not found or expired.', code: 'SESSION_EXPIRED' });
 
   req.sessionId = sessionId;
   req.session   = session;
@@ -144,10 +175,17 @@ registerAuthRoutes(app, {
   hashPassword,
   verifyPassword,
   setSession,
-  createFreshState,
+  getSession,
+  persistSession,
+  newCreationState,
   isReady,
   isInCreation,
-  buildOpeningPrompt
+  buildOpeningPrompt,
+  buildCharacterPanelData,
+  buildProgressionPanelData,
+  buildEconomyPanelData,
+  buildRightPanelData,
+  buildBoardDisplayData
 });
 
 registerSaveRoutes(app, {
@@ -155,6 +193,11 @@ registerSaveRoutes(app, {
   requireSession,
   setSession,
   persistSession,
+  newCreationState,
+  isInCreation,
+  buildProgressionPanelData,
+  buildBoardDisplayData,
+  getPlayerLevel,
   createFreshState,
   buildOpeningPrompt,
   buildCharacterPanelData,
@@ -167,6 +210,7 @@ registerSaveRoutes(app, {
 registerQuestRoutes(app, {
   requireSession,
   setSession,
+  persistSession,
   refreshBoard,
   acceptQuest,
   acceptQuestByIndex,
@@ -176,7 +220,8 @@ registerQuestRoutes(app, {
 registerSettingsRoutes(app, {
   db,
   requireSession,
-  setSession
+  setSession,
+  persistSession
 });
 
 registerStateRoutes(app, {
@@ -186,6 +231,7 @@ registerStateRoutes(app, {
   buildProgressionPanelData,
   buildEconomyPanelData,
   buildRightPanelData,
+  buildBoardDisplayData,
   isInCreation,
   isReady
 });
@@ -308,9 +354,16 @@ app.get('/{*path}', (req, res) => {
 // =============================================
 // START SERVER
 // =============================================
-const server = app.listen(PORT, () => {
-  console.log(`[Server] Ember and Ash running on http://localhost:${PORT}`);
-});
+// Exported for tests: start only when run directly (node server.js) or
+// when EMBER_AUTOSTART isn't disabled.
+let server = null;
+function start(port = PORT) {
+  server = app.listen(port, () => {
+    console.log(`[Server] Ember and Ash running on http://localhost:${server.address().port}`);
+  });
+  return server;
+}
+if (process.env.EMBER_NO_AUTOSTART !== '1') start();
 
 
 // =============================================
@@ -325,6 +378,7 @@ async function shutdown() {
   }
   await Promise.all(persistPromises);
   db.closeDatabase();
+  if (!server) process.exit(0);
   server.close(() => {
     console.log('[Server] Closed cleanly.');
     process.exit(0);
@@ -333,3 +387,5 @@ async function shutdown() {
 
 process.on('SIGTERM', shutdown);
 process.on('SIGINT',  shutdown);
+
+module.exports = { app, start, sessions, persistSession };

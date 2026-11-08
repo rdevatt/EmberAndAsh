@@ -25,6 +25,7 @@ const {
   getCompanion,
   changeCompanionLoyalty,
   detectCompanionIntent,
+  applySocialRapport,
   getCompanionsDisplay,
   getLoyaltyLabel
 } = require('./companions');
@@ -166,6 +167,7 @@ function equipWeapon(state, weaponSrc) {
   }
 
   state.gear.weapon = item;
+  recalculateResources(state);
   const stowText = previous ? ` Previous weapon stowed in backpack: ${previous.name}.` : '';
   return { success: true, item, message: `Equipped: ${item.name} (${item.quality}).${stowText}` };
 }
@@ -180,6 +182,7 @@ function equipArmor(state, armorSrc) {
   }
 
   state.gear.armor = item;
+  recalculateResources(state);
   const stowText = previous ? ` Previous armor stowed in backpack: ${previous.name}.` : '';
   return { success: true, item, message: `Equipped: ${item.name} (${item.quality}).${stowText}` };
 }
@@ -190,6 +193,7 @@ function unequipWeapon(state) {
   }
   const item = state.gear.weapon;
   state.gear.weapon = null;
+  recalculateResources(state);
   // Add to inventory
   addItem(state, item);
   return { success: true, item, message: `Unequipped: ${item.name}` };
@@ -201,6 +205,7 @@ function unequipArmor(state) {
   }
   const item = state.gear.armor;
   state.gear.armor = null;
+  recalculateResources(state);
   // Add to inventory
   addItem(state, item);
   return { success: true, item, message: `Unequipped: ${item.name}` };
@@ -294,6 +299,22 @@ function buildProceduralStatMods(itemName, slot, tier, playerLevel) {
   const mods = { [first]: primary };
   if (secondary > 0) mods[second] = secondary;
   return mods;
+}
+
+/**
+ * If equipping this backpack item would beat what's in its slot, returns
+ * { slot, tier } — used to point out upgrades after looting.
+ */
+function describeUpgrade(state, itemName) {
+  const lowered  = String(itemName || '').toLowerCase();
+  const isArmor  = ARMOR_KEYWORDS.some(kw => lowered.includes(kw));
+  const isWeapon = !isArmor && WEAPON_KEYWORDS.some(kw => lowered.includes(kw));
+  if (!isArmor && !isWeapon) return null;
+  const slot    = isArmor ? 'armor' : 'weapon';
+  const tier    = getTierForLevel(getPlayerLevel(state.totalXP || 0));
+  const current = state.gear && state.gear[slot];
+  if (current && (current.tier || 0) >= tier) return null;
+  return { slot, tier };
 }
 
 function classifyEquipSlot(name, explicitType = null) {
@@ -580,6 +601,7 @@ function saveGearAtDeath(state) {
   };
   state.deathLocation = state.character ? state.character.region : null;
   state.gear          = { weapon: null, armor: null };
+  recalculateResources(state);
 
   return true;
 }
@@ -592,7 +614,24 @@ function recoverGear(state) {
     };
   }
 
-  state.gear          = { weapon: state.savedGear.weapon, armor: state.savedGear.armor };
+  const here = state.character ? state.character.region : null;
+  if (here !== state.deathLocation) {
+    const where = REGIONS[state.deathLocation] ? REGIONS[state.deathLocation].label : state.deathLocation;
+    return {
+      success: false,
+      message: `Your gear lies where you fell, in ${where}. Travel there to recover it.`
+    };
+  }
+
+  // Anything picked up since death goes to the backpack rather than vanishing.
+  if (state.gear && state.gear.weapon && state.savedGear.weapon) addItem(state, state.gear.weapon);
+  if (state.gear && state.gear.armor  && state.savedGear.armor)  addItem(state, state.gear.armor);
+
+  state.gear          = {
+    weapon: state.savedGear.weapon || (state.gear && state.gear.weapon) || null,
+    armor:  state.savedGear.armor  || (state.gear && state.gear.armor)  || null
+  };
+  recalculateResources(state);
   state.savedGear     = null;
   state.deathLocation = null;
 
@@ -709,6 +748,16 @@ function checkShopCustomerEvent(state) {
 // Returns { available, reason, nsfwFull }
 // =============================================
 function checkIntimacyAvailable(state, npcKey) {
+  // Never available for a character under 18 — no fade-to-black either.
+  const age = state.character && state.character.age;
+  if (!age || age < 18) {
+    return {
+      available: false,
+      reason:    'underage',
+      hint:      '[No romantic or intimate content is possible for this character. Redirect the scene naturally.]'
+    };
+  }
+
   // Player must have opted in
   if (!state.nsfwEnabled) {
     return {
@@ -876,6 +925,7 @@ module.exports = {
   getAvailableGearTiers,
 
   // Equipment detection
+  describeUpgrade,
   detectEquipIntent,
   processEquipCommand,
 
@@ -885,6 +935,7 @@ module.exports = {
   getCompanion,
   changeCompanionLoyalty,
   detectCompanionIntent,
+  applySocialRapport,
   getCompanionsDisplay,
   getLoyaltyLabel,
 

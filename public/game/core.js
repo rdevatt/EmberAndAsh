@@ -164,6 +164,8 @@ const el = {
 // =============================================
 // API HELPERS
 // =============================================
+let sessionRecoveryInProgress = false;
+
 async function apiCall(method, path, body = null) {
   const opts = {
     method,
@@ -176,9 +178,36 @@ async function apiCall(method, path, body = null) {
 
   if (body) opts.body = JSON.stringify(body);
 
-  const res  = await fetch(`/api${path}`, opts);
-  const data = await res.json();
+  let res;
+  try {
+    res = await fetch(`/api${path}`, opts);
+  } catch (err) {
+    // Network failure — never leave the UI locked.
+    return { ok: false, status: 0, data: { error: 'Cannot reach the server. Check that it is running, then try again.' } };
+  }
+
+  let data;
+  try {
+    data = await res.json();
+  } catch (err) {
+    data = { error: `Unexpected server response (${res.status}).` };
+  }
+
+  // The server restores sessions from the database, so a 401 means the
+  // session is truly gone (e.g. an expired guest). Start over cleanly.
+  if (res.status === 401 && data && data.code === 'SESSION_EXPIRED' && !path.startsWith('/auth')) {
+    handleSessionExpired();
+  }
+
   return { ok: res.ok, status: res.status, data };
+}
+
+function handleSessionExpired() {
+  if (sessionRecoveryInProgress) return;
+  sessionRecoveryInProgress = true;
+  localStorage.removeItem('sessionId');
+  showToast('Your session expired — reconnecting…');
+  setTimeout(() => window.location.reload(), 1200);
 }
 
 function normalizeLikelyCommandInput(rawInput) {
@@ -186,99 +215,102 @@ function normalizeLikelyCommandInput(rawInput) {
   if (!input) return '';
 
   const lower = input.toLowerCase();
-  const commandLike = /^(equip|unequip|take|loot|search|show|inspect|examine|drop|discard|remove|sell|set companion|add companion|companions|party|backpack|gear|inventory|check board|accept quest|rest|long rest|status|check stats|open shop|close shop|recover gear|retrieve gear)\b/.test(lower);
+  const commandLike = /^(equip|unequip|take|loot|search|show|inspect|examine|drop|discard|remove|sell|set companion|add companion|companions|party|backpack|gear|inventory|check board|accept quest|abandon quest|quests|journal|map|travel to|help|rest|long rest|make camp|status|check stats|open shop|close shop|shop|buy|drink potion|recover gear|retrieve gear)\b/.test(lower);
 
   return commandLike ? input.replace(/[.!?]+$/g, '').trim() : input;
 }
 
+// Applies every panel payload present in a server response.
+function applyPanels(data) {
+  if (!data) return;
+  try {
+    if (data.character)   updateCharacterPanel(data.character);
+    if (data.progression) updateProgressionPanel(data.progression);
+    if (data.economy)     updateEconomyPanel(data.economy);
+    if (data.rightPanel)  updateRightPanel(data.rightPanel);
+    if (data.board)       updateBoardPanel(data.board);
+  } catch (e) {
+    console.warn('[UI] Panel update error (non-fatal):', e);
+  }
+}
+
+function showGameUI() {
+  client.inCreation = false;
+  el.creationWizard.classList.add('hidden');
+  el.inputArea.classList.remove('hidden');
+  el.playerInput.focus();
+}
+
+// Puts the client into the right mode for a session payload
+// (from /state, /auth/*, or /saves/load).
+async function enterSession(data, welcome) {
+  applyPanels(data);
+  if (data.inCreation) {
+    client.inCreation = true;
+    if (welcome) appendSystemMessage(welcome);
+    if (!data.creationPhase || data.creationPhase <= 1) {
+      appendStory(null, data.output || OPENING_PROMPT_FALLBACK, true);
+    }
+    await cwResume(data.creationPhase || 1);
+  } else {
+    const hadHistory = !welcome && loadStoryHistoryFromLocal();
+    if (!hadHistory) {
+      const summary = data.storySummary ? `\n\n— Your story so far —\n\n${data.storySummary}\n\n— — —` : '';
+      appendSystemMessage((welcome || 'Your story continues...') + summary);
+    }
+    showGameUI();
+  }
+}
+
+const OPENING_PROMPT_FALLBACK = 'Before this story goes further — who are you?';
+
 
 // =============================================
 // SESSION INIT
+// Order: resume the stored session (the server restores it from the
+// database even after a restart) → remember-me auto-login → new guest.
 // =============================================
 async function initSession() {
-  // --- Auto-login via remember-me token ---
+  if (client.sessionId) {
+    const { ok, data } = await apiCall('GET', '/state');
+    if (ok && data.success) {
+      client.isLoggedIn = !!data.isLoggedIn;
+      updateAuthUI();
+      await enterSession(data, null);
+      return;
+    }
+  }
+
   const rememberToken = localStorage.getItem('rememberToken');
   if (rememberToken) {
     const { ok, data } = await apiCall('POST', '/auth/auto-login', { rememberToken });
     if (ok && data.success) {
-      client.sessionId = data.sessionId;
+      client.sessionId  = data.sessionId;
       client.isLoggedIn = true;
       client.username   = data.username;
       localStorage.setItem('sessionId', data.sessionId);
-      localStorage.setItem('rememberToken', data.rememberToken); // rolling refresh
+      if (data.rememberToken) localStorage.setItem('rememberToken', data.rememberToken);
+      localStorage.removeItem('storyHistory');
       updateAuthUI();
-
-      if (data.hasCharacter) {
-        client.inCreation = false;
-        await refreshPanels();
-        const resumeMsg = data.storySummary
-          ? `Welcome back, ${data.username}.\n\n— Your story so far —\n\n${data.storySummary}\n\n— — —`
-          : `Welcome back, ${data.username}. Your story continues...`;
-        appendStory(null, resumeMsg, false);
-        el.creationWizard.classList.add('hidden');
-        el.inputArea.classList.remove('hidden');
-        el.playerInput.focus();
-      } else {
-        appendStory(null, `Welcome back, ${data.username}.`, false);
-        cwInit();
-      }
+      if (el.toggleNsfw) el.toggleNsfw.checked = !!data.nsfwEnabled;
+      await enterSession(data, `Welcome back, ${data.username}.`);
       return;
-    } else {
-      // Token expired — clear it
-      localStorage.removeItem('rememberToken');
     }
+    localStorage.removeItem('rememberToken');
   }
 
-  // --- Try to resume existing guest session ---
-  const { ok, data } = await apiCall('POST', '/auth/guest', {
-    sessionId: client.sessionId
-  });
-
+  const { ok, data } = await apiCall('POST', '/auth/guest', {});
   if (!ok) {
-    appendStory(null, 'Failed to connect to server. Please refresh.', false);
-    el.creationWizard.classList.add('hidden');
-    el.inputArea.classList.remove('hidden');
+    appendSystemMessage(data.error || 'Failed to connect to server. Please refresh.');
     return;
   }
 
   client.sessionId = data.sessionId;
+  client.isLoggedIn = false;
   localStorage.setItem('sessionId', data.sessionId);
-
-  if (data.resumed) {
-    // Session exists — check whether character creation is actually done
-    if (data.isReady && !data.inCreation) {
-      // Fully created character — jump straight into the game
-      client.inCreation = false;
-      await refreshPanels();
-      // Try to restore the last session's story from local cache
-      const hadHistory = loadStoryHistoryFromLocal();
-      if (!hadHistory) {
-        const resumeMsg = data.storySummary
-          ? `— Your story so far —\n\n${data.storySummary}\n\n— — —`
-          : 'Your story continues...';
-        appendStory(null, resumeMsg, false);
-      }
-      el.creationWizard.classList.add('hidden');
-      el.inputArea.classList.remove('hidden');
-      el.playerInput.focus();
-    } else {
-      // Session found but creation never finished (stale/crashed session).
-      // Drop the old session and start fresh.
-      localStorage.removeItem('sessionId');
-      client.sessionId = null;
-      const { ok: ok2, data: data2 } = await apiCall('POST', '/auth/guest', {});
-      if (ok2) {
-        client.sessionId = data2.sessionId;
-        localStorage.setItem('sessionId', data2.sessionId);
-        appendStory(null, data2.output || '', true);
-        cwInit();
-      }
-    }
-  } else {
-    // Brand new session — show the opening narrative then launch wizard
-    appendStory(null, data.output || '', true);
-    cwInit();
-  }
+  localStorage.removeItem('storyHistory');
+  updateAuthUI();
+  await enterSession(data, null);
 }
 
 
@@ -310,81 +342,35 @@ async function submitAction() {
   // Show player input in story
   appendPlayerAction(input);
 
-  // --- Crafted gear commands ---
-  const lInput = input.toLowerCase().trim();
-  if (lInput.startsWith('equip ')) {
-    const itemName = input.slice(6).trim();
-    const { ok, data } = await apiCall('POST', '/game/equip-crafted', { itemName });
+  try {
+    await _doNormalAction(input);
+  } finally {
     setLoading(false);
-    if (ok && data.success) {
-      if (data.character) updateCharacterPanel(data.character);
-      if (data.economy)   updateEconomyPanel(data.economy);
-      appendStory(null, data.message, false);
-    } else if (ok) {
-      // Not a crafted item — let it fall through as normal action
-      await _doNormalAction(input);
-    }
-    return;
   }
-
-  if (lInput.startsWith('sell ')) {
-    const itemName = input.slice(5).trim();
-    const { ok, data } = await apiCall('POST', '/game/sell-crafted', { itemName });
-    setLoading(false);
-    if (ok && data.success) {
-      if (data.economy)   updateEconomyPanel(data.economy);
-      appendStory(null, data.message, false);
-    } else if (ok) {
-      // Not a crafted item — pass through as normal action
-      await _doNormalAction(input);
-    }
-    return;
-  }
-
-  await _doNormalAction(input);
 }
 
 async function _doNormalAction(input) {
   const { ok, data } = await apiCall('POST', '/action', { input });
 
-  setLoading(false);
-
   if (!ok) {
-    appendStory(null, data.error || 'Something went wrong.', false);
+    appendSystemMessage(data.error || 'Something went wrong.');
     return;
   }
 
-  // Handle command responses (stats/gear panels — no narrative output)
+  applyPanels(data);
+
+  // Instant command responses: shown without retry/edit buttons.
   if (data.isCommand) {
-    if (data.commandType === 'stats' && data.character) {
-      updateCharacterPanel(data.character);
-      appendStory(null, '[Character sheet updated in the left panel.]', false);
-    } else if (data.commandType === 'gear' && data.economy) {
-      updateEconomyPanel(data.economy);
-      appendStory(null, data.output || '[Gear updated in the left panel.]', false);
-    } else if (data.commandType === 'freePoint') {
-      appendStory(null, data.output, false);
-      if (data.character) updateCharacterPanel(data.character);
-    } else if (data.output) {
-      appendStory(null, data.output, false);
+    if (data.output) {
+      appendCommandOutput(input, data.output);
+    } else if (data.commandType === 'stats') {
+      appendCommandOutput(input, '[Character sheet updated in the left panel.]');
     }
     return;
   }
 
-  // Normal action response
-  if (data.output) {
-    const isCreation = data.inCreation !== false && client.inCreation;
-    appendStory(null, data.output, isCreation);
-  }
-
-  client.inCreation = data.inCreation || false;
-
-  // Update all panels
-  if (data.character)   updateCharacterPanel(data.character);
-  if (data.progression) updateProgressionPanel(data.progression);
-  if (data.economy)     updateEconomyPanel(data.economy);
-  if (data.rightPanel)  updateRightPanel(data.rightPanel);
-  if (data.board)       updateBoardPanel(data.board);
+  if (data.output) appendStory(input, data.output, false);
+  client.inCreation = !!data.inCreation;
 }
 
 
@@ -397,13 +383,11 @@ async function retryNarrative(entryToReplace, playerInputEntry) {
   if (!client.lastInput || client.isLoading) return;
 
   setLoading(true);
-
   const { ok, data } = await apiCall('POST', '/retry-narrative', {});
-
   setLoading(false);
 
   if (!ok) {
-    appendStory(null, data.error || 'Failed to regenerate.', false);
+    appendSystemMessage(data.error || 'Failed to regenerate.');
     return;
   }
 
@@ -422,11 +406,7 @@ async function retryNarrative(entryToReplace, playerInputEntry) {
     attachStoryEntryButtons(entryToReplace, playerInputEntry);
   }
 
-  if (data.character)   updateCharacterPanel(data.character);
-  if (data.progression) updateProgressionPanel(data.progression);
-  if (data.economy)     updateEconomyPanel(data.economy);
-  if (data.rightPanel)  updateRightPanel(data.rightPanel);
-  if (data.board)       updateBoardPanel(data.board);
+  applyPanels(data);
 }
 
 
@@ -445,7 +425,7 @@ async function undoLastAction(aiEntry, playerInputEntry) {
   setLoading(false);
 
   if (!ok) {
-    appendStory(null, data.error || 'Failed to undo.', false);
+    appendSystemMessage(data.error || 'Failed to undo.');
     return;
   }
 
@@ -463,12 +443,10 @@ async function undoLastAction(aiEntry, playerInputEntry) {
   client.lastAIEntry = null;
   client.canUndo = false;
 
+  popLastLocalStoryEntry();
+
   // Update all panels to reflect restored state
-  if (data.character)   updateCharacterPanel(data.character);
-  if (data.progression) updateProgressionPanel(data.progression);
-  if (data.economy)     updateEconomyPanel(data.economy);
-  if (data.rightPanel)  updateRightPanel(data.rightPanel);
-  if (data.board)       updateBoardPanel(data.board);
+  applyPanels(data);
 
   // Show confirmation
   showToast('Action undone — try something different.');
@@ -530,46 +508,30 @@ async function submitEditedAction(newInput) {
   if (!normalizedInput) return;
 
   setLoading(true);
-
   const { ok, data } = await apiCall('POST', '/edit-action', { input: normalizedInput });
-
   setLoading(false);
-  
-  // Exit edit mode
-  client.isEditing = false;
-  el.btnSubmit.textContent = 'Send';
-  el.btnSubmit.classList.remove('edit-mode');
-  const cancelBtn = document.getElementById('btn-cancel-edit');
-  if (cancelBtn) cancelBtn.classList.add('hidden');
+
+  cancelEdit();
 
   if (!ok) {
-    appendStory(null, data.error || 'Failed to process edit.', false);
+    appendSystemMessage(data.error || 'Failed to process edit.');
     return;
   }
 
-  // Remove the old AI response entry
+  // Replace the old exchange with the new one.
   if (client.lastAIEntry && client.lastAIEntry.parentNode) {
     client.lastAIEntry.parentNode.removeChild(client.lastAIEntry);
   }
-
-  // Update the player input entry with new text
+  popLastLocalStoryEntry();
   if (client.editPlayerEntry) {
     client.editPlayerEntry.querySelector('.player-action').textContent = '> ' + normalizedInput;
+    client.lastPlayerEntry = client.editPlayerEntry;
   }
-
-  // Track new input
+  client.editPlayerEntry = null;
   client.lastInput = normalizedInput;
 
-  // Append new AI response
-  if (data.output) {
-    appendStory(normalizedInput, data.output, false, true); // skipSave since we're replacing
-  }
-
-  if (data.character)   updateCharacterPanel(data.character);
-  if (data.progression) updateProgressionPanel(data.progression);
-  if (data.economy)     updateEconomyPanel(data.economy);
-  if (data.rightPanel)  updateRightPanel(data.rightPanel);
-  if (data.board)       updateBoardPanel(data.board);
+  if (data.output) appendStory(normalizedInput, data.output, false);
+  applyPanels(data);
 }
 
 

@@ -3,8 +3,16 @@
 function updateAuthUI() {
   if (!el.authStatus) return;
   el.authStatus.textContent = client.isLoggedIn
-    ? `Logged in as ${client.username}`
+    ? `Logged in${client.username ? ' as ' + client.username : ''}`
     : 'Guest session';
+  const logoutForm = document.getElementById('form-logout');
+  if (logoutForm) logoutForm.classList.toggle('hidden', !client.isLoggedIn);
+  if (client.isLoggedIn) {
+    el.formLogin.classList.add('hidden');
+    el.formRegister.classList.add('hidden');
+  } else if (el.formRegister.classList.contains('hidden')) {
+    el.formLogin.classList.remove('hidden');
+  }
 }
 
 function showToast(message) {
@@ -26,9 +34,18 @@ function updateCharacterPanel(c) {
     el.charLevel.textContent = `Level ${c.level}`;
   }
   if (c.background) el.charBackground.textContent = c.background;
+  const nameEl = document.getElementById('char-name');
+  if (nameEl) {
+    nameEl.textContent = c.name || '';
+    nameEl.classList.toggle('hidden', !c.name);
+  }
   if (c.description) {
     el.charDescription.textContent = c.description;
     el.charDescription.classList.remove('hidden');
+  }
+  if (c.totalXP !== undefined && el.xpDisplay) {
+    const xpNext = c.xpToNext !== null && c.xpToNext !== undefined ? ` (+${c.xpToNext} to next)` : ' (MAX)';
+    el.xpDisplay.textContent = `XP: ${c.totalXP}${xpNext}`;
   }
 
   if (c.hp !== undefined && c.maxHp) {
@@ -67,13 +84,11 @@ function updateCharacterPanel(c) {
 function updateProgressionPanel(p) {
   if (!p) return;
 
-  if (p.totalXP !== undefined) {
-    const xpNext = p.xpToNext !== null ? ` (+${p.xpToNext} to next)` : ' (MAX)';
-    el.xpDisplay.textContent = `XP: ${p.totalXP}${xpNext}`;
-  }
-
   if (p.className) {
     el.classDisplay.textContent = `${p.className} Lv${p.classLevel || 1}`;
+    el.classDisplay.classList.remove('dim');
+  } else if (p.pendingClassOffer) {
+    el.classDisplay.textContent = `Offer: ${p.pendingClassOffer.label} — type "yes" or "no"`;
     el.classDisplay.classList.remove('dim');
   } else {
     el.classDisplay.textContent = 'No class yet';
@@ -82,6 +97,9 @@ function updateProgressionPanel(p) {
 
   if (p.professionName) {
     el.profDisplay.textContent = `${p.professionRank || p.professionName} Lv${p.professionLevel || 1}`;
+    el.profDisplay.classList.remove('dim');
+  } else if (p.pendingProfOffer) {
+    el.profDisplay.textContent = `Offer: ${p.pendingProfOffer.label} — type "yes" or "no"`;
     el.profDisplay.classList.remove('dim');
   } else {
     el.profDisplay.textContent = 'No profession yet';
@@ -229,54 +247,73 @@ function updateBoardPanel(board) {
   const section    = document.getElementById('section-board');
   const label      = document.getElementById('board-label');
   const boardList  = document.getElementById('board-quests-list');
+  const boardWrap  = document.getElementById('board-quests-wrap');
   const activeList = document.getElementById('active-quests-list');
   const activeWrap = document.getElementById('active-quests-wrap');
   if (!section || !boardList || !activeList) return;
 
-  if (!board.available) { section.classList.add('hidden'); return; }
+  const hasActive = board.activeQuests && board.activeQuests.length > 0;
+  if (!board.available && !hasActive) { section.classList.add('hidden'); return; }
   section.classList.remove('hidden');
 
-  if (label && board.boardLabel) label.textContent = board.boardLabel.toUpperCase();
+  if (label) label.textContent = board.available && board.boardLabel ? board.boardLabel.toUpperCase() : 'QUESTS';
+  if (boardWrap) boardWrap.classList.toggle('hidden', !board.available);
 
   boardList.innerHTML = '';
   (board.quests || []).forEach(q => {
     const row = document.createElement('div');
     row.className = 'quest-row';
     row.innerHTML = `
-      <div class="quest-label ${q.isAdvance ? 'advance-quest' : ''}">[${q.index}] ${q.label}</div>
-      <div class="quest-giver dim">${q.giver} — <span class="quest-difficulty-${q.difficulty || 'normal'}">${(q.difficulty||'normal').toUpperCase()}</span></div>
-      <div class="quest-reward">${q.coinDisplay} + XP</div>`;
+      <div class="quest-label ${q.isAdvance ? 'advance-quest' : ''}">[${q.index}] ${escapeHtml(q.label)}</div>
+      <div class="quest-giver dim">${escapeHtml(q.giver || '')} — <span class="quest-difficulty-${escapeHtml(q.difficulty || 'normal')}">${escapeHtml((q.difficulty || 'normal').toUpperCase())}</span></div>
+      <div class="quest-reward">${escapeHtml(q.coinDisplay)} + XP</div>`;
+    const btn = document.createElement('button');
+    btn.className = 'story-btn quest-action-btn';
+    btn.textContent = 'Accept';
+    btn.title = q.desc || '';
+    btn.addEventListener('click', () => runCommand(`accept quest ${q.index}`));
+    row.appendChild(btn);
     boardList.appendChild(row);
   });
 
-  if (!board.activeQuests || board.activeQuests.length === 0) {
+  if (!hasActive) {
     activeWrap.classList.add('hidden');
   } else {
     activeWrap.classList.remove('hidden');
     activeList.innerHTML = '';
-    board.activeQuests.forEach(q => {
+    board.activeQuests.forEach((q, i) => {
       const row = document.createElement('div');
       row.className = 'active-quest-row';
       const pct = q.targetCount > 1 ? Math.round((q.progress / q.targetCount) * 100) : (q.isComplete ? 100 : 0);
       const progressHtml = q.targetCount > 1
         ? `<div class="quest-progress-bar"><div class="quest-progress-fill" style="width:${pct}%"></div></div><div class="active-quest-progress">${q.progress}/${q.targetCount}</div>`
-        : q.isComplete ? `<div class="quest-complete-indicator">✓ READY TO COMPLETE</div>` : '';
-      row.innerHTML = `<div class="active-quest-label">${q.label}</div>${progressHtml}<div class="active-quest-progress">${q.coinDisplay}</div>`;
+        : '';
+      const statusHtml = q.status ? `<div class="dim small">${escapeHtml(q.status)}</div>` : '';
+      row.innerHTML = `<div class="active-quest-label">${escapeHtml(q.label)}</div>${progressHtml}${statusHtml}<div class="active-quest-progress">${escapeHtml(q.coinDisplay)}</div>`;
+      const btn = document.createElement('button');
+      btn.className = 'story-btn quest-action-btn';
+      btn.textContent = 'Abandon';
+      btn.addEventListener('click', () => {
+        if (confirm(`Abandon "${q.label}"?`)) runCommand(`abandon quest ${i + 1}`);
+      });
+      row.appendChild(btn);
       activeList.appendChild(row);
     });
   }
 }
 
+// Submits a command as if the player had typed it.
+function runCommand(text) {
+  if (client.inCreation || client.isLoading) return;
+  el.playerInput.value = text;
+  updateCharCount();
+  submitAction();
+}
+
 async function refreshPanels() {
   const { ok, data } = await apiCall('GET', '/state');
   if (!ok) return;
-
-  if (data.character)   updateCharacterPanel(data.character);
-  if (data.progression) updateProgressionPanel(data.progression);
-  if (data.economy)     updateEconomyPanel(data.economy);
-  if (data.rightPanel)  updateRightPanel(data.rightPanel);
-  if (data.board)       updateBoardPanel(data.board);
-
+  applyPanels(data);
   client.inCreation = data.inCreation || false;
 }
 
@@ -295,19 +332,61 @@ function appendPlayerAction(text, isHistory = false) {
 
 const MAX_LOCAL_HISTORY = 30;
 
+// Local story cache is tied to the session that wrote it.
 function saveStoryEntryLocally(playerAction, text) {
   if (!text) return;
   try {
     const history = JSON.parse(localStorage.getItem('storyHistory') || '[]');
-    history.push({ playerAction, text, ts: Date.now() });
+    history.push({ playerAction, text, ts: Date.now(), sid: client.sessionId });
     while (history.length > MAX_LOCAL_HISTORY) history.shift();
     localStorage.setItem('storyHistory', JSON.stringify(history));
   } catch (e) { }
 }
 
-function loadStoryHistoryFromLocal() {
+function popLastLocalStoryEntry() {
   try {
     const history = JSON.parse(localStorage.getItem('storyHistory') || '[]');
+    history.pop();
+    localStorage.setItem('storyHistory', JSON.stringify(history));
+  } catch (e) { }
+}
+
+// Non-story messages (welcome, errors): no buttons, not cached.
+function appendSystemMessage(text) {
+  if (!text) return null;
+  const entry = document.createElement('div');
+  entry.className = 'story-entry system-entry';
+  entry.innerHTML = `<div class="announcement">${escapeHtml(text)}</div>`;
+  el.storyContent.appendChild(entry);
+  afterStoryAppend();
+  return entry;
+}
+
+// Instant command results: cached for reload, but no retry/edit buttons.
+function appendCommandOutput(playerAction, text) {
+  if (!text) return null;
+  // The server's "last action" is now this command, so earlier
+  // retry/edit/undo buttons would act on the wrong exchange.
+  el.storyContent.querySelectorAll('.story-entry-buttons').forEach(b => b.remove());
+  client.lastAIEntry = null;
+  saveStoryEntryLocally(playerAction, text);
+  const entry = document.createElement('div');
+  entry.className = 'story-entry command-entry';
+  entry.innerHTML = `<div class="announcement command-output">${escapeHtml(text)}</div>`;
+  el.storyContent.appendChild(entry);
+  afterStoryAppend();
+  return entry;
+}
+
+function afterStoryAppend() {
+  scrollToBottom();
+  if (window.innerWidth <= 768 && typeof setMobilePanel === 'function') setMobilePanel('center');
+}
+
+function loadStoryHistoryFromLocal() {
+  try {
+    const history = JSON.parse(localStorage.getItem('storyHistory') || '[]')
+      .filter(h => !h.sid || h.sid === client.sessionId);
     if (!history.length) return false;
 
     const divider = document.createElement('div');
@@ -354,7 +433,9 @@ function appendStory(playerAction, text, isCreation = false, skipSave = false) {
 
   entry.innerHTML = html;
 
-  if (!isCreation && parts.narrative && !skipSave) {
+  if (!isCreation && (parts.narrative || parts.announcements) && !skipSave) {
+    // Retry / edit / undo only ever apply to the latest action.
+    el.storyContent.querySelectorAll('.story-entry-buttons').forEach(b => b.remove());
     const playerInputEntry = client.lastPlayerEntry;
     attachStoryEntryButtons(entry, playerInputEntry);
     client.lastAIEntry = entry;
@@ -362,6 +443,7 @@ function appendStory(playerAction, text, isCreation = false, skipSave = false) {
   }
 
   el.storyContent.appendChild(entry);
+  afterStoryAppend();
 
   return entry;
 }
@@ -451,9 +533,11 @@ async function handleLogin() {
     return;
   }
 
+  setLoading(true);
   const { ok, data } = await apiCall('POST', '/auth/login', {
     username, password, sessionId: client.sessionId, rememberMe
   });
+  setLoading(false);
 
   if (!ok) {
     showAuthError(data.error || 'Login failed.');
@@ -464,15 +548,37 @@ async function handleLogin() {
   client.isLoggedIn = true;
   client.username   = data.username;
   localStorage.setItem('sessionId', data.sessionId);
+  if (data.rememberToken) localStorage.setItem('rememberToken', data.rememberToken);
 
-  if (data.rememberToken) {
-    localStorage.setItem('rememberToken', data.rememberToken);
-  }
-
-  el.authStatus.textContent = `Logged in as ${data.username}`;
-  el.toggleNsfw.checked     = !!data.nsfwEnabled;
+  el.toggleNsfw.checked = !!data.nsfwEnabled;
+  el.inputPassword.value = '';
   clearAuthErrors();
+  updateAuthUI();
   closeSettings();
+
+  // Switch the screen to the account's game.
+  const keepStory = data.carriedGuest;
+  if (!keepStory) {
+    el.storyContent.innerHTML = '';
+    localStorage.removeItem('storyHistory');
+  }
+  const welcome = data.carriedGuest
+    ? `Logged in as ${data.username}. Your character is now saved to slot ${data.saveSlot}.`
+    : `Welcome, ${data.username}.`;
+  if (keepStory) {
+    appendSystemMessage(welcome);
+    applyPanels(data);
+  } else {
+    await enterSession(data, welcome);
+  }
+}
+
+async function handleLogout() {
+  await apiCall('POST', '/auth/logout', { rememberToken: localStorage.getItem('rememberToken') });
+  localStorage.removeItem('rememberToken');
+  localStorage.removeItem('sessionId');
+  localStorage.removeItem('storyHistory');
+  window.location.reload();
 }
 
 async function handleRegister() {
@@ -503,23 +609,26 @@ async function handleRegister() {
 
 async function handleNsfwToggle() {
   const enabled = el.toggleNsfw.checked;
-
-  await apiCall('POST', '/settings/nsfw', { enabled });
-
-  appendStory(null, enabled
-    ? '[Adult content enabled.]'
-    : '[Adult content disabled.]',
-  false);
+  const { ok, data } = await apiCall('POST', '/settings/nsfw', { enabled });
+  if (!ok) {
+    el.toggleNsfw.checked = !enabled;
+    appendSystemMessage(`[${data.error || 'Could not change the setting.'}]`);
+    return;
+  }
+  appendSystemMessage(enabled ? '[Adult content enabled.]' : '[Adult content disabled.]');
 }
 
 async function handleSave() {
   if (!client.isLoggedIn) {
+    showToast('Guest progress saves automatically. Log in to use save slots.');
     openSettings();
     return;
   }
-  const { ok } = await apiCall('POST', '/saves/save');
+  const { ok, data } = await apiCall('POST', '/saves/save');
   if (ok) {
     el.btnSave.textContent = 'SAVED';
     setTimeout(() => { el.btnSave.textContent = 'SAVE'; }, 1500);
+  } else {
+    showToast(data.error || 'Save failed.');
   }
 }
