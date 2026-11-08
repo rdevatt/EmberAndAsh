@@ -307,3 +307,38 @@ test('scene events match engine results: misses are misses, the dead stay dead',
   assert.ok(Art.scene(scene).includes('ea-dead'));
   assert.ok(['farmland', 'plains', 'city'].includes(scene.biome));
 });
+
+// ---------------- dominion & legend agency ----------------
+test('eras redraw the map; strong powers push borders; legends act on their own', () => {
+  const { s, w } = hero(95, 'shattered_throne');
+  chronicle.ensureDominion(w);
+  assert.equal(chronicle.dominionOf(w, 'pale_city'), 'choir', 'the Choir holds the white city at first');
+  s.campaign = { flags: { emberTaken: true }, choices: { 10: 'Take the Throne' }, completed: [], startRegion: 'thornwick' };
+  chronicle.applyEnding(w, s, 'ascend');
+  assert.equal(chronicle.dominionOf(w, 'the_crucible'), 'choir', 'the Dominion holds the inner ring');
+  const held0 = Object.values(w.dominion).filter(x => x === 'choir').length;
+  const newcomer = hero(1).s; chronicle.attachWorld(newcomer, w); newcomer.characterId = 'c_new';
+  chronicle.advanceTime(newcomer, 20 * 360 * 24);
+  const held1 = Object.values(w.dominion).filter(x => x === 'choir').length;
+  assert.ok(held1 > held0, `the Sovereign's realm grows (${held0} → ${held1} regions)`);
+  assert.ok(w.history.some(e => e.type === 'dominion' && e.actor && e.actor.name === 'Aldren'), 'the ruling legend annexes land in their own name');
+  const years = new Set(w.history.filter(e => e.type === 'dominion').map(e => e.date.split(' (')[0].split(', ')[1]));
+  assert.ok(years.size > 5, 'events over twenty years carry their own dates');
+});
+
+test('era effects reach play: hazards, prices and mana', () => {
+  const a = hero(35, 'coldsnap_pass');
+  const harsh = hero(35, 'coldsnap_pass');
+  chronicle.applyEnding(harsh.w, { ...harsh.s, character: harsh.s.character, campaign: { flags: {}, choices: {} } }, 'ascend');
+  const world = require('../game/world');
+  const d0 = world.applyHazard(a.s).damage;
+  const d1 = world.applyHazard(harsh.s).damage;
+  assert.ok(d1 > d0, 'the dark age makes hazards worse');
+  const mage = hero(30);
+  mage.s.combatClass = 'wizard'; mage.s.classLevel = 1; mage.s.mana = 1000; mage.s.maxMana = 1000;
+  chronicle.applyEnding(mage.w, { ...mage.s, character: mage.s.character, campaign: { flags: {}, choices: {} } }, 'shatter');
+  const T = require('../game/combat-tactics');
+  const firebolt = T.getKnownAbilities(mage.s).find(x => x.id === 'firebolt');
+  T.payAbilityCost(mage.s, firebolt);
+  assert.equal(mage.s.mana, 1000 - Math.ceil(12 * 1.25), 'magic costs more in the Ordinary Age');
+});

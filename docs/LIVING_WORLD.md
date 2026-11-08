@@ -15,12 +15,13 @@ Status key:
 
 | Check | Result |
 | --- | --- |
-| `npm test` (isolated temp DB, offline narration) | **89 / 89 pass** (68 earlier + 21 new) |
+| `npm test` (isolated temp DB, offline narration) | **91 / 91 pass** (68 earlier + 23 new), stable over 5 consecutive runs |
 | `scripts/ui-playtest.js`: desktop, reduced motion, mobile 390×844 | **44 / 44** checks, no console errors |
 | Full campaign regression (`scripts/playthrough.js`) | Completes: The Long Fire, level 96, 0 server errors |
 | Postgame hero, ranger, Ascend ending (`--postgame 1500`) | Level 96 → 132 in 1,530 actions; 26 rift depths, 8 sagas, 4 crises won, 2 deaths |
 | Postgame hero, fighter, Wardens ending (`--postgame 2500`) | Level 96 → 124 in 2,500 actions; no death spiral after the fix below |
 | New generation in the same world (`--generation 800`) | Level 1 → 19 in 851 actions, 6 deaths, 3 sagas; inherited campaign; the legend appears in "legends" and in townsfolk's rumours |
+| Wizard, Remnant ending, seed 9 (`--postgame 800 --generation 500`) | Ending reached; hero 96 → 125 in 833 actions (4 deaths, 18 rift depths); newcomer level 19 in 510 actions (3 deaths) |
 
 ### Fixes made because of these runs
 
@@ -33,6 +34,9 @@ Status key:
   - *Found:* an inherited-world newcomer only reached level 2–6 in about 1,000 actions.
   - *Now:* they get a "First Steps" starter saga (+350 XP, like Chapter 1).
   - *Also:* low-level sagas are gentler, sagas open at level 3, and level-1–4 characters don't meet foes 2 levels above them.
+- **Long time skips stamped every event with the final date.** As a side effect, each legend's yearly decision reused the same roll every year.
+  - *Found by:* a flaky test.
+  - *Now:* the clock steps month by month through any skip.
 - **"New Game" discarded the current character.**
   - *Now:* it archives the character first.
 
@@ -140,6 +144,21 @@ Status key:
   - `prefers-reduced-motion` (tested) or the "Still" button shows the final state without animation; "Hide art" turns illustrations off. The scene sits above the story on mobile (tested at 390 px).
 - **Not done:** no external image-generation provider is wired in. The game never needs one; an optional provider interface is future work.
 
+## 9b. Dominion and legends who act — **Done + tested**
+
+- **The dominion map:** each region is held by a power (Ember Wardens, Free Compact, Veldrathi Remnant, Ashen Choir, or no one).
+  - Each ending redraws the map for the victors.
+  - Every year, a power above 70 strength pushes into a weaker neighbour. Regions ruined by ignored crises can fall to the Choir, the Compact or lawlessness.
+  - The `map` shows who holds each road, and merchants charge allies of the local power 10% less and its enemies 25% more.
+- **Legends act on their own,** about every other year, according to their role and personality:
+  - ruling legends annex neighbouring regions in their own name;
+  - dutiful legends and patrons ride out to end crises;
+  - mentors found schools;
+  - others get monuments in their home region.
+
+  Every action goes into the chronicle and their list of achievements, so newcomers hear about it in rumours and in their dialogue.
+- **Era effects apply in play** (tested): hazard damage, prices, and the extra mana cost in the Ordinary Age.
+
 ## 10. Long-term development — **Done, lightly tested**
 
 - **Titles** come from real state: realm ruler; legend title; Archmage (caster, class level 5, level 120+); Master of Arms; Rift-walker; Champion of the Realm (3+ crises ended); Founder; the Undying.
@@ -152,17 +171,12 @@ Status key:
 ## Known limitations
 
 - **Live AI narration** is still untested: the stored Groq key returns 401. The offline narrator covers every new event.
-- **Legends don't act on their own** between your sessions. They age, die, rule and are succeeded, but they don't wage wars or make new choices autonomously.
+- **Legends' autonomous acts are a small fixed set** (annex, end crises, found schools, monuments). There are no wars between legends.
+- **Wizard runs vary a lot:** 3,900–11,400 actions to finish the campaign, depending on the seed. The killers are older, very tanky enemy types in the Veldrath regions (Demon Knight, Djinn Lord, Sand Drake). This was a known item before this phase.
 - **Bot pacing data stops at level 132.** Levels 150+ were checked only through the formula and simulated fights.
 - **Orders** grant a title, a history entry and a hall location, but no further gameplay yet.
 
 ## Next implementation tasks
-
-1. **Autonomous legend agency.** Once a year in `chronicle.evolve`, each living legend takes an action that follows from their personality and role:
-   - a ruthless ruler annexes a region (faction power and settlement status change);
-   - a patron raises a monument;
-   - a mentor founds a school.
-
-   Each action should be recorded in history and reflected in dialogue.
-2. **Per-region dominion map.** Track which faction or realm controls each region (`world.dominion[region]`), shown on the map, changed by crises, governing and legend actions. It should affect prices and patrol encounters per region.
-3. **Optional image-provider interface** (`EMBER_ART_PROVIDER`) for portraits, with the SVG renderer as the guaranteed fallback.
+1. **Rebalance the older enemy table** for the Veldrath and Fen alias regions (Demon Knight, Djinn Lord, Sand Drake, Elder Lich). These are stat blocks from the original enemy table that are far tougher than the newer region monsters. Use `scripts/region-sweep.js` with a wizard build as the acceptance check, aiming for at least 90% wins with abilities.
+2. **Optional image-provider interface** (`EMBER_ART_PROVIDER`) for portraits, with the SVG renderer as the guaranteed fallback.
+3. **Wars between legends.** When two living legends' factions border each other, resolve a yearly contest by faction power, with chronicle entries and border changes.

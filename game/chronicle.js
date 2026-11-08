@@ -400,6 +400,7 @@ function applyEnding(world, state, ending, { migrated = false } = {}) {
   world.ending = ending;
   world.era = { name: era.name, since: nowDay(world), ending };
   world.factionPower = { ...era.power };
+  applyEraDominion(world, ending);
   const hero = state.character ? state.character.name : 'the hero';
   const flags = (state.campaign && state.campaign.flags) || {};
   const heroRules = ending === 'ascend' || (ending === 'imperium' && flags.ownKey);
@@ -521,6 +522,108 @@ function ageFigures(world, activeCharacterId) {
 }
 
 // ---------------------------------------------
+// Dominion: who holds each region
+// ---------------------------------------------
+const FACTION_NAMES = { wardens: 'the Ember Wardens', compact: 'the Free Compact', remnant: 'the Veldrathi Remnant', choir: 'the Ashen Choir', lawless: 'no one' };
+
+function ensureDominion(world) {
+  if (!world.dominion || typeof world.dominion !== 'object') world.dominion = {};
+  for (const [k, r] of Object.entries(REGIONS)) {
+    if (world.dominion[k]) continue;
+    const npcFaction = r.npcs && r.npcs[0] ? r.npcs[0].faction : null;
+    world.dominion[k] = k === 'shattered_throne' ? 'lawless' : (npcFaction === 'choir' ? 'choir' : npcFaction || 'compact');
+  }
+  return world.dominion;
+}
+
+function dominionOf(world, regionKey) {
+  if (!world) return null;
+  return ensureDominion(world)[regionKey] || 'compact';
+}
+
+function setDominion(world, regionKey, faction, why) {
+  const d = ensureDominion(world);
+  if (d[regionKey] === faction) return null;
+  const from = d[regionKey];
+  d[regionKey] = faction;
+  return addEvent(world, { type: 'dominion', importance: 3, title: `${FACTION_NAMES[faction] || faction} take${faction === 'lawless' ? '' : 's'} control of ${REGIONS[regionKey].label}`, text: `${FACTION_NAMES[from] || from} lose${from === 'lawless' ? '' : 's'} their hold. ${why || ''}`.trim(), region: regionKey });
+}
+
+// An era redraws the map: the victors hold the inner ring.
+function applyEraDominion(world, ending) {
+  ensureDominion(world);
+  const winner = { rekindle: 'wardens', imperium: 'remnant', ascend: 'choir', shatter: 'compact' }[ending];
+  if (!winner) return;
+  for (const [k, r] of Object.entries(REGIONS)) {
+    if (k === 'shattered_throne') { world.dominion[k] = ending === 'ascend' ? 'choir' : ending === 'shatter' ? 'lawless' : winner; continue; }
+    if (ending === 'shatter' ? r.tier >= 1 : r.tier >= (ending === 'imperium' ? 4 : 6)) {
+      if (ending === 'imperium' && !/veldrath|bone|pale|sunken|void/.test(k) && r.tier < 6) continue;
+      world.dominion[k] = winner;
+    }
+  }
+}
+
+// Each year the strongest power pushes into a neighbouring region it does not hold.
+function shiftBorders(world) {
+  ensureDominion(world);
+  const power = world.factionPower || {};
+  const strongest = Object.entries(power).sort((a, b) => b[1] - a[1])[0];
+  if (!strongest || strongest[1] < 70) return null;
+  const [faction] = strongest;
+  const frontier = [];
+  for (const [k, holder] of Object.entries(world.dominion)) {
+    if (holder !== faction) continue;
+    for (const n of REGIONS[k].adjacent || []) if (world.dominion[n] !== faction && (power[world.dominion[n]] || 0) < strongest[1] - 15) frontier.push(n);
+  }
+  if (!frontier.length) return null;
+  const target = frontier[hashInt(world.id + nowDay(world)) % frontier.length];
+  return setDominion(world, target, faction, 'Their strength has outgrown their borders.');
+}
+
+// ---------------------------------------------
+// Legends act on their own (once a year)
+// ---------------------------------------------
+function legendsAct(world, activeCharacterId) {
+  const out = [];
+  ensureDominion(world);
+  for (const f of world.figures) {
+    if (f.characterId === activeCharacterId || f.status === 'deceased') continue;
+    const traits = f.personality || [];
+    const roll = hashInt(f.characterId + nowDay(world)) % 6;
+    if (roll > 2) continue;                                     // legends do not act every year
+    const faction = world.realm && world.realm.rulerId === f.characterId
+      ? ({ ascend: 'choir', imperium: 'remnant', rekindle: 'wardens', shatter: 'compact' }[world.ending] || 'compact') : null;
+    if (f.role === 'ruler' && faction && (traits.includes('ambitious') || traits.includes('ruthless') || roll === 0)) {
+      const seatNeighbours = Object.keys(world.dominion).filter(k => world.dominion[k] === faction).flatMap(k => REGIONS[k].adjacent || []).filter(n => world.dominion[n] !== faction);
+      if (seatNeighbours.length) {
+        const target = seatNeighbours[hashInt(f.characterId + 'annex' + nowDay(world)) % seatNeighbours.length];
+        const e = setDominion(world, target, faction, `${f.name}, ${f.title}, extends their rule.`);
+        if (e) { e.actor = { id: f.characterId, name: f.name }; out.push(e); if (!f.achievements.includes(`annexed ${REGIONS[target].label}`)) f.achievements.push(`annexed ${REGIONS[target].label}`); }
+        continue;
+      }
+    }
+    const crisis = (world.crises || []).find(c => c.status === 'active');
+    if ((f.role === 'patron' || traits.includes('dutiful')) && crisis) {
+      crisis.status = 'resolved'; crisis.resolvedBy = f.characterId;
+      out.push(addEvent(world, { type: 'crisis', importance: 3, title: `${crisis.title} is ended by ${f.name}`, text: `The old hero ${f.name} rode out one last time.`, actor: { id: f.characterId, name: f.name }, region: crisis.region }, `crisis:${crisis.id}`));
+      f.achievements.push(`ended the ${crisis.title}`);
+      continue;
+    }
+    if (f.role === 'mentor' && !(world.organizations || []).some(o => o.founderId === f.characterId)) {
+      const seat = f.seat || (f.snapshot && f.snapshot.homeRegion) || 'oakhaven';
+      world.organizations.push({ name: `the School of ${f.name}`, founderId: f.characterId, founder: f.name, seat, foundedDay: nowDay(world), members: 30 });
+      out.push(addEvent(world, { type: 'founding', importance: 3, title: `${f.name} founds the School of ${f.name}`, text: `Students come to ${REGIONS[seat] ? REGIONS[seat].label : seat} to learn what the old hero knows.`, actor: { id: f.characterId, name: f.name }, region: seat }, `found:${f.characterId}`));
+      continue;
+    }
+    if (!f.monument && f.snapshot && f.snapshot.homeRegion) {
+      f.monument = f.snapshot.homeRegion;
+      out.push(addEvent(world, { type: 'monument', importance: 2, title: `A monument to ${f.name} is raised in ${REGIONS[f.monument].label}`, actor: { id: f.characterId, name: f.name }, region: f.monument }, `monument:${f.characterId}`));
+    }
+  }
+  return out.filter(Boolean);
+}
+
+// ---------------------------------------------
 // World evolution & crises
 // ---------------------------------------------
 const CRISIS_TYPES = [
@@ -559,6 +662,7 @@ function failCrisis(world, crisis) {
   world.settlements[crisis.region] = s;
   const owner = (r.npcs && r.npcs[0] && r.npcs[0].faction) || 'compact';
   world.factionPower[owner] = Math.max(0, (world.factionPower[owner] || 50) - 5);
+  if (s.status === 'ruined') setDominion(world, crisis.region, crisis.kind === 'uprising' ? 'compact' : crisis.kind === 'incursion' ? 'choir' : 'lawless', 'Order collapsed when no champion came.');
   return addEvent(world, { type: 'crisis', importance: 3, title: `${crisis.title} is not stopped`, text: `${r.settlement ? r.settlement.name : r.label} is ${s.status}. No champion came.`, region: crisis.region });
 }
 
@@ -594,6 +698,9 @@ function evolve(world, state) {
       out.push(...ageNpcs(world));
       out.push(...ageFigures(world, state && state.characterId));
       evolveSettlements(world);
+      out.push(...legendsAct(world, state && state.characterId));
+      const shift = shiftBorders(world);
+      if (shift) out.push(shift);
     }
   }
   return out.filter(Boolean);
@@ -609,8 +716,16 @@ function advanceTime(state, hours, reason = '') {
   const h = Math.floor(Number(hours) || 0);
   if (!world || h <= 0) return { hours: 0, messages: [], events: [] };
   const beforeAge = ageOf(state, world);
-  world.calendar.hour = nowHour(world) + h;
-  const events = evolve(world, state);
+  const target = nowHour(world) + h;
+  // Step the clock month by month so events that happen during a long
+  // stretch are dated (and decided) when they happen, not all at the end.
+  const events = [];
+  while (world.nextEvolutionDay * HOURS_PER_DAY <= target) {
+    world.calendar.hour = Math.max(nowHour(world), world.nextEvolutionDay * HOURS_PER_DAY);
+    events.push(...evolve(world, state));
+  }
+  world.calendar.hour = target;
+  events.push(...evolve(world, state));
   syncAge(state, world);
   const messages = [];
   const afterAge = ageOf(state, world);
@@ -647,5 +762,6 @@ module.exports = {
   applyEnding, eraEffects,
   recordFigure, addAchievement, figureAge, figureStatus, ageFigures, snapshotOf, personalityOf,
   spawnCrisis, resolveCrisis, failCrisis, evolve,
-  advanceTime, hoursUntilMorning
+  advanceTime, hoursUntilMorning,
+  FACTION_NAMES, ensureDominion, dominionOf, setDominion, shiftBorders, legendsAct
 };

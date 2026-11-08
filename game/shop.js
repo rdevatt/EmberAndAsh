@@ -33,7 +33,16 @@ function getShopStock(state) {
   const region  = REGIONS[regionKey] || {};
   const tier    = getTierForLevel(getPlayerLevel(state.totalXP || 0));
   const quality = GEAR_QUALITIES[tier];
-  const mod     = getPriceModifier(state);
+  // Free Compact standing sets the base; the era and whoever holds this
+  // region adjust it (friends of the local power pay less, enemies more).
+  const ch = require('./chronicle');
+  const W = ch.worldOf(state);
+  let mod = getPriceModifier(state) * (W ? ch.eraEffects(W).priceMult || 1 : 1);
+  const holder = W ? ch.dominionOf(W, regionKey) : null;
+  if (holder && state.factions && typeof state.factions[holder] === 'number') {
+    if (state.factions[holder] >= 50) mod *= 0.9; else if (state.factions[holder] <= -20) mod *= 1.25;
+  }
+  mod = Math.round(mod * 100) / 100;
   const p = (x) => Math.max(1, Math.round(x * mod));
   const gearPrice = 150 * (tier + 1) * (tier + 1);
   const rt = region.tier || 1;
@@ -61,8 +70,8 @@ function buildShopText(state) {
   if (!hasMerchant(state)) return 'There are no merchants out here. Find a settlement ("explore" lists what is here).';
   const r = REGIONS[state.character.region];
   const lines = [`MERCHANTS OF ${(r.settlement ? r.settlement.name : r.label).toUpperCase()}`, `Your coin: ${formatCoin(state.coin || 0)}`];
-  const mod = getPriceModifier(state);
-  if (mod !== 1) lines.push(`(Free Compact standing: prices ×${mod})`);
+  const mod = getShopStock(state).length ? Math.round((getShopStock(state)[0].price / (150 * Math.pow(getTierForLevel(getPlayerLevel(state.totalXP || 0)) + 1, 2))) * 100) / 100 : 1;
+  if (mod !== 1) lines.push(`(Prices ×${mod}: your standing, the era, and who holds this region)`);
   lines.push('');
   for (const item of getShopStock(state)) lines.push(`  ${item.name} — ${formatCoin(item.price)} (${item.note})`);
   lines.push('', 'Type "buy <item>", e.g. "buy 2 healing potions", "buy longbow", "buy fur-lined cloak". "sell <item>" to sell.');

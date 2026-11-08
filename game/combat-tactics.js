@@ -431,7 +431,12 @@ function tickCooldowns(state) {
 function payAbilityCost(state, ability) {
   const cds = getCooldowns(state);
   if (cds[ability.id]) return `${ability.label} is not ready (${cds[ability.id]} more round${cds[ability.id] > 1 ? 's' : ''})`;
-  const c = ability.cost || {};
+  const base = ability.cost || {};
+  // In the Ordinary Age magic is thin: mana costs more.
+  const ch = require('./chronicle');
+  const W = ch.worldOf(state);
+  const manaMult = W ? ch.eraEffects(W).manaCostMult || 1 : 1;
+  const c = { ...base, mana: base.mana ? Math.ceil(base.mana * manaMult) : base.mana };
   if (c.stamina && (state.stamina || 0) < c.stamina) return `Not enough stamina for ${ability.label}`;
   if (c.mana && (state.mana || 0) < c.mana) return `Not enough mana for ${ability.label}`;
   if (c.hp && state.hp <= Math.ceil(state.maxHp * c.hp) + 1) return `Too wounded for ${ability.label}`;

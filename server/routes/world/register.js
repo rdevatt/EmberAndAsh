@@ -74,8 +74,12 @@ module.exports = function registerWorldRoutes(app, deps) {
       const y = Math.max(0, Math.min(200, Math.floor(Number(years) || 0)));
       if (y > 0) {
         // The years pass for everyone: people age, die, are succeeded; crises come and go.
-        target.calendar.hour = chronicle.nowHour(target) + y * chronicle.DAYS_PER_YEAR * chronicle.HOURS_PER_DAY;
-        chronicle.evolve(target, null);
+        const end = chronicle.nowHour(target) + y * chronicle.DAYS_PER_YEAR * chronicle.HOURS_PER_DAY;
+        while (target.nextEvolutionDay * chronicle.HOURS_PER_DAY <= end) {
+          target.calendar.hour = Math.max(chronicle.nowHour(target), target.nextEvolutionDay * chronicle.HOURS_PER_DAY);
+          chronicle.evolve(target, null);
+        }
+        target.calendar.hour = end;
         chronicle.addEvent(target, { type: 'era', title: `${y} years pass`, text: `A new generation comes of age in ${target.era.name}.` });
       }
     } else {

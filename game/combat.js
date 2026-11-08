@@ -524,9 +524,12 @@ function applyCombatRound(state, input) {
     if (action === 'attack') {
       const attempt = detectSpellCast(state, input);
       if (attempt && attempt.spell) {
-        if ((state.mana || 0) >= attempt.spell.manaCost) {
+        const chr = require('./chronicle');
+        const Wm = chr.worldOf(state);
+        const manaCost = Math.ceil(attempt.spell.manaCost * (Wm ? chr.eraEffects(Wm).manaCostMult || 1 : 1));
+        if ((state.mana || 0) >= manaCost) {
           spell = attempt.spell;
-          state.mana = Math.max(0, state.mana - spell.manaCost);
+          state.mana = Math.max(0, state.mana - manaCost);
           action = 'spell';
         } else {
           result.spellFailed = 'mana';

@@ -122,7 +122,10 @@ function buildMapText(state) {
   } else {
     lines.push('Roads from here:');
     for (const o of opts) {
-      lines.push(`  ${o.open ? '•' : '✕'} ${o.label} — Tier ${o.tier}, Danger Lv${o.levelRange[0]}–${o.levelRange[1]}${o.open ? '' : ' (not yet)'}`);
+      const ch = require('./chronicle');
+      const w = ch.worldOf(state);
+      const held = w ? ch.dominionOf(w, o.key) : null;
+      lines.push(`  ${o.open ? '•' : '✕'} ${o.label} — Tier ${o.tier}, Danger Lv${o.levelRange[0]}–${o.levelRange[1]}${held ? `, held by ${ch.FACTION_NAMES[held] || held}` : ''}${o.open ? '' : ' (not yet)'}`);
     }
     lines.push('', 'Type "travel to <region>" to set out.');
   }

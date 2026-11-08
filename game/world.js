@@ -68,7 +68,11 @@ function applyHazard(state) {
   if (isWarded(state, h)) return { warded: true, message: `Your ${h.ward} keeps the ${h.label.toLowerCase()} at bay.` };
   // Scouts read the land and avoid the worst of it.
   const scoutCut = state.profession === 'scout' ? 0.5 : 1;
-  const dmg = Math.max(1, Math.round(state.maxHp * h.damage * scoutCut));
+  // The age matters: the Long Fire beats back the Ash; the Sovereign's reign feeds it.
+  const ch = require('./chronicle');
+  const W = ch.worldOf(state);
+  const era = W ? ch.eraEffects(W).hazardMult || 1 : 1;
+  const dmg = Math.max(1, Math.round(state.maxHp * h.damage * scoutCut * era));
   const before = state.hp;
   state.hp = Math.max(1, state.hp - dmg);
   return {
