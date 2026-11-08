@@ -110,9 +110,31 @@
         <div id="companions-list" class="dim small">None.</div>
       </section>
 
+      <section class="panel-section hidden" id="section-factions">
+        <div class="panel-label">FACTIONS</div>
+        <div id="factions-list" class="small"></div>
+      </section>
+
       <section class="panel-section" id="section-commands">
         <div class="panel-label">COMMANDS</div>
         <div id="commands-list" class="small">
+          <div class="commands-category">Story &amp; World</div>
+          <ul class="commands-ul">
+            <li>story</li>
+            <li>talk to [name]</li>
+            <li>confront [boss]</li>
+            <li>choose [number]</li>
+            <li>explore · explore [place]</li>
+            <li>gather</li>
+            <li>factions</li>
+          </ul>
+
+          <div class="commands-category">Crafting</div>
+          <ul class="commands-ul">
+            <li>recipes · materials</li>
+            <li>craft / forge / brew [item]</li>
+          </ul>
+
           <div class="commands-category">Basics</div>
           <ul class="commands-ul">
             <li>help</li>
@@ -145,7 +167,10 @@
           <div class="commands-category">Combat</div>
           <ul class="commands-ul">
             <li>attack [target]</li>
+            <li>defend</li>
+            <li>abilities · [ability name]</li>
             <li>cast [spell] at [target]</li>
+            <li>drink potion · drink mana potion</li>
             <li>flee</li>
             <li>inspect</li>
           </ul>
@@ -163,7 +188,8 @@
           <div class="commands-category">Companions</div>
           <ul class="commands-ul">
             <li>companions</li>
-            <li>ask [name] to join me</li>
+            <li>recruit [name]</li>
+            <li>hire a sellsword</li>
             <li>dismiss [name]</li>
           </ul>
         </div>
@@ -293,6 +319,7 @@
 
       </div><!-- /#creation-wizard -->
 
+      <div id="combat-actions" class="combat-actions" aria-label="Combat actions"></div>
       <div id="input-area" class="hidden">
         <div id="input-wrapper">
           <textarea
@@ -316,6 +343,19 @@
 
     <!-- RIGHT PANEL — World -->
     <aside id="panel-right">
+
+      <section class="panel-section hidden" id="section-story">
+        <div class="panel-label">MAIN STORY <span id="narration-mode" class="narration-mode"></span></div>
+        <div id="story-chapter" class="threat-name">—</div>
+        <div id="story-objective" class="dim small">—</div>
+        <div id="story-choices" class="story-choices"></div>
+        <div class="quick-actions">
+          <button class="quick-btn" data-cmd="story" type="button">Journal</button>
+          <button class="quick-btn" data-cmd="explore" type="button">Explore</button>
+          <button class="quick-btn" data-cmd="map" type="button">Map</button>
+          <button class="quick-btn" data-cmd="shop" type="button">Shop</button>
+        </div>
+      </section>
 
       <section class="panel-section" id="section-threat">
         <div class="panel-label" id="threat-label">SURROUNDINGS</div>

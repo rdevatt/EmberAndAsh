@@ -659,7 +659,7 @@ function applyCombatRound(state, input) {
       const plan = T.planEnemyTurn(state, enemy);
       result.enemyLines.push(...plan.lines);
       if (!plan.windingUp) {
-        const hitChance = Math.min(0.8, Math.max(0.3, 0.55 + (enemy.effectiveDex - stats.dex) / 40 + (plan.hitBonus || 0) - (armor && armor.armorLevel ? armor.armorLevel * 0.006 : 0)));
+        const hitChance = Math.min(0.8, Math.max(0.3, ((enemy.level || 1) < 5 ? 0.5 : 0.55) + (enemy.effectiveDex - stats.dex) / 40 + (plan.hitBonus || 0) - (armor && armor.armorLevel ? armor.armorLevel * 0.006 : 0)));
         const magicResist = Math.min(0.35, Math.max(0, (stats.wis - 10) * 0.01));
         const armorReduce = armor && armor.armorLevel ? armor.armorLevel * 2 : 0;
         const strike = (mult) => {

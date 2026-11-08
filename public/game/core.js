@@ -229,6 +229,10 @@ function applyPanels(data) {
     if (data.economy)     updateEconomyPanel(data.economy);
     if (data.rightPanel)  updateRightPanel(data.rightPanel);
     if (data.board)       updateBoardPanel(data.board);
+    if ('story' in data)  updateStoryPanel(data.story, data.narration);
+    if (data.factions)    updateFactionsPanel(data.factions);
+    if (data.party)       updatePartyPanel(data.party);
+    updateCombatActions(data);
   } catch (e) {
     console.warn('[UI] Panel update error (non-fatal):', e);
   }
@@ -369,7 +373,7 @@ async function _doNormalAction(input) {
     return;
   }
 
-  if (data.output) appendStory(input, data.output, false);
+  if (data.output) appendStory(input, data.output, false, false, { undoable: data.undoable !== false });
   client.inCreation = !!data.inCreation;
 }
 
@@ -539,7 +543,7 @@ async function submitEditedAction(newInput) {
 // ATTACH STORY ENTRY BUTTONS
 // Adds retry/undo/edit buttons to a story entry
 // =============================================
-function attachStoryEntryButtons(aiEntry, playerInputEntry) {
+function attachStoryEntryButtons(aiEntry, playerInputEntry, undoable = true) {
   // Create button container
   const btnContainer = document.createElement('div');
   btnContainer.className = 'story-entry-buttons';
@@ -551,6 +555,9 @@ function attachStoryEntryButtons(aiEntry, playerInputEntry) {
   retryBtn.title = 'Regenerate the narrative (same outcome)';
   retryBtn.addEventListener('click', () => retryNarrative(aiEntry, playerInputEntry));
   btnContainer.appendChild(retryBtn);
+
+  // Combat rounds and story decisions can't be edited or undone.
+  if (!undoable) { aiEntry.appendChild(btnContainer); return; }
 
   // Edit button
   const editBtn = document.createElement('button');

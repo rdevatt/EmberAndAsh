@@ -378,7 +378,9 @@ function planEnemyTurn(state, enemy) {
     return plan;
   }
 
-  const special = enemy.special || (enemy.behavior === 'aggressive' ? { every: 4, name: 'Heavy Blow', telegraph: `${enemy.label} draws back for a crushing blow`, mult: 1.7 } : null);
+  // Newcomer grace: ordinary enemies below level 5 fight plainly.
+  const seasoned = (enemy.level || 1) >= 5 || enemy.isBoss;
+  const special = enemy.special || (enemy.behavior === 'aggressive' && seasoned ? { every: 4, name: 'Heavy Blow', telegraph: `${enemy.label} draws back for a crushing blow`, mult: 1.7 } : null);
   if (special && enemy.turn % special.every === 0) {
     enemy.windup = special;
     plan.windingUp = true;
@@ -387,17 +389,17 @@ function planEnemyTurn(state, enemy) {
     return plan;
   }
 
-  if (traits.tags.includes('caster') && Math.random() < 0.3) {
+  if (traits.tags.includes('caster') && Math.random() < (seasoned ? 0.3 : 0.15)) {
     plan.element = traits.tags.includes('undead') ? 'shadow' : traits.tags.includes('frost') ? 'frost' : traits.tags.includes('fiery') ? 'fire' : 'arcane';
     plan.ignoreArmor = true;
     plan.mult = 0.9;
     plan.status = plan.element === 'fire' ? 'burn' : plan.element === 'shadow' ? 'weaken' : null;
     plan.lines.push(`✧ ${enemy.label} hurls ${plan.element === 'physical' ? 'a curse' : `${plan.element} magic`} at you`);
   }
-  if (enemy.behavior === 'pack' && Math.random() < 0.25) plan.extraHits = 1;
-  if (enemy.behavior === 'ambush' && enemy.turn === 1) { plan.mult *= 1.5; plan.lines.push(`${enemy.label} strikes from cover!`); }
-  if (enemy.behavior === 'predator' && Math.random() < 0.25) plan.status = 'bleed';
-  if (enemy.behavior === 'tactical' && !plan.status && Math.random() < 0.2) plan.status = 'weaken';
+  if (enemy.behavior === 'pack' && seasoned && Math.random() < 0.25) plan.extraHits = 1;
+  if (enemy.behavior === 'ambush' && enemy.turn === 1) { plan.mult *= seasoned ? 1.5 : 1.2; plan.lines.push(`${enemy.label} strikes from cover!`); }
+  if (enemy.behavior === 'predator' && seasoned && Math.random() < 0.25) plan.status = 'bleed';
+  if (enemy.behavior === 'tactical' && seasoned && !plan.status && Math.random() < 0.2) plan.status = 'weaken';
   return plan;
 }
 

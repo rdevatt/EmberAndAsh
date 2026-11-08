@@ -401,3 +401,33 @@ button.retry-btn:not(.story-btn):hover {
 .system-entry .announcement {
   white-space: pre-wrap;
 }
+
+/* ---------- Story, factions, combat actions ---------- */
+.narration-mode { font-size: 9px; letter-spacing: 0; color: var(--text-dim); text-transform: none; }
+#story-objective { margin-top: 4px; line-height: 1.4; }
+.story-choices { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+.choice-btn, .combat-btn, .quick-btn {
+  background: var(--bg-input); color: var(--text); border: 1px solid var(--border-bright);
+  font: inherit; font-size: 11px; padding: 5px 8px; cursor: pointer; text-align: left; border-radius: 2px;
+}
+.choice-btn { border-color: var(--accent); color: var(--text-gold); }
+.choice-btn:hover:not(:disabled), .combat-btn:hover:not(:disabled), .quick-btn:hover { background: var(--bg-hover); border-color: var(--text-gold); }
+.choice-btn:disabled, .combat-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.quick-actions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+.quick-btn { font-size: 10px; padding: 3px 8px; }
+.combat-actions { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 12px 0; }
+.combat-actions:empty { display: none; }
+.combat-btn { font-size: 10px; padding: 4px 7px; }
+.combat-btn.danger { border-color: var(--text-red); color: var(--text-red); }
+.faction-row { margin-bottom: 6px; }
+.faction-name { color: var(--text); }
+.faction-standing { float: right; color: var(--text-dim); }
+.faction-standing.neg { color: var(--text-red); }
+.faction-standing.pos { color: var(--text-green); }
+.faction-bar { height: 3px; background: var(--bg-darker); margin-top: 3px; }
+.faction-fill { height: 100%; background: var(--text-gold); }
+
+@media (max-width: 768px) {
+  .choice-btn, .combat-btn, .quick-btn { font-size: 13px; padding: 8px 10px; min-height: 40px; }
+  .combat-actions { gap: 6px; }
+}

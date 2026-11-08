@@ -302,6 +302,105 @@ function updateBoardPanel(board) {
   }
 }
 
+// ---------------------------------------------
+// Story, factions, party and combat-action panels
+// ---------------------------------------------
+function updateStoryPanel(story, narration) {
+  const section = document.getElementById('section-story');
+  if (!section) return;
+  const mode = document.getElementById('narration-mode');
+  if (mode) {
+    mode.textContent = narration === 'ai' ? '· AI narration' : narration === 'offline' ? '· offline narration' : '';
+    mode.title = narration === 'offline' ? 'The AI narrator is unavailable; the game engine narrates. Gameplay is unaffected.' : '';
+  }
+  if (!story) { section.classList.add('hidden'); return; }
+  section.classList.remove('hidden');
+  const chapter = document.getElementById('story-chapter');
+  const objective = document.getElementById('story-objective');
+  const choices = document.getElementById('story-choices');
+  if (story.ended) {
+    chapter.textContent = `THE END — ${story.ending}`;
+    objective.textContent = `Postgame: bounties continue; at the Shattered Throne, "enter the rift". Deepest rift: ${story.riftDepth || 0}.`;
+    choices.innerHTML = '';
+    return;
+  }
+  chapter.textContent = `Chapter ${story.chapter}: ${story.title}`;
+  objective.textContent = (story.locked ? '✕ ' : '► ') + story.objective;
+  choices.innerHTML = '';
+  (story.options || []).forEach(o => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'choice-btn';
+    b.disabled = !o.available;
+    b.textContent = `${o.n}. ${o.label}${o.available ? '' : ' (closed)'}`;
+    b.addEventListener('click', () => {
+      if (window.confirm(`Choose: "${o.label}"?\n\nStory decisions are permanent.`)) runCommand(`choose ${o.n}`);
+    });
+    choices.appendChild(b);
+  });
+}
+
+function updateFactionsPanel(list) {
+  const section = document.getElementById('section-factions');
+  const box = document.getElementById('factions-list');
+  if (!section || !box || !Array.isArray(list)) return;
+  section.classList.remove('hidden');
+  box.innerHTML = list.map(f => {
+    const pct = Math.round((f.value + 100) / 2);
+    return `<div class="faction-row" title="${escHtml(f.label)}: ${f.value}">
+      <span class="faction-name">${escHtml(f.label)}</span>
+      <span class="faction-standing ${f.value < 0 ? 'neg' : f.value >= 50 ? 'pos' : ''}">${escHtml(f.standing)}</span>
+      <div class="faction-bar"><div class="faction-fill" style="width:${pct}%"></div></div>
+    </div>`;
+  }).join('');
+}
+
+function updatePartyPanel(party) {
+  const section = document.getElementById('section-companions');
+  const box = document.getElementById('companions-list');
+  if (!section || !box || !Array.isArray(party)) return;
+  if (!party.length) { section.classList.add('hidden'); box.textContent = 'None.'; return; }
+  section.classList.remove('hidden');
+  box.innerHTML = party.map(c => `<div class="companion-row">
+      <span class="companion-name">${escHtml(c.name)}</span>
+      <span class="companion-loyalty dim">${escHtml(c.role)} · loyalty ${Number(c.loyalty) || 0}${c.hired ? ' · hired' : ''}</span>
+    </div>`).join('');
+}
+
+function updateCombatActions(data) {
+  const box = document.getElementById('combat-actions');
+  if (!box) return;
+  const inCombat = data && data.rightPanel && data.rightPanel.inCombat;
+  if (!inCombat) { box.innerHTML = ''; return; }
+  const buttons = [
+    { label: 'Attack', cmd: 'I attack it with a careful, precise strike' },
+    { label: 'Defend', cmd: 'I raise my guard and defend' }
+  ];
+  for (const a of (data.abilities || [])) {
+    if (a.id === 'power_attack' && (data.abilities || []).length > 3) continue;
+    buttons.push({ label: a.label, cmd: `I use ${a.label}`, disabled: !a.ready, title: a.desc });
+  }
+  if (data.potions) buttons.push({ label: `Potion (${data.potions})`, cmd: 'drink healing potion' });
+  if (data.manaPotions) buttons.push({ label: `Mana (${data.manaPotions})`, cmd: 'drink mana potion' });
+  buttons.push({ label: 'Inspect', cmd: 'inspect' }, { label: 'Flee', cmd: 'flee', cls: 'danger' });
+  box.innerHTML = '';
+  for (const b of buttons) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = `combat-btn ${b.cls || ''}`;
+    btn.textContent = b.label;
+    btn.disabled = !!b.disabled;
+    if (b.title) btn.title = b.title;
+    btn.addEventListener('click', () => runCommand(b.cmd));
+    box.appendChild(btn);
+  }
+}
+
+document.addEventListener('click', (ev) => {
+  const btn = ev.target.closest && ev.target.closest('.quick-btn[data-cmd]');
+  if (btn) runCommand(btn.dataset.cmd);
+});
+
 // Submits a command as if the player had typed it.
 function runCommand(text) {
   if (client.inCreation || client.isLoading) return;
@@ -409,7 +508,7 @@ function loadStoryHistoryFromLocal() {
   }
 }
 
-function appendStory(playerAction, text, isCreation = false, skipSave = false) {
+function appendStory(playerAction, text, isCreation = false, skipSave = false, opts = {}) {
   if (!text) return null;
 
   if (!skipSave && !isCreation) {
@@ -437,7 +536,7 @@ function appendStory(playerAction, text, isCreation = false, skipSave = false) {
     // Retry / edit / undo only ever apply to the latest action.
     el.storyContent.querySelectorAll('.story-entry-buttons').forEach(b => b.remove());
     const playerInputEntry = client.lastPlayerEntry;
-    attachStoryEntryButtons(entry, playerInputEntry);
+    attachStoryEntryButtons(entry, playerInputEntry, opts.undoable !== false);
     client.lastAIEntry = entry;
     client.canUndo = true;
   }
