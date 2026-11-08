@@ -301,7 +301,8 @@ function buildGearItem(src, isArmor) {
     statMods:    src.statMods  || null,
     isCrafted:   src.isCrafted || false,
     sellBonus:   src.sellBonus || 0,
-    craftedBy:   src.craftedBy || null
+    craftedBy:   src.craftedBy || null,
+    durability:  typeof src.durability === 'number' ? src.durability : 100
   };
 }
 

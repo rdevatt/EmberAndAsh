@@ -139,6 +139,8 @@ async function shop() {
     boughtTier = t;
   }
   for (const ward of wardsNeeded) if (!inv().some(i => (i.name || i) === ward) && coin() > 300 * r.tier) await act(`buy ${ward}`);
+  const w = last.economy && last.economy.weapon, a = last.economy && last.economy.armor;
+  if ((w && w.durability < 60) || (a && a.durability < 60)) await act('repair gear');
   const potions = count('healing potion');
   if (potions < 5 && coin() > 30 * r.tier * 6) await act(`buy ${5 - potions} healing potions`);
   if (STYLE === 'wizard' && count('mana potion') < 3 && coin() > 40 * r.tier * 6) await act(`buy ${3 - count('mana potion')} mana potions`);

@@ -13,6 +13,7 @@ const factions  = require('../../../game/factions');
 const comps     = require('../../../game/companions');
 const tactics   = require('../../../game/combat-tactics');
 const crafting  = require('../../../game/crafting-recipes');
+const durability = require('../../../game/durability');
 const { REGIONS } = require('../../../game/constants');
 
 const FACTION_CMD   = /^(?:factions?|reputation|standing|standings|faction standing)[.!?]*$/i;
@@ -50,6 +51,19 @@ module.exports = function createWorldCommands(h) {
 
     // ---------------- combat-only guard ----------------
     if (state.inCombat) return null;
+
+    // ---------------- repair & reforge ----------------
+    const repairMatch = cmd.match(/^(?:i\s+)?(?:repair|mend|fix)(?:\s+(?:my\s+|the\s+)?(gear|equipment|everything|all|weapon|armou?r|sword|blade|bow|staff|dagger|axe|mace|spear|mail|leather armou?r))?$/i);
+    if (repairMatch) {
+      const what = /weapon|sword|blade|bow|staff|dagger|axe|mace|spear/.test(repairMatch[1] || '') ? 'weapon' : /armou?r|mail|leather/.test(repairMatch[1] || '') ? 'armor' : 'all';
+      const result = durability.repair(state, what);
+      return sendCommand(req, res, result.message, 'repair', { persist: result.success });
+    }
+    const reforgeMatch = cmd.match(/^(?:i\s+)?reforge\s*(?:my\s+|the\s+)?(.*)$/i);
+    if (reforgeMatch) {
+      const result = durability.reforge(state, reforgeMatch[1]);
+      return sendCommand(req, res, result.message, 'reforge', { persist: result.success });
+    }
 
     // ---------------- crafting ----------------
     const craft = crafting.detectCraft(state, input);

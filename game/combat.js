@@ -524,7 +524,8 @@ function applyCombatRound(state, input) {
   const accuracy    = Math.max(stats.dex, Math.round(stats.str * 0.8));
   const dexAdv      = (accuracy - enemy.effectiveDex) / 25;
   const dmgMult     = T.playerDamageMultiplier(state, enemy);
-  const weaponBonus = (weapon ? weapon.weaponBonus || 0 : 0) + (state.bonusWeaponDamage || 0);
+  const D = require('./durability');
+  const weaponBonus = (weapon ? Math.round((weapon.weaponBonus || 0) * D.durabilityFactor(weapon)) : 0) + (state.bonusWeaponDamage || 0);
   const profile     = T.weaponProfile(weapon);
   let evade = false, exposed = 1;
 
@@ -661,7 +662,7 @@ function applyCombatRound(state, input) {
       if (!plan.windingUp) {
         const hitChance = Math.min(0.8, Math.max(0.3, ((enemy.level || 1) < 5 ? 0.5 : 0.55) + (enemy.effectiveDex - stats.dex) / 40 + (plan.hitBonus || 0) - (armor && armor.armorLevel ? armor.armorLevel * 0.006 : 0)));
         const magicResist = Math.min(0.35, Math.max(0, (stats.wis - 10) * 0.01));
-        const armorReduce = armor && armor.armorLevel ? armor.armorLevel * 2 : 0;
+        const armorReduce = armor && armor.armorLevel ? Math.round(armor.armorLevel * 2 * D.durabilityFactor(armor)) : 0;
         const strike = (mult) => {
           if (evade || Math.random() >= hitChance) return 0;
           let raw = (enemy.effectiveStr * 1.5 + (enemy.level || 1) * 0.5) * (Math.random() * 0.5 + 0.75) * mult * T.enemyDamageMultiplier(state, enemy) * exposed;
@@ -703,6 +704,9 @@ function applyCombatRound(state, input) {
       }
     }
   }
+
+  // Gear wears: weapons when they land blows, armour when it takes them.
+  for (const l of D.wearGear(state, { struck: result.playerHit && (action === 'attack' || (ability && ability.kind === 'weapon')), wasHit: result.enemyHit })) result.enemyLines.push(l);
 
   // Casters recover a little mana each round they fight.
   if (T.getKnownAbilities(state).some(a => a.cost && a.cost.mana) || (state.spells || []).length) {

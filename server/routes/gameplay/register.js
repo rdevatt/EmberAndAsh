@@ -37,7 +37,7 @@ const HELP_TEXT = [
   'Rest:     rest (short) · make camp (full heal, risk of ambush) · rent a room at the inn (safe, costs coin)',
   'Trade:    shop · buy <item> · sell <item> · drink potion / drink mana potion',
   'Quests:   check board · accept quest N · quests · abandon quest N',
-  'Gear:     gear / backpack · equip <item> · unequip <item> · drop <item>',
+  'Gear:     gear / backpack · equip <item> · unequip <item> · drop <item> · repair gear · reforge <item> (blacksmiths)',
   'Growth:   stats · spend point on <stat>   (offers: answer "yes" or "no")',
   'Party:    companions · recruit <name> · hire a sellsword · dismiss <name>',
   'Shop:     open shop · close shop (merchants: sell your own goods)'

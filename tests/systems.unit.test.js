@@ -323,3 +323,47 @@ test('supply contracts consume real materials; escorts cannot be talked into com
   quests.checkQuestProgress(s, "we're here, we arrived", []);
   assert.equal(esc.progress, 0);
 });
+
+// ---------------- durability ----------------
+const D = require('../game/durability');
+
+test('gear wears in combat, loses power when worn/broken, and keeps wear through re-equipping', () => {
+  seedRandom(4);
+  const s = ready('ironport', 20);
+  s.gear.weapon = ch.buildGearItem({ name: 'sword', tier: 4 }, false);
+  s.gear.weapon.durability = 26;
+  for (let i = 0; i < 40; i++) D.wearGear(s, { struck: true, wasHit: false });
+  assert.ok(s.gear.weapon.durability < 26);
+  assert.ok(D.durabilityFactor(s.gear.weapon) < 1);
+  s.gear.weapon.durability = 0;
+  assert.equal(D.durabilityFactor(s.gear.weapon), 0, 'broken gear gives nothing');
+  const { processEquipCommand, detectEquipIntent } = require('../game/economy');
+  processEquipCommand(s, detectEquipIntent('unequip sword'));
+  processEquipCommand(s, detectEquipIntent('equip sword'));
+  assert.equal(s.gear.weapon.durability, 0, 'unequip/equip is not a free repair');
+});
+
+test('repairs cost coin at a merchant or ore for a blacksmith; reforging needs skill', () => {
+  const s = ready('ironport', 20, { coin: 0 });
+  s.gear.weapon = ch.buildGearItem({ name: 'sword', tier: 4 }, false);
+  s.gear.weapon.durability = 40;
+  assert.equal(D.repair(s).success, false, 'no coin, no repair');
+  s.coin = 10000;
+  assert.equal(D.repair(s).success, true);
+  assert.equal(s.gear.weapon.durability, 100);
+  assert.ok(s.coin < 10000);
+
+  const smith = ready('the_core_wastes', 40, { profession: 'blacksmith', profXP: 0, coin: 5000 });
+  smith.character.region = 'shattered_throne';   // no settlement
+  smith.gear.weapon = ch.buildGearItem({ name: 'sword', tier: 3 }, false);
+  smith.gear.weapon.durability = 50;
+  world.addMaterial(smith, 'silver ore', 5);
+  assert.equal(D.repair(smith).success, true, 'blacksmiths repair with ore anywhere');
+  assert.equal(world.countMaterial(smith, 'silver ore'), 3);
+  assert.equal(D.reforge(smith, 'sword').success, false, 'needs profession level 3');
+  smith.profXP = 200;
+  const r = D.reforge(smith, 'sword');
+  assert.equal(r.success, true, r.message);
+  assert.equal(smith.gear.weapon.tier, 4);
+  assert.equal(world.countMaterial(smith, 'silver ore'), 0);
+});

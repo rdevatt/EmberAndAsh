@@ -485,7 +485,8 @@ function processEquipCommand(state, equipIntent) {
           statMods: (typeof invItem === 'object' && invItem.statMods) ? invItem.statMods : null,
           isCrafted: !!(typeof invItem === 'object' && invItem.isCrafted),
           sellBonus: (typeof invItem === 'object' && invItem.sellBonus) ? invItem.sellBonus : 0,
-          craftedBy: (typeof invItem === 'object' && invItem.craftedBy) ? invItem.craftedBy : null
+          craftedBy: (typeof invItem === 'object' && invItem.craftedBy) ? invItem.craftedBy : null,
+          durability: (typeof invItem === 'object' && typeof invItem.durability === 'number') ? invItem.durability : undefined
         };
 
         if (!source.statMods) {
@@ -555,7 +556,8 @@ function processEquipCommand(state, equipIntent) {
     statMods:    w.statMods  || null,
     isCrafted:   w.isCrafted || false,
     canUse,
-    label:       `${w.name} (${w.quality})${canUse ? '' : ' [Level ' + w.levelReq + ' required]'}`,
+    durability:  typeof w.durability === 'number' ? w.durability : 100,
+    label:       `${w.name} (${w.quality})${canUse ? '' : ' [Level ' + w.levelReq + ' required]'}${(w.durability ?? 100) <= 0 ? ' [BROKEN]' : (w.durability ?? 100) <= 25 ? ' [worn]' : ''}`,
     modDisplay:  formatStatMods(w.statMods)
   };
 }
@@ -577,7 +579,8 @@ function getArmorDisplay(state) {
     statMods:    a.statMods  || null,
     isCrafted:   a.isCrafted || false,
     canUse,
-    label:       `${a.name} (${a.quality})${canUse ? '' : ' [Level ' + a.levelReq + ' required]'}`,
+    durability:  typeof a.durability === 'number' ? a.durability : 100,
+    label:       `${a.name} (${a.quality})${canUse ? '' : ' [Level ' + a.levelReq + ' required]'}${(a.durability ?? 100) <= 0 ? ' [BROKEN]' : (a.durability ?? 100) <= 25 ? ' [worn]' : ''}`,
     modDisplay:  formatStatMods(a.statMods)
   };
 }

@@ -13,8 +13,8 @@ Status key:
 
 | Check | Command | Latest result |
 | --- | --- | --- |
-| Unit + API tests | `npm test` | **64 / 64 pass** (run repeatedly, stable) |
-| Full-game bot over HTTP, no state editing | `node scripts/playthrough.js` | **5 complete runs reached an ending** (table below) |
+| Unit + API tests | `npm test` | **66 / 66 pass** (run repeatedly, stable) |
+| Full-game bot over HTTP, no state editing | `node scripts/playthrough.js` | **6 complete runs reached an ending** (table below) |
 | Combat balance by tier, build and boss | `node scripts/balance-sim.js` | table below |
 | Every region | `node scripts/region-sweep.js` | ability-using fighter wins **86–100 %** in all 38 regions |
 | World tour (all 38 regions by road over the API) | `tests/world-tour.api.test.js` | pass |
@@ -27,6 +27,7 @@ Status key:
 | Fighter / alchemist | Wardens | The Long Fire | 2,191 | 95 | 3 | 28 | 21 |
 | Ranger / scout | Ascend | The New Sovereign | 2,112 | 96 | 3 | 29 | 21 |
 | Wizard / alchemist | Remnant | The Sun Rises | 3,884 | 95 | 15 | 13 | 24 |
+| Fighter (seed 21, with durability) | Wardens | The Long Fire | 2,255 | 96 | 2 | — | — |
 | Fighter / alchemist (seed 11) | Shatter | The Ordinary World | 2,715 | 95 | 2 | 8 | 21 |
 | Ranger / scout (seed 3) | Wardens | The Long Fire | 2,046 | 96 | 0 | 24 | 21 |
 
@@ -85,12 +86,12 @@ Regular enemies at each tier's mid level, tier-appropriate gear. Win rates:
 - **Advance quests:** go exactly one tier up.
 - **Partial:** escort-on-death is the only failure condition. There are no timed quests.
 
-### 6. Equipment, crafting, economy — **Done + tested** (crafting, economy); **Missing** (durability)
+### 6. Equipment, crafting, economy — **Done + tested**
 - **Crafting:** 20 recipes. Gear quality is capped by your level, your profession level and your best ore. Reagents add enchantments.
 - **Free crafting removed:** describing crafting no longer creates items, and narrated profession XP is rate-limited.
 - **Economy:** resale is always below the purchase price (tested for every shop item). Scene pickups are worthless junk. Loot is typed and tiered. Gear stat mods disappear on unequip (tested).
-- **Missing:** item durability and repair.
-- **Partial:** professions have a few unlockable benefits beyond quality and yield (scout hazard and flee bonuses, scholar landmark XP, a bonus potion yield at level 3+, stronger enchantments at level 4+). There is no reforging of existing gear.
+- **Durability:** weapons wear when they land blows and armour when it takes them. Worn gear (≤25%) gives 75% of its bonus; broken gear gives none. Unequipping and re-equipping keeps the wear. `repair gear` at a merchant costs coin; blacksmiths repair with ore anywhere. Blacksmiths of profession level 3+ can `reforge <item>` one quality tier (3 ore + coin, capped by level, skill and metal). All of this is tested.
+- **Partial:** professions other than blacksmith have only a few unlockable benefits beyond quality and yield (scout hazard and flee bonuses, scholar landmark XP, a bonus potion yield at level 3+, stronger enchantments at level 4+).
 
 ### 7. Companions and relationships — **Done + tested** (rules); **Done, lightly tested** (play)
 - **Roster:** 8 named companions with personalities and roles (striker, guardian, healer, caster), plus hired sellswords on a contract.
@@ -116,10 +117,18 @@ Regular enemies at each tier's mid level, tier-appropriate gear. Win rates:
 
 ## Known gaps and risks
 - **Live AI narration is untested** (no valid key).
-- **Durability and repair** are not implemented.
 - **Pacing:** the bots finish in about 2,000–3,900 actions. A human typing full sentences will take far longer. That pacing has not been tested with real players.
 - **Bot coverage:** bots use 3 builds (fighter, ranger, wizard). Rogue, cleric and the other classes are covered by simulation only.
 - **NPC dialogue is shallow** (one line per NPC, outside the story).
 
 ## Next implementation task
-**Gear durability and blacksmith reforging.** Weapons and armour lose durability in combat. A merchant or blacksmith repairs them for coin and materials. A blacksmith of profession level 3+ can `reforge <item>` to raise an owned item one quality tier (capped by player level and ore). Start in `game/economy/core.js` (gear objects) and `game/crafting-recipes.js`, add a `durability` field with a migration in `game/state.js` `validateState`, and cover it in `tests/systems.unit.test.js`.
+**Deeper profession unlocks for the non-smith trades.** Mirror what blacksmiths now have (repair and reforge) for the other professions:
+
+- **Alchemist:** combat elixirs (strength, ward, cleanse) at levels 3 and 5.
+- **Hunter:** trophy materials from beasts and bonus damage against them.
+- **Scholar:** inscribing a spell scroll that teaches a non-caster one spell.
+- **Cook:** meals with a lasting buff.
+- **Merchant:** better resale and an "appraise" command.
+- **Scout:** reveal a region's landmarks and hazards on arrival.
+
+Start in `game/crafting-recipes.js` (new recipes gated by `prof` and profession level) and `game/combat-tactics.js` (buff status types). Cover each unlock in `tests/systems.unit.test.js`.
