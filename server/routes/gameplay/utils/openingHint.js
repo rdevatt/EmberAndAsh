@@ -36,6 +36,7 @@ function buildOpeningHint(state) {
     region ? `[Region feel: ${regionFlavors[region] || region}]` : '',
     beastOpenings[region] ? `[Opening beat: ${beastOpenings[region]}]` : '',
     '[Write ONLY prose. No stats, no mechanics, no system text. Establish the world as dangerous, real, and indifferent.]',
+    '[STORY HOOK — nearby, a wounded Ember Warden named Maren Holt (a woman in Warden grey with a flame-in-circle badge, bleeding from an arrow wound in her side) is slumped against something. She was hunting the same beast. Introduce her, but do not have her speak at length — the player will talk to her.]',
     '[End on an open beat — something just changed, now what?]'
   ].filter(Boolean).join('\n');
 }

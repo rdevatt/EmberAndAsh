@@ -50,7 +50,11 @@ function isOfflineMode() {
 }
 
 function getGroqClient() {
-  if (!groq) groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+  if (!groq) groq = new Groq({
+    apiKey: process.env.GROQ_API_KEY,
+    timeout: parseInt(process.env.EMBER_AI_TIMEOUT_MS || '15000', 10),
+    maxRetries: 1
+  });
   return groq;
 }
 const MODEL          = 'llama-3.3-70b-versatile';
@@ -296,9 +300,51 @@ function buildFullPrompt(state, playerInput) {
 // Single responsibility: call the API and return text.
 // All error handling lives here.
 // =============================================
+// ---------------------------------------------
+// AI availability: a small circuit breaker so a bad key, rate limit or
+// outage costs one slow request, not one per action.
+// ---------------------------------------------
+const aiHealth = { disabledUntil: 0, reason: null, failures: 0, lastError: null, lastSuccessAt: 0 };
+
+function getNarrationStatus() {
+  if (isOfflineMode()) return { mode: 'offline', reason: process.env.GROQ_API_KEY ? 'disabled by NARRATIVE_OFFLINE' : 'no GROQ_API_KEY set' };
+  if (Date.now() < aiHealth.disabledUntil) return { mode: 'offline', reason: aiHealth.reason, retryInSeconds: Math.ceil((aiHealth.disabledUntil - Date.now()) / 1000) };
+  return { mode: 'ai', reason: null };
+}
+
+function tripBreaker(err) {
+  const status = err && (err.status || (err.response && err.response.status));
+  aiHealth.failures++;
+  aiHealth.lastError = String((err && err.message) || err).slice(0, 200);
+  let pauseMs = 0;
+  if (status === 401 || status === 403) { pauseMs = 10 * 60 * 1000; aiHealth.reason = 'AI key rejected (HTTP ' + status + ')'; }
+  else if (status === 429) {
+    const retry = parseInt((err.headers && (err.headers['retry-after'] || (err.headers.get && err.headers.get('retry-after')))) || '30', 10);
+    pauseMs = Math.min(300, Math.max(5, retry || 30)) * 1000; aiHealth.reason = 'AI rate limited';
+  } else if (aiHealth.failures >= 3) { pauseMs = 60 * 1000; aiHealth.reason = 'AI unreachable'; }
+  if (pauseMs) {
+    aiHealth.disabledUntil = Date.now() + pauseMs;
+    console.warn(`[Narrative] AI paused for ${Math.round(pauseMs / 1000)}s: ${aiHealth.reason}. Using offline narration.`);
+  }
+}
+
+// Removes things narration must never claim: bracketed engine notes and
+// invented rewards. The engine's own announcements are appended separately.
+function sanitizeNarrative(text) {
+  let t = String(text || '');
+  t = t.replace(/^\s*\[[^\]\n]{0,400}\]\s*$/gm, '');
+  t = t.replace(/\(?\+\s?\d+\s*(?:xp|experience|gold|silver|copper|coins?)\b\)?/gi, '');
+  t = t.replace(/\b(?:you (?:gain|earn|receive|obtain|are awarded))\s+\d+\s*(?:xp|experience|gold|silver|copper|coins?)\b[.!]?/gi, '');
+  t = t.replace(/[ \t]+([.,!?;:])/g, '$1').replace(/\n{3,}/g, '\n\n').trim();
+  return t.length > 2400 ? t.slice(0, 2400).replace(/\s+\S*$/, '') + '…' : t;
+}
+
 async function callGroq(prompt, systemOverride = null, history = []) {
   if (isOfflineMode()) {
     return { success: false, offline: true, text: '', error: 'offline', tokens: 0 };
+  }
+  if (Date.now() < aiHealth.disabledUntil) {
+    return { success: false, offline: true, text: '', error: aiHealth.reason, tokens: 0 };
   }
   try {
     const response = await getGroqClient().chat.completions.create({
@@ -306,36 +352,26 @@ async function callGroq(prompt, systemOverride = null, history = []) {
       max_tokens:  MAX_TOKENS,
       temperature: 0.85,
       messages: [
-        {
-          role:    'system',
-          content: systemOverride || SYSTEM_PROMPT
-        },
+        { role: 'system', content: systemOverride || SYSTEM_PROMPT },
         ...history,
-        {
-          role:    'user',
-          content: prompt
-        }
+        { role: 'user', content: prompt }
       ]
     });
-
-    return {
-      success: true,
-      text:    response.choices[0]?.message?.content?.trim() || '',
-      tokens:  response.usage?.total_tokens || 0
-    };
-
+    const raw = response && response.choices && response.choices[0] && response.choices[0].message && response.choices[0].message.content;
+    const text = typeof raw === 'string' ? sanitizeNarrative(raw) : '';
+    if (text.length < 2) throw Object.assign(new Error('Malformed or empty AI response'), { status: 'malformed' });
+    aiHealth.failures = 0;
+    aiHealth.lastSuccessAt = Date.now();
+    return { success: true, text, tokens: (response.usage && response.usage.total_tokens) || 0 };
   } catch (err) {
     console.error('[Narrative] Groq call failed:', err.message);
-
-    // Return a safe fallback so the game never hard-crashes on AI failure
-    return {
-      success: false,
-      text:    'The world holds its breath for a moment. Then the story continues.',
-      error:   err.message,
-      tokens:  0
-    };
+    tripBreaker(err);
+    // Callers fall back to offline narration built from engine facts.
+    return { success: false, text: '', error: err.message, tokens: 0 };
   }
 }
+
+function __setGroqClientForTests(client) { groq = client; aiHealth.disabledUntil = 0; aiHealth.failures = 0; aiHealth.reason = null; }
 
 
 // =============================================
@@ -347,61 +383,9 @@ function pick(list, seed) {
   return list[Math.abs(seed) % list.length];
 }
 
+// Offline prose lives in ./offline.js (varied, state-accurate, no invented outcomes).
 function buildOfflineNarrative(state, playerInput, hint) {
-  const region = state.character ? REGIONS[state.character.region] : null;
-  const seed   = (state.actionCount || 0) + String(playerInput || '').length;
-  const h      = String(hint || '');
-  const lines  = [];
-
-  if (h.includes('[OPENING SCENE')) {
-    const opening = region && region.beastOpening
-      ? region.beastOpening + '.'
-      : 'Something that should have killed you lies dead in the mud instead.';
-    lines.push(opening);
-    lines.push(`Around you: ${region ? region.flavor : 'a world that does not care whether you live'}. The warmth in your chest has not faded.`);
-    return lines.join('\n\n');
-  }
-
-  const enemy = state.currentEnemy;
-  const r     = state.pendingCombatResult;
-  if (h.includes('ENEMY SPAWNED') || h.includes('AMBIENT ENCOUNTER') || h.includes('found you')) {
-    if (enemy) lines.push(`A ${enemy.label} closes in. ${enemy.desc}`);
-  } else if (h.includes('[COMBAT NARRATIVE') && r) {
-    lines.push(r.playerHit
-      ? pick(['Your strike lands with a wet, solid sound.', 'Steel finds flesh.', 'The blow connects and the enemy reels.'], seed)
-      : pick(['Your attack cuts only air.', 'The enemy twists away from your strike.', 'You overreach and the blow goes wide.'], seed));
-    lines.push(r.enemyHit
-      ? pick(['Pain answers — the counterblow catches you hard.', 'You take a hit and the world flashes white.'], seed)
-      : pick(['The return strike whistles past you.', 'You slip the counterattack by a hair.'], seed));
-  } else if (h.includes('SUCCESSFULLY FLEES')) {
-    lines.push('You break away and run until the sounds of pursuit fade behind you.');
-  } else if (h.includes('FLEE FAILED')) {
-    lines.push('You turn to run and a blow catches you across the back. There is no escape — not yet.');
-  } else if (h.includes('IMPOSSIBLE FIGHT')) {
-    lines.push('Nothing you do touches it. Every instinct screams at you to run.');
-  } else if (h.includes('QUEST ACCEPTED') || h.includes('QUEST ACTIVE')) {
-    lines.push('You tear the notice from the board and tuck it away. Work is work.');
-  } else if (h.includes('QUEST COMPLETED')) {
-    lines.push('The job is done. Coin changes hands, and for a moment the world feels a little less hostile.');
-  } else if (h.includes('TRAVEL —')) {
-    lines.push('The road unspools beneath your feet, mile after mile, until the land itself changes.');
-  } else if (h.includes('BOUNTY BOARD')) {
-    lines.push('Weathered notices flap against the board, each one a promise of coin and trouble.');
-  } else if (h.includes('PROFESSION TASK') || h.includes('NO PROFESSION')) {
-    lines.push('The work takes time and sweat, but it gets done.');
-  } else if (h.includes('SHOP EVENT')) {
-    lines.push('A customer drifts up to your stall, eyeing your wares.');
-  }
-
-  if (lines.length === 0) {
-    lines.push(pick([
-      `Time passes in ${region ? region.label : 'the wilds'}. ${region ? region.flavor.charAt(0).toUpperCase() + region.flavor.slice(1) : 'The world'} surrounds you.`,
-      'The world carries on around you, indifferent and watchful.',
-      'Wind moves through the area. Somewhere far off, something calls and is answered.',
-      'Nothing stirs for the moment. The silence feels earned, and temporary.'
-    ], seed));
-  }
-  return lines.join(' ');
+  return require('./offline').buildOfflineNarrative(state, playerInput, hint);
 }
 
 
@@ -818,6 +802,9 @@ module.exports = {
   // Groq
   callGroq,
   isOfflineMode,
+  getNarrationStatus,
+  sanitizeNarrative,
+  __setGroqClientForTests,
   buildOfflineNarrative,
 
   // Summary

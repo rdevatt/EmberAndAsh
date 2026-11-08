@@ -15,6 +15,7 @@
 const path = require('path');
 const h = require(path.join(__dirname, '..', 'tests', 'helpers'));
 const { REGIONS, GEAR_QUALITIES } = require(path.join(__dirname, '..', 'game', 'constants'));
+const T = require(path.join(__dirname, '..', 'game', 'combat-tactics'));
 const { CHAPTERS, BOSSES } = require(path.join(__dirname, '..', 'game', 'constants', 'data', 'world', 'campaign'));
 
 const argv = process.argv.slice(2);
@@ -87,7 +88,10 @@ async function fightToEnd() {
     else {
       const heal = abilities.find(a => /heal|second wind|lay on|inner peace|regrowth/i.test(a.label));
       const ward = abilities.find(a => /ward|sanctuary|divine shield/i.test(a.label));
-      const strike = abilities.find(a => !/heal|second wind|lay on|inner peace|regrowth|blood|ward|sanctuary|divine shield|power attack/i.test(a.label) && (a.cost.mana || 0) <= last.character.mana && (a.cost.stamina || 0) <= last.character.stamina);
+      // What "inspect" would tell a player: don't use elements the enemy resists.
+      const foe = last.rightPanel && last.rightPanel.enemy;
+      const resisted = foe ? T.describeTraits({ label: foe.label }).strong : [];
+      const strike = abilities.find(a => !resisted.includes((T.ABILITIES[a.id] || {}).element) && !/heal|second wind|lay on|inner peace|regrowth|blood|ward|sanctuary|divine shield|power attack/i.test(a.label) && (a.cost.mana || 0) <= last.character.mana && (a.cost.stamina || 0) <= last.character.stamina);
       if (heal && hpPct() < 0.5) input = `I use ${heal.label}`;
       else if (ward && hpPct() < 0.8 && !/ward \d/.test(lastOut)) input = `I use ${ward.label}`;
       else if (strike) input = `I use ${strike.label}`;
@@ -128,8 +132,10 @@ async function shop() {
     const w = await act(`buy ${style.weapon === 'staff' ? 'oak staff' : style.weapon === 'bow' ? 'longbow' : 'sword'}`);
     const a = await act('buy leather armor');
     const wn = (w.output || '').match(/Bought (.+?) for/); const an = (a.output || '').match(/Bought (.+?) for/);
-    if (wn) await act(`equip ${wn[1]}`);
-    if (an) await act(`equip ${an[1]}`);
+    let e1, e2;
+    if (wn) e1 = await act(`equip ${wn[1]}`);
+    if (an) e2 = await act(`equip ${an[1]}`);
+    if (argv.includes('--trace')) log(`  shop t${t}: ${(w.output || '').slice(0, 60)} | ${(e1 && e1.output || '').slice(0, 60)} | ${(e2 && e2.output || '').slice(0, 60)}`);
     boughtTier = t;
   }
   for (const ward of wardsNeeded) if (!inv().some(i => (i.name || i) === ward) && coin() > 300 * r.tier) await act(`buy ${ward}`);
@@ -173,7 +179,7 @@ function grindRegion(target) {
   let best = region(), bestScore = -Infinity;
   for (const [k, r] of Object.entries(REGIONS)) {
     if (k === 'shattered_throne' && !(last.story && last.story.chapter === 10)) continue;
-    if (r.levelRange[0] > lvl + 1 || r.levelRange[1] < lvl - 4 || !r.settlement) continue;
+    if (r.levelRange[0] > lvl - 1 || r.levelRange[1] < lvl - 4 || !r.settlement) continue;
     const dist = (route(target || region(), k) || []).length;
     const score = r.levelRange[0] * 2 - dist * 3;
     if (score > bestScore) { bestScore = score; best = k; }
