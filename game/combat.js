@@ -535,7 +535,9 @@ function applyCombatRound(state, input) {
     const hit    = Math.random() < chance;
     const crit   = hit && (Math.random() < Math.min(critBonus >= 1 ? 1 : 0.4, stats.dex / 250 + bp.critBonus + (critBonus || 0)));
     const raw    = (Math.max(1, atk - 7) + weaponBonus + Math.floor(playerLevel / 2)) * bp.damageMod * (mult || 1) * (crit ? 2 : 1);
-    const dmg    = hit ? Math.max(1, Math.round(raw * dmgMult * T.resistMultiplier(enemy, element || 'physical'))) : 0;
+    // Hunters know where beasts are soft.
+    const hunterEdge = state.profession === 'hunter' && enemy.traits.tags.includes('beast') ? 1.15 : 1;
+    const dmg    = hit ? Math.max(1, Math.round(raw * dmgMult * hunterEdge * T.resistMultiplier(enemy, element || 'physical'))) : 0;
     return { hit, crit, dmg, chance };
   };
 
@@ -593,7 +595,16 @@ function applyCombatRound(state, input) {
     } else {
       const idx = state.inventory.indexOf(potion);
       state.inventory.splice(idx, 1);
-      if (item === 'mana potion') {
+      if (item === 'elixir of might') {
+        T.addEffect(state, enemy, 'player', { type: 'rage', remaining: 4 });
+        result.playerLines.push('⚗ You drink an elixir of might — fury fills you (+40% damage)');
+      } else if (item === 'warding draught') {
+        T.addPlayerWard(state, Math.round(state.maxHp * 0.3));
+        result.playerLines.push(`⚗ You drink a warding draught — a ward absorbs the next ${Math.round(state.maxHp * 0.3)} damage`);
+      } else if (item === 'snare') {
+        const r = T.addEffect(state, enemy, 'enemy', { type: 'stun', remaining: 1 });
+        result.playerLines.push(r.immune ? `✕ ${enemy.label} tears through the snare` : `⚙ You spring a snare — ${enemy.label} is caught`);
+      } else if (item === 'mana potion') {
         const before = state.mana;
         state.mana = Math.min(state.maxMana, state.mana + Math.ceil(state.maxMana * 0.4));
         result.playerLines.push(`⚗ You drink a mana potion — Mana +${state.mana - before}`);

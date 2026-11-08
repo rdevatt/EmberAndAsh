@@ -13,7 +13,7 @@ Status key:
 
 | Check | Command | Latest result |
 | --- | --- | --- |
-| Unit + API tests | `npm test` | **66 / 66 pass** (run repeatedly, stable) |
+| Unit + API tests | `npm test` | **68 / 68 pass** (run repeatedly, stable) |
 | Full-game bot over HTTP, no state editing | `node scripts/playthrough.js` | **6 complete runs reached an ending** (table below) |
 | Combat balance by tier, build and boss | `node scripts/balance-sim.js` | table below |
 | Every region | `node scripts/region-sweep.js` | ability-using fighter wins **86–100 %** in all 38 regions |
@@ -87,11 +87,19 @@ Regular enemies at each tier's mid level, tier-appropriate gear. Win rates:
 - **Partial:** escort-on-death is the only failure condition. There are no timed quests.
 
 ### 6. Equipment, crafting, economy — **Done + tested**
-- **Crafting:** 20 recipes. Gear quality is capped by your level, your profession level and your best ore. Reagents add enchantments.
+- **Crafting:** 25 recipes. Gear quality is capped by your level, your profession level and your best ore. Reagents add enchantments.
 - **Free crafting removed:** describing crafting no longer creates items, and narrated profession XP is rate-limited.
 - **Economy:** resale is always below the purchase price (tested for every shop item). Scene pickups are worthless junk. Loot is typed and tiered. Gear stat mods disappear on unequip (tested).
 - **Durability:** weapons wear when they land blows and armour when it takes them. Worn gear (≤25%) gives 75% of its bonus; broken gear gives none. Unequipping and re-equipping keeps the wear. `repair gear` at a merchant costs coin; blacksmiths repair with ore anywhere. Blacksmiths of profession level 3+ can `reforge <item>` one quality tier (3 ore + coin, capped by level, skill and metal). All of this is tested.
-- **Partial:** professions other than blacksmith have only a few unlockable benefits beyond quality and yield (scout hazard and flee bonuses, scholar landmark XP, a bonus potion yield at level 3+, stronger enchantments at level 4+).
+- **Profession unlocks:** all tested.
+  - **Blacksmith:** repair with ore anywhere; reforge gear at profession level 3+.
+  - **Alchemist:** elixir of might (fury) at level 3+, warding draught at 5+, and a bonus potion per brew at 3+.
+  - **Cook:** travel feasts that heal 60%, at level 2+.
+  - **Scholar:** spell scrolls at level 3+ (`read spell scroll` teaches Mana Bolt or Divine Bolt), and +25% XP from landmarks.
+  - **Hunter:** +15% damage against beasts; snares that stun, at level 2+.
+  - **Scout:** snares, reveals landmarks on arrival, halves hazard damage, and makes fleeing easier.
+  - **Merchant:** +5% resale per profession level.
+  - **All crafters:** stronger enchantments at profession level 4+.
 
 ### 7. Companions and relationships — **Done + tested** (rules); **Done, lightly tested** (play)
 - **Roster:** 8 named companions with personalities and roles (striker, guardian, healer, caster), plus hired sellswords on a contract.
@@ -122,13 +130,15 @@ Regular enemies at each tier's mid level, tier-appropriate gear. Win rates:
 - **NPC dialogue is shallow** (one line per NPC, outside the story).
 
 ## Next implementation task
-**Deeper profession unlocks for the non-smith trades.** Mirror what blacksmiths now have (repair and reforge) for the other professions:
+**Companion personal quests and deeper NPC dialogue.** Today each roster companion has a personality line, a combat role and loyalty, but nothing of their own to do. Give each of the 8 a short personal quest that unlocks at loyalty 70:
 
-- **Alchemist:** combat elixirs (strength, ward, cleanse) at levels 3 and 5.
-- **Hunter:** trophy materials from beasts and bonus damage against them.
-- **Scholar:** inscribing a spell scroll that teaches a non-caster one spell.
-- **Cook:** meals with a lasting buff.
-- **Merchant:** better resale and an "appraise" command.
-- **Scout:** reveal a region's landmarks and hazards on arrival.
+- **Brannoc:** forge a blade from star-iron.
+- **Tamsin:** clear the Silver Grove.
+- **Sexton Abel:** lay the Oakhaven dead to rest.
+- **Heron:** sink a Choir barge.
+- **Seraphine:** relight one more tower.
+- **Aske:** hold the Scar.
+- **Lucan:** confront the Choir in the Core Wastes.
+- **Maren:** reclaim the caravan's last shard.
 
-Start in `game/crafting-recipes.js` (new recipes gated by `prof` and profession level) and `game/combat-tactics.js` (buff status types). Cover each unlock in `tests/systems.unit.test.js`.
+Completing a quest grants a companion upgrade (a second ability or a role boost) and a unique line of dialogue. Add these as campaign-style step lists in a new `game/constants/data/world/companion-quests.js`, drive them through `campaign.onEvent`-style hooks in `game/companions.js`, and test them in `tests/systems.unit.test.js`.

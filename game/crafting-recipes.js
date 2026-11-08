@@ -46,6 +46,13 @@ const RECIPES = {
   healing:    { label: 'healing potion', prof: ['alchemist', 'cook'], slot: 'consumable', needs: { herbs: 2 }, yields: 2, item: { name: 'healing potion', type: 'potion', heal: 0.4 }, names: ['healing potion', 'healing potions', 'potion', 'potions', 'healing draught'] },
   mana:       { label: 'mana potion',  prof: ['alchemist', 'scholar'], slot: 'consumable', needs: { herbs: 2, moonpetal: 1 }, yields: 2, item: { name: 'mana potion', type: 'potion', mana: 0.4 }, names: ['mana potion', 'mana potions'] },
   meal:       { label: 'hearty meal',  prof: ['cook', 'hunter'], slot: 'consumable', needs: { hide: 1, herbs: 1 }, yields: 2, item: { name: 'healing potion', label: 'hearty meal', type: 'potion', heal: 0.3 }, names: ['meal', 'hearty meal', 'stew', 'food', 'rations'] },
+  // --- profession unlocks (minimum profession level) ---
+  might:      { label: 'elixir of might',   prof: ['alchemist'], minProf: 3, slot: 'consumable', needs: { herbs: 2, emberglass: 1 }, yields: 2, item: { name: 'elixir of might', type: 'potion', buff: 'rage' }, names: ['elixir of might', 'might elixir', 'elixirs of might'] },
+  warding:    { label: 'warding draught',   prof: ['alchemist'], minProf: 5, slot: 'consumable', needs: { herbs: 2, sunstone: 1 }, yields: 2, item: { name: 'warding draught', type: 'potion', ward: 0.3 }, names: ['warding draught', 'warding draughts', 'ward draught'] },
+  feast:      { label: 'travel feast',      prof: ['cook'], minProf: 2, slot: 'consumable', needs: { hide: 2, herbs: 2 }, yields: 2, item: { name: 'hearty meal', label: 'travel feast', type: 'potion', heal: 0.6 }, names: ['feast', 'travel feast'] },
+  scroll:     { label: 'spell scroll',      prof: ['scholar'], minProf: 3, slot: 'consumable', needs: { hide: 1, herbs: 1, moonpetal: 1 }, yields: 1, item: { name: 'spell scroll', type: 'scroll' }, names: ['spell scroll', 'scroll', 'scroll of mana bolt'] },
+  trap_kit:   { label: 'hunter\'s snare',   prof: ['hunter', 'scout'], minProf: 2, slot: 'consumable', needs: { timber: 1, hide: 1 }, yields: 2, item: { name: 'snare', type: 'potion', snare: true }, names: ['snare', 'snares', 'trap', 'traps'] },
+
   // --- wards (anyone can make these) ---
   fur_cloak:  { label: 'fur-lined cloak',   prof: null, slot: 'ward', needs: { hide: 3 },                    item: { name: 'fur-lined cloak', type: 'ward' },   names: ['fur-lined cloak', 'fur cloak', 'warm cloak'] },
   fog_lantern:{ label: 'fog lantern',       prof: null, slot: 'ward', needs: { timber: 1, 'iron ore': 1 },  item: { name: 'fog lantern', type: 'ward' },       names: ['fog lantern', 'lantern'] },
@@ -114,6 +121,9 @@ function craft(state, { id, recipe, qty = 1 }) {
   if (recipe.prof && !recipe.prof.includes(state.profession)) {
     return { success: false, message: `Making a ${recipe.label} takes a ${recipe.prof.join(' or ')}'s training. ${state.profession ? `You are a ${state.profession}.` : 'You have no profession yet — do the work of a trade and one will be offered.'}` };
   }
+  if (recipe.minProf && profLevel < recipe.minProf) {
+    return { success: false, message: `A ${recipe.label} takes profession level ${recipe.minProf} (you are level ${profLevel}).` };
+  }
   const oreKind = bestOre(state) || 'iron ore';
   const runs = recipe.slot === 'consumable' || recipe.slot === 'ward' ? qty : 1;
   const needs = resolveNeeds(state, recipe, oreKind);
@@ -175,7 +185,7 @@ function buildRecipeText(state) {
   for (const [, r] of Object.entries(RECIPES)) {
     const allowed = !r.prof || r.prof.includes(prof);
     const needs = Object.entries(r.needs).map(([k, q]) => `${q} ${k}`).join(' + ');
-    lines.push(`  ${allowed ? '•' : '✕'} ${r.label.padEnd(18)} ${needs}${r.prof ? `  [${r.prof.join('/')}]` : ''}`);
+    lines.push(`  ${allowed ? '•' : '✕'} ${r.label.padEnd(18)} ${needs}${r.prof ? `  [${r.prof.join('/')}${r.minProf ? ` ${r.minProf}+` : ''}]` : ''}`);
   }
   lines.push('', '"ore" uses the best ore you carry (iron → silver → mithril → star-iron).',
     'A rare reagent in your pack (emberglass, sunstone, wyrm scale...) is used automatically to enchant gear.',

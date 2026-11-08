@@ -119,3 +119,22 @@ test('campaign, factions, companions, landmarks and travel survive save, restart
     assert.match(lm.output, /already explored/, 'landmark discovery kept');
   }
 });
+
+test('scholar scrolls teach a spell once; repair needs coin; "fix the cart" stays a story action', async () => {
+  const c = await guestWithCharacter();
+  const s = sessions.get(c.sessionId).state;
+  s.spells = [];
+  s.inventory.push({ name: 'spell scroll', type: 'scroll' }, { name: 'spell scroll', type: 'scroll' });
+  const r1 = await c.act('read spell scroll');
+  assert.match(r1.output, /Spell learned/);
+  assert.equal(s.spells.length, 1);
+  await c.act('read spell scroll');
+  const r3 = await c.act('read spell scroll');
+  assert.match(r3.output, /nothing you do not already know|no spell scroll/);
+
+  s.gear.weapon.durability = 10; s.coin = 0;
+  const broke = await c.act('repair gear');
+  assert.match(broke.output, /Repairs cost/);
+  const story = await c.act('I fix the cart wheel');
+  assert.notEqual(story.isCommand, true);
+});

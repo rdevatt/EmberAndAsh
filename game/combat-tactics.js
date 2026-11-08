@@ -152,7 +152,7 @@ function detectAbility(state, input) {
 
 const DEFEND_RE = /\b(defend|block|parry|brace|raise my shield|shield up|guard myself|take cover|dodge|evade|sidestep|hold my ground|go defensive|defensive stance|duck)\b/i;
 const ATTACK_VERBS = /\b(slash|stab|strike|hit|attack|swing|thrust|cut|shoot|smash|riposte|counter|lunge|punch|kick|cleave|fire)\b/i;
-const ITEM_RE = /\b(drink|quaff|down|use)\b.*\b(potion|draught|elixir|tonic)\b/i;
+const ITEM_RE = /\b(drink|quaff|down|use|throw|set)\b.*\b(potion|draught|elixir|tonic|snare|trap)\b/i;
 
 function detectDefend(input) {
   const t = String(input || '');
@@ -162,7 +162,11 @@ function detectDefend(input) {
 function detectCombatItem(input) {
   const t = String(input || '');
   if (!ITEM_RE.test(t)) return null;
-  return /\bmana\b/i.test(t) ? 'mana potion' : 'healing potion';
+  if (/\bmana\b/i.test(t)) return 'mana potion';
+  if (/\bmight\b/i.test(t)) return 'elixir of might';
+  if (/\bwarding\b/i.test(t)) return 'warding draught';
+  if (/\b(snare|trap)\b/i.test(t)) return 'snare';
+  return 'healing potion';
 }
 
 // ---------------------------------------------

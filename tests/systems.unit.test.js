@@ -367,3 +367,24 @@ test('repairs cost coin at a merchant or ore for a blacksmith; reforging needs s
   assert.equal(smith.gear.weapon.tier, 4);
   assert.equal(world.countMaterial(smith, 'silver ore'), 0);
 });
+
+test('profession unlocks: gated recipes, combat elixirs and snares, scholar scrolls', () => {
+  seedRandom(6);
+  const alch = ready('ironport', 30, { profession: 'alchemist', profXP: 60 });   // level 2
+  world.addMaterial(alch, 'herbs', 4); world.addMaterial(alch, 'emberglass', 1);
+  assert.equal(crafting.craft(alch, crafting.detectCraft(alch, 'brew elixir of might')).success, false, 'needs level 3');
+  alch.profXP = 160;
+  assert.equal(crafting.craft(alch, crafting.detectCraft(alch, 'brew elixir of might')).success, true);
+  assert.equal(alch.inventory.filter(i => i.name === 'elixir of might').length, 3, '2 + level-3 bonus');
+
+  alch.inCombat = true; alch.currentEnemy = combat.spawnEnemy('ironport', 30); T.clearCombatEffects(alch);
+  alch.currentEnemy.currentHP = alch.currentEnemy.maxHP = 10000;
+  const r = combat.applyCombatRound(alch, 'I drink an elixir of might');
+  assert.match(r.combatLog, /elixir of might/);
+  assert.ok(T.hasEffect(alch, 'player', 'rage'), 'fury active');
+  assert.equal(alch.inventory.filter(i => i.name === 'elixir of might').length, 2, 'one consumed');
+
+  alch.inventory.push({ name: 'snare', type: 'potion', snare: true });
+  const snared = combat.applyCombatRound(alch, 'I set a snare');
+  assert.match(snared.combatLog, /snare/);
+});

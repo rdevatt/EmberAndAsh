@@ -52,6 +52,20 @@ module.exports = function createWorldCommands(h) {
     // ---------------- combat-only guard ----------------
     if (state.inCombat) return null;
 
+    // ---------------- scholar's scrolls ----------------
+    if (/^(?:i\s+)?(?:read|study|use|learn from)\s+(?:the\s+|a\s+|my\s+)?spell scroll$/i.test(cmd)) {
+      const { STARTING_SPELLS } = require('../../../game/constants');
+      const idx = (state.inventory || []).findIndex(i => (typeof i === 'string' ? i : i.name) === 'spell scroll');
+      if (idx < 0) return sendCommand(req, res, 'You have no spell scroll. Scholars can scribe them ("craft spell scroll").', 'scroll', { persist: false });
+      if (!Array.isArray(state.spells)) state.spells = [];
+      const order = (state.stats.wis || 10) > (state.stats.int || 10) ? ['divine_bolt', 'mana_bolt'] : ['mana_bolt', 'divine_bolt'];
+      const spellId = order.find(id => !state.spells.some(sp => sp && sp.id === id));
+      if (!spellId) return sendCommand(req, res, 'The scroll teaches nothing you do not already know.', 'scroll', { persist: false });
+      state.inventory.splice(idx, 1);
+      state.spells.push({ ...STARTING_SPELLS[spellId] });
+      return sendCommand(req, res, `You study the scroll until the words burn themselves into memory. Spell learned: ${STARTING_SPELLS[spellId].label} ("cast ${STARTING_SPELLS[spellId].label}").`, 'scroll');
+    }
+
     // ---------------- repair & reforge ----------------
     const repairMatch = cmd.match(/^(?:i\s+)?(?:repair|mend|fix)(?:\s+(?:my\s+|the\s+)?(gear|equipment|everything|all|weapon|armou?r|sword|blade|bow|staff|dagger|axe|mace|spear|mail|leather armou?r))?$/i);
     if (repairMatch) {

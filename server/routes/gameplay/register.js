@@ -33,7 +33,7 @@ const HELP_TEXT = [
   '          abilities (list yours) — watch for ⚠ telegraphed attacks and defend against them',
   'After:    loot the body · recover gear (where you died)',
   'World:    explore (places here) · explore <place> · gather · map · travel to <region>',
-  'Craft:    recipes · materials · craft <item> ("forge a sword", "brew healing potion", "make a fur-lined cloak")',
+  'Craft:    recipes · materials · craft <item> ("forge a sword", "brew healing potion", "make a fur-lined cloak") · read spell scroll',
   'Rest:     rest (short) · make camp (full heal, risk of ambush) · rent a room at the inn (safe, costs coin)',
   'Trade:    shop · buy <item> · sell <item> · drink potion / drink mana potion',
   'Quests:   check board · accept quest N · quests · abandon quest N',
@@ -459,6 +459,9 @@ module.exports = function registerGameplayRoutes(app, deps) {
         if (arrival && arrival.settlement) events.push({ type: 'system', message: `${arrival.settlement.name} (${arrival.settlement.kind}) — inn: ${arrival.settlement.inn}. Type "explore" to see what is here.` });
         const hz = world.applyHazard(state);
         if (hz) events.push({ type: 'system', message: hz.message });
+        if (state.profession === 'scout' && arrival) {
+          events.push({ type: 'system', message: `Scout's eye: ${arrival.landmarks.map(l => l.name + (l.guarded ? ' (guarded)' : '')).join(', ')}${arrival.reagent ? `; rare ${arrival.reagent} grows here` : ''}.` });
+        }
         applyQuestUpdates(state, events, cleanInput, [{ type: 'arrived', region: result.to }]);
         worldCommands.pushCampaign(events, campaign.onEvent(state, { type: 'arrived', region: result.to }));
 
@@ -660,6 +663,8 @@ module.exports = function registerGameplayRoutes(app, deps) {
         if (!itemName) return sendCommand(req, res, 'Sell what item?', 'inventory', { persist: false });
         const sold = sellInventoryOrEquipped(state, itemName);
         if (!sold) return sendCommand(req, res, `You do not have "${itemName}" in your backpack or equipped gear.`, 'inventory', { persist: false });
+        // Merchants know how to haggle: +5% resale per profession level.
+        if (state.profession === 'merchant') sold.value = Math.round(sold.value * (1 + 0.05 * Math.max(1, state.professionLevel || 1)));
         addCoin(state, sold.value);
         return sendCommand(req, res, `Sold ${sold.name} for ${formatCoin(sold.value)}.`, 'inventory');
       }
