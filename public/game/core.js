@@ -232,6 +232,9 @@ function applyPanels(data) {
     if ('story' in data)  updateStoryPanel(data.story, data.narration);
     if (data.factions)    updateFactionsPanel(data.factions);
     if (data.party)       updatePartyPanel(data.party);
+    if ('world' in data)  updateWorldPanel(data.world);
+    if (data.portrait && window.EmberScene) EmberScene.renderPortrait(document.getElementById('portrait-holder'), data.portrait);
+    if (data.scene && window.EmberScene) showScene(data.scene, data.inCreation);
     updateCombatActions(data);
   } catch (e) {
     console.warn('[UI] Panel update error (non-fatal):', e);

@@ -9,6 +9,7 @@ function stripTrailingPunctuation(value) {
 module.exports = function registerSaveRoutes(app, deps) {
   const {
     db,
+    worldStore,
     requireSession,
     setSession,
     persistSession,
@@ -140,6 +141,14 @@ module.exports = function registerSaveRoutes(app, deps) {
 
   // Starts a new character in the current slot (the client confirms first).
   app.post('/api/game/reset', requireSession, async (req, res) => {
+    // Never discard a character: the one being replaced goes to the archive
+    // (resumable from the Worlds menu). The new one starts in a fresh world.
+    const old = req.session.state;
+    if (old && old.character && old.character.region && !isInCreation(old)) {
+      const { getPlayerLevel } = require('../../../game/character');
+      db.archiveCharacter(old.characterId || `c_legacy_${Date.now()}`, req.session.playerId ? `player:${req.session.playerId}` : `guest:${req.sessionId}`, old.worldId || null, old.character.name, getPlayerLevel(old.totalXP || 0), old);
+      if (worldStore) worldStore.persist(old, req.session, req.sessionId);
+    }
     const freshState = newCreationState();
     if (req.session.state && req.session.state.nsfwEnabled === false) freshState.nsfwEnabled = false;
 

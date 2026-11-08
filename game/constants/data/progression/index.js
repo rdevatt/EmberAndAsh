@@ -70,7 +70,8 @@ const INTIMACY_CONDITIONS = {
   nsfwEnabled:      true
 };
 
-const MAX_LEVEL = 100;
+// No final level any more (see game/character/xp.js). Kept for old imports.
+const MAX_LEVEL = Infinity;
 
 const CLASS_LEVEL_XP = [
   0,

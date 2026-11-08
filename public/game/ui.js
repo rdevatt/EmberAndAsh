@@ -401,6 +401,96 @@ document.addEventListener('click', (ev) => {
   if (btn) runCommand(btn.dataset.cmd);
 });
 
+// ---------------------------------------------
+// Living world: date, age, titles, after-ending choices, scenes, worlds
+// ---------------------------------------------
+function updateWorldPanel(w) {
+  const line = document.getElementById('world-line');
+  const ageEl = document.getElementById('char-age');
+  const titles = document.getElementById('char-titles');
+  const after = document.getElementById('after-ending');
+  if (!w) { if (line) line.textContent = ''; if (after) after.classList.add('hidden'); return; }
+  if (line) line.textContent = `${w.date} · ${w.era}${w.realm ? ` · ${w.realm}` : ''}${w.crises ? ` · ${w.crises} crisis${w.crises > 1 ? 'es' : ''}` : ''}${w.saga ? `\nSaga — ${w.saga}` : ''}`;
+  if (ageEl) ageEl.textContent = `Age ${w.age} (${w.ageBand})${w.deceased ? ' — deceased' : ''}`;
+  if (titles) titles.textContent = (w.titles || []).join(' · ');
+  if (after) after.classList.toggle('hidden', !(w.afterEnding || w.deceased));
+  const cont = document.getElementById('btn-after-continue');
+  if (cont) cont.classList.toggle('hidden', !!w.deceased);
+}
+
+let sceneHidden = false;
+try { sceneHidden = localStorage.getItem('ea-hide-art') === '1'; } catch (e) { /* ignore */ }
+function showScene(scene, inCreation) {
+  const stage = document.getElementById('scene-stage');
+  if (!stage) return;
+  stage.classList.toggle('hidden', sceneHidden || !!inCreation);
+  if (sceneHidden) return;
+  EmberScene.render(document.getElementById('scene-holder'), document.getElementById('scene-caption'), scene);
+}
+
+async function afterEnding(path, body) {
+  if (client.isLoading) return;
+  setLoading(true);
+  const { ok, data } = await apiCall('POST', path, body || {});
+  setLoading(false);
+  if (!ok) { appendSystemMessage(data.error || 'Something went wrong.'); return; }
+  if (data.inCreation) {
+    el.storyContent.innerHTML = '';
+    try { localStorage.removeItem('storyHistory'); } catch (e) { /* ignore */ }
+    await enterSession(data, null);
+    if (data.output) appendSystemMessage(data.output.split('\n\n')[0]);
+    return;
+  }
+  applyPanels(data);
+  if (data.output) appendCommandOutput(null, data.output);
+}
+
+async function loadWorldsList() {
+  const box = document.getElementById('worlds-list');
+  if (!box) return;
+  const { ok, data } = await apiCall('GET', '/world');
+  if (!ok) { box.textContent = 'Could not load worlds.'; return; }
+  const parts = [];
+  if (data.current) parts.push(`<div><b>${escHtml(data.current.name)}</b> — ${escHtml(data.current.date)} · ${escHtml(data.current.era)}</div>`);
+  const others = (data.worlds || []).filter(w => !data.current || w.id !== data.current.id);
+  if (others.length) parts.push('<div style="margin-top:6px">Other worlds (kept safe):</div>' + others.map(w => `<div>• ${escHtml(w.name || w.id)} — ${w.events} events, ${w.figures} legends</div>`).join(''));
+  const arch = data.archived || [];
+  if (arch.length) parts.push('<div style="margin-top:6px">Characters set aside:</div>' + arch.map(c => `<div class="archived-row">• ${escHtml(c.name || 'Unnamed')} (Lv ${escHtml(c.level)}) <button type="button" class="quick-btn resume-btn" data-id="${escHtml(c.character_id)}">Resume</button></div>`).join(''));
+  if (!parts.length) parts.push('<div>Only this world so far.</div>');
+  box.innerHTML = parts.join('');
+  box.querySelectorAll('.resume-btn').forEach(b => b.addEventListener('click', async () => {
+    if (!window.confirm('Switch to this character? Your current character will be set aside safely and can be resumed later.')) return;
+    document.getElementById('btn-close-saves').click();
+    await afterEnding('/world/resume', { characterId: b.dataset.id });
+  }));
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const bind = (id, fn) => { const b = document.getElementById(id); if (b) b.addEventListener('click', fn); };
+  bind('btn-after-continue', () => afterEnding('/world/continue'));
+  bind('btn-after-same', () => {
+    const y = window.prompt('How many years later does the new character begin? (0–200)', '20');
+    if (y === null) return;
+    afterEnding('/world/new-character', { mode: 'same', years: parseInt(y, 10) || 0 });
+  });
+  bind('btn-after-new', () => {
+    if (!window.confirm('Start an entirely new world? This world and its characters are kept and can be resumed from the Saves menu.')) return;
+    afterEnding('/world/new-character', { mode: 'new' });
+  });
+  bind('btn-scene-hide', () => {
+    sceneHidden = !sceneHidden;
+    try { localStorage.setItem('ea-hide-art', sceneHidden ? '1' : '0'); } catch (e) { /* ignore */ }
+    document.getElementById('scene-stage').classList.toggle('hidden', sceneHidden);
+    if (sceneHidden) appendSystemMessage('Illustrations hidden. Use the Hide art button (or reload) to bring them back.');
+  });
+  bind('btn-scene-still', () => {
+    let still = false;
+    try { still = localStorage.getItem('ea-still') !== '1'; localStorage.setItem('ea-still', still ? '1' : '0'); } catch (e) { /* ignore */ }
+    const b = document.getElementById('btn-scene-still'); if (b) b.textContent = still ? 'Animate' : 'Still';
+  });
+  bind('btn-saves', () => setTimeout(loadWorldsList, 50));
+});
+
 // Submits a command as if the player had typed it.
 function runCommand(text) {
   if (client.inCreation || client.isLoading) return;

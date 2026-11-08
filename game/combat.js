@@ -237,7 +237,8 @@ function buildEnemyInstance(key, enemy, targetLevel) {
   const effectiveDex  = 5 + (enemy.mods.dex || 0) + Math.floor(targetLevel * 0.3);
   const effectiveVit  = 5 + (enemy.mods.vit || 0) + Math.floor(targetLevel * 0.4);
   // Deeper tiers field tougher creatures so fights stay meaningful as gear improves.
-  const depth         = 1 + Math.max(0, targetLevel - 10) / 60;
+  // Capped at ×2.5: beyond that, difficulty comes from mechanics, not HP.
+  const depth         = Math.min(2.5, 1 + Math.max(0, targetLevel - 10) / 60);
   const maxHP         = Math.max(8, Math.round((enemy.hpBase * 0.6 + effectiveVit * 3 + targetLevel * 2) * depth));
 
   return {
@@ -294,7 +295,10 @@ function isEnemyUnbeatable(enemyLevel, playerLevel) {
 function calculateEnemyXP(enemyLevel, playerLevel, xpMod) {
   const gap      = enemyLevel - playerLevel;
   const gapBonus = gap > 0 ? 1 + (gap * 0.1) : 1.0;
-  return Math.round(enemyLevel * gapBonus * (xpMod || 1.0));
+  // Trivial foes teach nothing: far-weaker enemies give a sliver of XP,
+  // so high levels can't be reached by farming the outer rim.
+  const trivial  = gap < -25 ? 0.02 : gap < -10 ? 0.25 : 1;
+  return Math.max(gap < -25 ? 0 : 1, Math.round(enemyLevel * gapBonus * (xpMod || 1.0) * trivial));
 }
 // =============================================
 // STATUS EFFECTS SYSTEM
@@ -460,6 +464,19 @@ function applyCombatRound(state, input) {
     bodyPart: (BODY_PARTS[bodyPartKey] || BODY_PARTS.torso).label
   };
 
+  // Rift and saga environments: burning ground, mana drain.
+  const env = enemy.environment || {};
+  if (env.burnPct && state.hp > 0) {
+    const burn = Math.max(1, Math.round(state.maxHp * env.burnPct));
+    state.hp = Math.max(1, state.hp - burn);
+    result.preLines.push(`🔥 The ground burns you — ${burn} damage`);
+  }
+  if (env.manaDrainPct && state.mana > 0) {
+    const drain = Math.max(1, Math.round(state.maxMana * env.manaDrainPct));
+    state.mana = Math.max(0, state.mana - drain);
+    result.preLines.push(`✧ The rift drinks ${drain} of your mana`);
+  }
+
   // Unbeatable enemy — skip normal resolution
   if (isEnemyUnbeatable(enemy.level, playerLevel)) {
     const armor       = getActiveArmor(state);
@@ -531,7 +548,7 @@ function applyCombatRound(state, input) {
 
   const rollWeaponHit = (hitMod, critBonus, mult, element) => {
     const atk    = T.attackStat(stats, weapon, ability);
-    const chance = Math.min(0.95, Math.max(0.05, 0.60 + dexAdv + bp.hitMod + qualityMod + staminaMod + (hitMod || 0)));
+    const chance = Math.min(0.95, Math.max(0.05, 0.60 + dexAdv + bp.hitMod + qualityMod + staminaMod + (hitMod || 0) - (env.hitPenalty || 0)));
     const hit    = Math.random() < chance;
     const crit   = hit && (Math.random() < Math.min(critBonus >= 1 ? 1 : 0.4, stats.dex / 250 + bp.critBonus + (critBonus || 0)));
     const raw    = (Math.max(1, atk - 7) + weaponBonus + Math.floor(playerLevel / 2)) * bp.damageMod * (mult || 1) * (crit ? 2 : 1);

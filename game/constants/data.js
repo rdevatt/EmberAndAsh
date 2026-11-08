@@ -70,6 +70,18 @@ const {
 const { createRegionMonsterPack } = require('./data/world/region-monsters');
 Object.assign(ENEMIES, createRegionMonsterPack(REGIONS, ENEMIES));
 
+// Gear beyond Legendary for an unbounded level curve: Mythic, Ascendant,
+// Primordial, Eternal and Worldforged tiers, each in five grades.
+(function extendGearQualities() {
+  const names = ['Mythic', 'Ascendant', 'Primordial', 'Eternal', 'Worldforged'];
+  const roman = ['', ' II', ' III', ' IV', ' V'];
+  let t = GEAR_QUALITIES.length;            // 10
+  for (const n of names) for (const r of roman) {
+    GEAR_QUALITIES.push({ tier: t, label: n + r, levelReq: 95 + (t - 9) * 15, weaponBonus: 48 + (t - 9) * 9, armorLevel: 22 + (t - 9) * 3 });
+    t++;
+  }
+})();
+
 // Settlements, NPCs, landmarks, hazards, resources and a two-way road graph.
 const { applyRegionDetails, HAZARDS, MATERIALS } = require('./data/world/region-details');
 applyRegionDetails(REGIONS);

@@ -15,6 +15,11 @@ const comps     = require('../../../game/companions');
 const factions  = require('../../../game/factions');
 const world     = require('../../../game/world');
 const tactics   = require('../../../game/combat-tactics');
+const chronicle = require('../../../game/chronicle');
+const endless   = require('../../../game/endless');
+const legacy    = require('../../../game/legacy');
+const { buildScene } = require('../../../game/scene');
+const appearance = require('../../../game/appearance');
 const { getTierForLevelPublic } = { getTierForLevelPublic: (lvl) => { const { GEAR_QUALITIES } = require('../../../game/constants'); let t = 0; for (const q of GEAR_QUALITIES) if (lvl >= q.levelReq) t = q.tier; return t; } };
 
 const MAX_INPUT_LENGTH = 2000;
@@ -129,13 +134,20 @@ module.exports = function registerGameplayRoutes(app, deps) {
 
   // Instant (non-narrative) command reply. Every command returns full panels
   // so the UI never shows stale HP/coin/inventory.
-  async function sendCommand(req, res, output, commandType, { persist = true } = {}) {
+  async function sendCommand(req, res, output, commandType, { persist = true, hours = 0 } = {}) {
     const state = req.session.state;
+    req.timeDefault = false;                 // menus and instant commands take no time
+    const notes = settleTime(req, hours);
+    if (notes.length) { output = `${output || ''}\n\n${notes.join('\n')}`; persist = true; }
     if (persist) await persistSession(req.sessionId);
     req.session.lastEvents = [];
     req.session.lastCombatLog = null;
     setSession(req.sessionId, req.session);
-    return res.json({ success: true, output, isCommand: true, commandType, undoable: false, ...allPanels(state) });
+    return res.json({ success: true, output, isCommand: true, commandType, undoable: false, ...allPanels(state), scene: safeScene(state, { commandType, input: req.body && req.body.input }) });
+  }
+
+  function safeScene(state, ctx) {
+    try { return buildScene(state, ctx); } catch (e) { console.error('[Scene] build failed:', e.message); return null; }
   }
 
   function appendHint(state, hint) {
@@ -206,6 +218,12 @@ module.exports = function registerGameplayRoutes(app, deps) {
     const levelUp = grantXP(state, kill.xp, { classXP: true });
     if (levelUp) events.push(levelUp);
     comps.onVictory(state);
+    // Hard-won boss fights leave a mark.
+    if (kill.isBoss && state.hp < state.maxHp * 0.15) {
+      const spots = ['cheek', 'brow', 'jaw', 'chin', 'neck', 'forehead'];
+      const where = spots[(state.campaign && state.campaign.bossesDefeated ? state.campaign.bossesDefeated.length : 0) % spots.length];
+      if (appearance.addScar(state, where)) events.push({ type: 'system', message: `The fight leaves you a scar across the ${where}.` });
+    }
 
     const meta = kill.meta || {};
     if (meta.landmark) {
@@ -221,9 +239,25 @@ module.exports = function registerGameplayRoutes(app, deps) {
       appendHint(state, `[BOSS DEFEATED — ${kill.label} has fallen. This is a turning point in the story. Make it feel earned.]`);
     }
     if (meta.rift) {
-      const msg = campaign.onRiftCleared(state, meta.rift);
+      const msg = endless.onRiftCleared(state, meta.rift);
       if (msg) events.push({ type: 'system', message: msg });
     }
+    const W = chronicle.worldOf(state);
+    if (meta.crisis && W) {
+      const msg = endless.onCrisisWon(state, W, meta.crisis);
+      if (msg) events.push({ type: 'system', message: msg });
+    }
+    if (meta.saga && W) {
+      const r = endless.onSagaEvent(state, W, { type: 'kill', meta });
+      if (r) { events.push({ type: 'system', message: r.message }); if (r.levelUp) events.push(r.levelUp); }
+    }
+    if (meta.relic && W) {
+      const r = legacy.claimRelic(W, state, meta.relic);
+      events.push({ type: 'system', message: r.message });
+    }
+    // Great milestones enter the chronicle.
+    const lvl = getPlayerLevel(state.totalXP || 0);
+    if (W && lvl >= 100 && lvl % 25 === 0) chronicle.addAchievement(W, state, `reaches the ${lvl}th level of mastery`, `level:${state.characterId}:${lvl}`);
 
     applyQuestUpdates(state, events, input, [{ type: 'enemyDefeated', enemyLabel: kill.label, meta }]);
   }
@@ -277,11 +311,40 @@ module.exports = function registerGameplayRoutes(app, deps) {
   function req_undoLock() { if (currentReq) currentReq.session.undoLocked = true; }
 
   const worldCommands = createWorldCommands({
-    sendCommand, narrateAndRespond: (...a) => narrateAndRespond(...a), startEncounter, appendHint, spawnEnemy, getPlayerLevel
+    sendCommand, narrateAndRespond: (...a) => narrateAndRespond(...a), startEncounter, appendHint, spawnEnemy, getPlayerLevel,
+    addTime: (req, h) => addTime(req, h)
   });
+
+  // ---------------------------------------------
+  // Time: each request accumulates the hours its actions take; they are
+  // applied once, only when the request succeeds. Commands, menus and
+  // conversations cost nothing.
+  // ---------------------------------------------
+  function addTime(req, hours) { if (req) { req.timeHours = (req.timeHours || 0) + hours; req.timeDefault = false; } }
+  function settleTime(req, extraHours = 0) {
+    const hours = (req.timeHours || 0) + extraHours + (req.timeDefault ? chronicle.TIME_COST.action : 0);
+    req.timeHours = 0; req.timeDefault = false;
+    if (!hours || !chronicle.worldOf(req.session.state) || !req.session.state.character || !req.session.state.character.region) return [];
+    const st = req.session.state;
+    const result = chronicle.advanceTime(st, hours);
+    const W = chronicle.worldOf(st);
+    // Old age claims those who outlive their span.
+    if (W && !st.deceased && chronicle.isPastLifespan(st, W)) {
+      st.deceased = true;
+      st.inCombat = false; st.currentEnemy = null;
+      chronicle.recordFigure(W, st, { status: 'deceased' });
+      const fig = W.figures.find(f => f.characterId === st.characterId);
+      if (fig) { fig.deathYear = chronicle.dateOf(chronicle.nowHour(W)).year; fig.tomb = st.character.region; }
+      if (fig && st.gear && st.gear.weapon && !W.relics.some(r => r.figureId === st.characterId)) W.relics.push({ id: `relic_${st.characterId}`, figureId: st.characterId, name: `${st.character.name}'s ${st.gear.weapon.name}`, region: st.character.region, claimedBy: null });
+      chronicle.addEvent(W, { type: 'death', importance: 4, title: `${st.character.name} dies of old age at ${chronicle.ageOf(st, W)}`, actor: chronicle.actorOf(st), region: st.character.region }, `death:${st.characterId}`);
+      result.messages.push(`\n— ${st.character.name.toUpperCase()} DIES OF OLD AGE —\nTheir story passes into the chronicle. Choose "new character in this world" to continue in the world they shaped, or "new world".`);
+    }
+    return result.messages;
+  }
 
   async function narrateAndRespond(req, res, input, events, extra = {}) {
     const state     = req.session.state;
+    for (const note of settleTime(req)) events.push({ type: 'system', message: note });
     const progress  = processPendingProgressEvents(state);
     events.push(...progress);
 
@@ -300,13 +363,15 @@ module.exports = function registerGameplayRoutes(app, deps) {
       db.appendStoryHistory(req.session.saveId, state.actionCount || 0, input, narrative.narrative || '', state.sceneContext || 'neutral');
     }
 
-    return res.json({ success: true, output, undoable: !req.session.undoLocked, ...allPanels(state), rightPanel: narrative.rightPanel });
+    const scene = safeScene(state, { combatResult: extra.combatResult || null, killed: !!extra.killed, killedEnemy: extra.killedEnemy || null, events, npcName: req.sceneNpc || null, input });
+    return res.json({ success: true, output, undoable: !req.session.undoLocked, ...allPanels(state), rightPanel: narrative.rightPanel, scene });
   }
 
   // Runs one combat round (or flee) and narrates it. Shared by /action and /edit-action.
   async function handleCombatTurn(req, res, input, events) {
     const state = req.session.state;
     req.session.undoLocked = true;
+    req.timeDefault = false;
 
     if (detectFleeIntent(input)) {
       const fleeing = state.currentEnemy;
@@ -320,14 +385,16 @@ module.exports = function registerGameplayRoutes(app, deps) {
       return narrateAndRespond(req, res, input, events);
     }
 
+    const enemyBefore  = state.currentEnemy;
     const combatResult = applyCombatRound(state, input);
     state.pendingContextHint = combatResult.hint;
     updateActionProgress(state, input);
+    if (combatResult.enemyKilled || !state.inCombat) addTime(req, chronicle.TIME_COST.fight);
 
     if (combatResult.enemyKilled) applyKill(state, events, input);
     if (isDead(state)) applyDeath(state, events);
 
-    return narrateAndRespond(req, res, input, events, { combatLog: combatResult.combatLog });
+    return narrateAndRespond(req, res, input, events, { combatLog: combatResult.combatLog, combatResult: combatResult.result, killed: combatResult.enemyKilled, killedEnemy: combatResult.enemyKilled ? enemyBefore : null });
   }
 
   // ---------------------------------------------
@@ -347,6 +414,10 @@ module.exports = function registerGameplayRoutes(app, deps) {
     req.session.lastInput     = cleanInput;
     req.session.undoLocked    = false;
     currentReq = req;
+    req.timeHours = 0;
+    req.timeDefault = !isInCreation(state);       // narrated actions take an hour
+    const worldNow = chronicle.worldOf(state);
+    req.session.worldHourSnapshot = worldNow ? chronicle.nowHour(worldNow) : null;
 
     try {
       // =========================================
@@ -371,14 +442,37 @@ module.exports = function registerGameplayRoutes(app, deps) {
         const narrative = await processNarrative(state, cleanInput, events);
         await persistSession(req.sessionId);
 
+        if (result.done) appearance.ensureAppearance(state);
         return res.json({
           success:       true,
+          scene:         result.done ? safeScene(state, {}) : null,
           output:        narrative.fullOutput,
           creationError: !!result.error,
           creationPhase: state.creation.phase,
           ...allPanels(state),
           rightPanel:    narrative.rightPanel
         });
+      }
+
+      // =========================================
+      // AFTER THE STORY: continue / new character here / new world
+      // =========================================
+      const { worldRoutes } = deps;
+      const lowerCmd = stripTrailingPunctuation(cleanInput.toLowerCase());
+      if (worldRoutes && /^(?:new character in (?:this|the same) world|new character here|begin anew in this world|a new generation)(?:,?\s*(\d+)\s*years? later)?$/.test(lowerCmd)) {
+        const yrs = (lowerCmd.match(/(\d+)\s*years?/) || [])[1];
+        const r = await worldRoutes.startNewCharacter(req, { mode: 'same', years: yrs !== undefined ? parseInt(yrs, 10) : 20 });
+        if (r.error) return sendCommand(req, res, r.error, 'world', { persist: false });
+        return res.json({ ...r.body, isCommand: true, commandType: 'newCharacter' });
+      }
+      if (worldRoutes && /^(?:new world|start a new world|start an entirely new world|fresh world)$/.test(lowerCmd)) {
+        const r = await worldRoutes.startNewCharacter(req, { mode: 'new' });
+        if (r.error) return sendCommand(req, res, r.error, 'world', { persist: false });
+        return res.json({ ...r.body, isCommand: true, commandType: 'newWorld' });
+      }
+      if (/^(?:continue|continue as (?:this|my) character|go on|carry on)$/.test(lowerCmd) && state.campaign && state.campaign.ending && state.campaign.afterEnding === 'pending') {
+        state.campaign.afterEnding = 'continue';
+        return sendCommand(req, res, `${state.character.name}'s story goes on. The world has changed and so have you. Try "sagas", "crises", "chronicle", "titles", "legends" — and the rift still waits at the Throne.`, 'continue');
       }
 
       // States saved mid-death by older versions: resolve before anything else.
@@ -454,6 +548,8 @@ module.exports = function registerGameplayRoutes(app, deps) {
         if (!result.success) return sendCommand(req, res, result.message, 'travel', { persist: false });
 
         events.push({ type: 'travel', from: result.from, to: result.to, message: result.message });
+        const upHill = (REGIONS[result.to].tier || 1) > (REGIONS[result.from] ? REGIONS[result.from].tier : 1);
+        addTime(req, upHill ? chronicle.TIME_COST.travelUp : chronicle.TIME_COST.travelSame);
         state.pendingContextHint = result.hint;
         const arrival = REGIONS[result.to];
         if (arrival && arrival.settlement) events.push({ type: 'system', message: `${arrival.settlement.name} (${arrival.settlement.kind}) — inn: ${arrival.settlement.inn}. Type "explore" to see what is here.` });
@@ -464,6 +560,15 @@ module.exports = function registerGameplayRoutes(app, deps) {
         }
         applyQuestUpdates(state, events, cleanInput, [{ type: 'arrived', region: result.to }]);
         worldCommands.pushCampaign(events, campaign.onEvent(state, { type: 'arrived', region: result.to }));
+        const W = chronicle.worldOf(state);
+        if (W) {
+          const sg = endless.onSagaEvent(state, W, { type: 'arrived', region: result.to });
+          if (sg) events.push({ type: 'system', message: sg.message });
+          const crisisHere = endless.activeCrises(W).find(c => c.region === result.to);
+          if (crisisHere) events.push({ type: 'system', message: `⚠ ${crisisHere.title}: ${crisisHere.text} ("answer the call")` });
+          const settlement = W.settlements[result.to];
+          if (settlement && settlement.status !== 'thriving') events.push({ type: 'system', message: `${REGIONS[result.to].label} is ${settlement.status}.` });
+        }
 
         // The road is not always quiet.
         if (Math.random() < 0.25) {
@@ -558,7 +663,7 @@ module.exports = function registerGameplayRoutes(app, deps) {
           : `You find a spot to rest, keeping one eye open.${roomNote}\n\nHours pass. You wake feeling restored.`;
         return sendCommand(req, res,
           `${restMessage}\n\nStamina: ${state.stamina}/${state.maxStamina} (full)\nHP: ${state.hp}/${state.maxHp} (full)\nMana: ${state.mana}/${state.maxMana} (full)`,
-          'longRest');
+          'longRest', { hours: chronicle.worldOf(state) ? chronicle.hoursUntilMorning(chronicle.worldOf(state)) : 8 });
       }
 
       if (isShortRest) {
@@ -575,7 +680,7 @@ module.exports = function registerGameplayRoutes(app, deps) {
           `Stamina: +${state.stamina - oldStamina} (${state.stamina}/${state.maxStamina})\n` +
           `HP: +${state.hp - oldHp} (${state.hp}/${state.maxHp})\n` +
           `Mana: +${state.mana - oldMana} (${state.mana}/${state.maxMana})`,
-          'rest');
+          'rest', { hours: chronicle.TIME_COST.shortRest });
       }
 
       // =========================================
@@ -944,6 +1049,8 @@ module.exports = function registerGameplayRoutes(app, deps) {
     if (req.session.undoLocked) return res.status(409).json({ error: 'Fate does not rewind: combat rounds and story decisions cannot be undone.', code: 'UNDO_LOCKED' });
     try {
       restoreStateSnapshot(req.session.state, req.session.stateSnapshot);
+      const w = chronicle.worldOf(req.session.state);
+      if (w && typeof req.session.worldHourSnapshot === 'number') { w.calendar.hour = req.session.worldHourSnapshot; chronicle.syncAge(req.session.state, w); }
       const undoneInput = req.session.lastInput;
       req.session.stateSnapshot   = null;
       req.session.lastInput       = null;

@@ -431,3 +431,49 @@ button.retry-btn:not(.story-btn):hover {
   .choice-btn, .combat-btn, .quick-btn { font-size: 13px; padding: 8px 10px; min-height: 40px; }
   .combat-actions { gap: 6px; }
 }
+
+/* ---------- Illustrated scenes & portraits ---------- */
+#scene-stage { border-bottom: 1px solid var(--border); background: var(--bg-darker); }
+#scene-holder { width: 100%; aspect-ratio: 2 / 1; max-height: 260px; overflow: hidden; }
+#scene-holder svg { width: 100%; height: 100%; display: block; }
+#scene-bar { display: flex; justify-content: space-between; align-items: center; gap: 6px; padding: 4px 10px; }
+.portrait-holder { width: 120px; margin: 4px 0 8px; }
+.portrait-holder svg { width: 100%; height: auto; display: block; border: 1px solid var(--border-bright); border-radius: 8px; }
+#char-titles { color: var(--text-gold); margin-top: 2px; }
+#world-line { margin-top: 8px; white-space: pre-line; }
+.ea-actor { transition: transform 0.25s ease; transform-box: fill-box; }
+.ea-player.ea-lunge, .ea-player.ea-walk { animation: ea-lunge 0.5s ease; }
+.ea-enemy.ea-enemy-lunge { animation: ea-enemy-lunge 0.5s ease; }
+.ea-shake { animation: ea-shake 0.4s ease; }
+.ea-cast .ea-figure { filter: drop-shadow(0 0 6px #a08aff); }
+.ea-guard .ea-figure { filter: drop-shadow(0 0 6px #9ad0ff); }
+.ea-heal .ea-figure { filter: drop-shadow(0 0 6px #7ae07a); }
+.ea-levelup .ea-figure { filter: drop-shadow(0 0 10px #ffd040); }
+.ea-windup .ea-enemy-body { filter: drop-shadow(0 0 8px #ff3030); }
+.ea-dazed { opacity: 0.7; }
+.ea-dying, .ea-dead { opacity: 0.25; }
+.ea-dying { transition: opacity 0.6s ease; }
+.ea-dead .ea-enemy-body, .ea-dying .ea-enemy-body { transform: scale(-1, 1) rotate(80deg) translate(0, 30px); transform-box: fill-box; }
+.ea-appear { animation: ea-appear 0.6s ease; }
+.ea-slide { animation: ea-slide 0.9s ease; }
+.ea-float { animation: ea-float 1.3s ease forwards; }
+.ea-projectile { transition: transform 0.4s ease-in; }
+.ea-fall { animation: ea-fall 4s linear infinite; }
+.ea-drift { animation: ea-drift 8s ease-in-out infinite alternate; }
+.ea-pulse, .ea-glow, .ea-flicker { animation: ea-pulse 1.6s ease-in-out infinite; }
+@keyframes ea-lunge { 0%,100% { translate: 0 0; } 45% { translate: 40px 0; } }
+@keyframes ea-enemy-lunge { 0%,100% { translate: 0 0; } 45% { translate: -40px 0; } }
+@keyframes ea-shake { 0%,100% { translate: 0 0; } 25% { translate: 5px 0; } 75% { translate: -5px 0; } }
+@keyframes ea-appear { from { opacity: 0; } to { opacity: 1; } }
+@keyframes ea-slide { from { translate: 60px 0; opacity: 0.4; } to { translate: 0 0; opacity: 1; } }
+@keyframes ea-float { from { opacity: 1; translate: 0 0; } to { opacity: 0; translate: 0 -30px; } }
+@keyframes ea-fall { from { translate: 0 -200px; } to { translate: 0 200px; } }
+@keyframes ea-drift { from { translate: -10px 0; } to { translate: 10px 0; } }
+@keyframes ea-pulse { 0%,100% { opacity: 0.6; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .ea-actor, .ea-float, .ea-fall, .ea-drift, .ea-pulse, .ea-glow, .ea-flicker, .ea-projectile, .ea-slide, .ea-shake, .ea-lunge { animation: none !important; transition: none !important; }
+}
+@media (max-width: 768px) {
+  #scene-holder { max-height: 170px; }
+  .portrait-holder { width: 96px; }
+}

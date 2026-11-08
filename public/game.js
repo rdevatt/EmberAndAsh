@@ -9,6 +9,8 @@
     document.body.appendChild(script);
   };
 
+  load('game/art.js');
+  load('game/scene-view.js');
   load('game/core.js');
   load('game/ui.js');
   load('game/creation.js');

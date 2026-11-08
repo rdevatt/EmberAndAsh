@@ -54,23 +54,13 @@ const {
 // =============================================
 // XP & LEVELING
 // =============================================
-function getXPForLevel(level) {
-  if (level <= 1) return 0;
-  return Math.floor(level * (level - 1) / 2) * 10;
-}
-
-function getPlayerLevel(totalXP) {
-  if (!totalXP || totalXP <= 0) return 1;
-  let level = 1;
-  while (level < MAX_LEVEL && totalXP >= getXPForLevel(level + 1)) level++;
-  return level;
-}
-
-function getXPToNextLevel(totalXP) {
-  const level = getPlayerLevel(totalXP);
-  if (level >= MAX_LEVEL) return null;
-  return getXPForLevel(level + 1) - totalXP;
-}
+// There is no final level — see ./xp.js for the unbounded curve. Levels
+// 1–100 cost exactly what they always did; beyond that each level costs
+// dramatically more. XP values may be decimal strings at very high levels.
+const XP = require('./xp');
+const getXPForLevel   = XP.getXPForLevel;
+const getPlayerLevel  = XP.getPlayerLevel;
+const getXPToNextLevel = XP.getXPToNextLevel;
 
 /**
  * Single entry point for awarding character XP (kills, quests, etc.).
@@ -81,8 +71,8 @@ function grantXP(state, amount, { classXP = false } = {}) {
   const gain = Math.max(0, Math.floor(amount || 0));
   if (gain <= 0) return null;
   const prevLevel = getPlayerLevel(state.totalXP || 0);
-  state.totalXP   = (state.totalXP || 0) + gain;
-  if (classXP) state.classXP = (state.classXP || 0) + gain;
+  state.totalXP   = XP.addXP(state.totalXP || 0, gain);
+  if (classXP) state.classXP = Math.min(Number.MAX_SAFE_INTEGER, (state.classXP || 0) + gain);
   const newLevel  = getPlayerLevel(state.totalXP);
   if (newLevel <= prevLevel) return null;
   const pts        = newLevel - prevLevel;
@@ -102,6 +92,12 @@ function grantXP(state, amount, { classXP = false } = {}) {
 function getEffectiveStats(state) {
   const stats = { ...(state.stats || {}) };
   const level = getPlayerLevel(state.totalXP || 0);
+  // Age shapes the body and mind (youth grows, age trades vigour for wisdom).
+  if (state.character && typeof state.character.bodyAge === 'number') {
+    for (const [stat, val] of Object.entries(require('../chronicle').ageModifiers(state))) {
+      stats[stat] = Math.max(1, (stats[stat] || 0) + val);
+    }
+  }
   for (const slot of ['weapon', 'armor']) {
     const item = state.gear && state.gear[slot];
     if (!item || !item.statMods || level < (item.levelReq || 1)) continue;
@@ -800,7 +796,8 @@ function processCreationInput(state, input) {
 // Returns { levelsGained, freePointsAwarded, resourcesUpdated }
 // =============================================
 function processLevelUp(state) {
-  const prevLevel = getPlayerLevel((state.totalXP || 0) - (state.pendingXP || 0));
+  const before    = XP.toBig(state.totalXP || 0) - XP.toBig(state.pendingXP || 0);
+  const prevLevel = getPlayerLevel(before > 0n ? before.toString() : 0);
   const newLevel  = getPlayerLevel(state.totalXP || 0);
 
   if (newLevel <= prevLevel) return null;

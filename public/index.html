@@ -36,7 +36,10 @@
 
       <section class="panel-section" id="section-identity">
         <div class="panel-label">CHARACTER</div>
+        <div id="portrait-holder" class="portrait-holder"></div>
         <div id="char-name" class="hidden"></div>
+        <div id="char-age" class="dim small"></div>
+        <div id="char-titles" class="small"></div>
         <div id="char-level">Level 1</div>
         <div id="char-background" class="dim">—</div>
         <div id="char-description" class="dim small">—</div>
@@ -201,6 +204,17 @@
     <!-- CENTER PANEL — Story -->
     <section id="panel-center">
 
+      <div id="scene-stage" class="hidden">
+        <div id="scene-holder" aria-live="off"></div>
+        <div id="scene-bar">
+          <span id="scene-caption" class="dim small"></span>
+          <span>
+            <button id="btn-scene-still" type="button" class="quick-btn" title="Turn scene animation off/on">Still</button>
+            <button id="btn-scene-hide" type="button" class="quick-btn" title="Hide or show the illustrated scene">Hide art</button>
+          </span>
+        </div>
+      </div>
+
       <div id="story-output">
         <div id="story-content"></div>
       </div>
@@ -349,11 +363,20 @@
         <div id="story-chapter" class="threat-name">—</div>
         <div id="story-objective" class="dim small">—</div>
         <div id="story-choices" class="story-choices"></div>
+        <div id="world-line" class="dim small"></div>
+        <div id="after-ending" class="story-choices hidden">
+          <div class="small" style="color:var(--text-gold)">The tale of the Ember is told. What now?</div>
+          <button type="button" class="choice-btn" id="btn-after-continue">Continue as this character</button>
+          <button type="button" class="choice-btn" id="btn-after-same">New character in this world (years later)</button>
+          <button type="button" class="choice-btn" id="btn-after-new">Start an entirely new world</button>
+        </div>
         <div class="quick-actions">
           <button class="quick-btn" data-cmd="story" type="button">Journal</button>
           <button class="quick-btn" data-cmd="explore" type="button">Explore</button>
           <button class="quick-btn" data-cmd="map" type="button">Map</button>
           <button class="quick-btn" data-cmd="shop" type="button">Shop</button>
+          <button class="quick-btn" data-cmd="chronicle" type="button">Chronicle</button>
+          <button class="quick-btn" data-cmd="sagas" type="button">Sagas</button>
         </div>
       </section>
 
@@ -522,6 +545,9 @@
           </div>
         </div>
       </div>
+      <div class="modal-divider"></div>
+      <div class="modal-title" style="font-size:12px">WORLDS &amp; CHARACTERS</div>
+      <div id="worlds-list" class="small dim">Loading…</div>
       <div class="modal-note dim small" id="saves-guest-note" style="display:none">
         Log in to use multiple save slots. Guest sessions use a single auto-save.
       </div>
@@ -571,6 +597,8 @@
   </div>
 
 
+  <script src="game/art.js"></script>
+  <script src="game/scene-view.js"></script>
   <script src="game/core.js"></script>
   <script src="game/ui.js"></script>
   <script src="game/creation.js"></script>

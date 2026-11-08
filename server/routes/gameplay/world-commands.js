@@ -14,6 +14,8 @@ const comps     = require('../../../game/companions');
 const tactics   = require('../../../game/combat-tactics');
 const crafting  = require('../../../game/crafting-recipes');
 const durability = require('../../../game/durability');
+const endless   = require('../../../game/endless');
+const legacy    = require('../../../game/legacy');
 const { REGIONS } = require('../../../game/constants');
 
 const FACTION_CMD   = /^(?:factions?|reputation|standing|standings|faction standing)[.!?]*$/i;
@@ -24,7 +26,9 @@ const DISMISS_CMD   = /^(?:i\s+)?(?:dismiss|send away|part ways with|release)\s+
 const COMPANION_CMD = /^(?:companions|check companions|my companions|party|my party)[.!?]*$/i;
 
 module.exports = function createWorldCommands(h) {
-  const { sendCommand, narrateAndRespond, startEncounter, appendHint, spawnEnemy, getPlayerLevel } = h;
+  const { sendCommand, narrateAndRespond, startEncounter, appendHint, spawnEnemy, getPlayerLevel, addTime } = h;
+  const chronicle = require('../../../game/chronicle');
+  const T = chronicle.TIME_COST;
 
   function sys(events, message) { if (message) events.push({ type: 'system', message }); }
 
@@ -49,8 +53,93 @@ module.exports = function createWorldCommands(h) {
     if (/^(?:recipes|crafting|craft list|what can i (?:craft|make|forge|brew))[.!?]*$/i.test(cmd)) return sendCommand(req, res, crafting.buildRecipeText(state), 'recipes', { persist: false });
     if (/^(?:materials|my materials)[.!?]*$/i.test(cmd)) return sendCommand(req, res, crafting.buildMaterialText(state), 'materials', { persist: false });
 
+    // ---------------- the living world ----------------
+    const W = chronicle.worldOf(state);
+    if (/^(?:chronicle|history|world history|the chronicle|timeline)[.!?]*$/i.test(cmd)) return sendCommand(req, res, chronicle.buildChronicleText(W), 'chronicle', { persist: false });
+    if (/^(?:date|calendar|what day is it|time|the date)[.!?]*$/i.test(cmd)) {
+      const a = chronicle.ageOf(state, W);
+      return sendCommand(req, res, `${chronicle.formatDate(chronicle.nowHour(W))}\n${W.era.name}${W.realm ? ` — ${W.realm.title} rules` : ''}.\nYou are ${a} (${chronicle.ageBand(chronicle.bodyAge(state, W))}); natural span about ${Number.isFinite(chronicle.lifespan(state)) ? chronicle.lifespan(state) : '∞'} years.`, 'date', { persist: false });
+    }
+    if (/^(?:crises|crisis|news|world news)[.!?]*$/i.test(cmd)) return sendCommand(req, res, endless.crisisText(W), 'crises', { persist: false });
+    if (/^(?:legends|heroes|figures|legacy)[.!?]*$/i.test(cmd)) return sendCommand(req, res, legacy.buildLegendsText(W, state), 'legends', { persist: false });
+    if (/^(?:titles|my titles|renown)[.!?]*$/i.test(cmd)) {
+      const ts = endless.titlesFor(state, W);
+      return sendCommand(req, res, ts.length ? `Your titles: ${ts.join(' · ')}` : 'You have no titles yet. Deeds make titles.', 'titles', { persist: false });
+    }
+    if (/^(?:longevity|lifespan|immortality|aging|ageing)[.!?]*$/i.test(cmd)) {
+      const opts = chronicle.longevityOptions(state, W);
+      return sendCommand(req, res, ['PATHS TO A LONGER LIFE', ...opts.map(o => `  ${o.taken ? '✓' : o.available ? '•' : '✕'} ${o.label} — ${o.desc}`), '', 'When a path is open to you: "pursue <path name>".'].join('\n'), 'longevity', { persist: false });
+    }
+    if (state.deceased) return sendCommand(req, res, `${state.character.name} has died. Their story is part of the chronicle now. Choose "new character in this world", "new world", or resume another character from the Saves menu.`, 'deceased', { persist: false });
+
     // ---------------- combat-only guard ----------------
     if (state.inCombat) return null;
+
+    // ---------------- living-world actions ----------------
+    if (/^(?:answer the call|defend the region|face the crisis|end the crisis)[.!?]*$/i.test(cmd)) {
+      const r = endless.startCrisisFight(state, W);
+      if (!r.success) return sendCommand(req, res, r.message, 'crisis', { persist: false });
+      startEncounter(state, r.enemy, `[CRISIS — ${r.enemy.label} (Lv${r.enemy.level}) threatens the region. ${r.enemy.desc}]`);
+      events.push({ type: 'combatStart', label: r.enemy.label, level: r.enemy.level, boss: true });
+      req.session.undoLocked = true; addTime(req, T.boss);
+      return narrateAndRespond(req, res, input, events);
+    }
+    const sagaCmd = endless.handleSagaCommand(state, W, input);
+    if (sagaCmd) {
+      if (sagaCmd.info || sagaCmd.started) return sendCommand(req, res, sagaCmd.message, 'saga', { persist: !!sagaCmd.started || /walk away/.test(sagaCmd.message) });
+      if (sagaCmd.advance) {
+        addTime(req, sagaCmd.hours || 4);
+        sys(events, sagaCmd.message);
+        const r = endless.onSagaEvent(state, W, { type: 'investigated' });
+        if (r) { sys(events, r.message); if (r.levelUp) events.push(r.levelUp); }
+        appendHint(state, `[SAGA — the player investigates. ${sagaCmd.message}]`);
+        return narrateAndRespond(req, res, input, events);
+      }
+      if (sagaCmd.spawn) {
+        startEncounter(state, sagaCmd.spawn, `[SAGA ${sagaCmd.boss ? 'BOSS' : 'FOE'} — ${sagaCmd.spawn.label} (Lv${sagaCmd.spawn.level}).]`);
+        events.push({ type: 'combatStart', label: sagaCmd.spawn.label, level: sagaCmd.spawn.level, boss: !!sagaCmd.boss });
+        req.session.undoLocked = true; addTime(req, 1);
+        return narrateAndRespond(req, res, input, events);
+      }
+    }
+    const governMatch = cmd.match(/^(?:i\s+)?(?:govern|rule)(?:\s+(?:the realm\s+)?(?:for|with|through)?\s*(.*))?$/i);
+    if (governMatch) {
+      const r = endless.govern(state, W, governMatch[1]);
+      if (!r.success) return sendCommand(req, res, r.message, 'govern', { persist: false });
+      req.session.undoLocked = true;
+      return sendCommand(req, res, r.message, 'govern', { hours: r.hours });
+    }
+    const foundMatch = cmd.match(/^(?:i\s+)?(?:found|establish)\s+(?:an? )?(?:order|guild|school|company)?\s*(?:called|named)?\s*(.+)$/i);
+    if (foundMatch && /\b(order|guild|school|company|brotherhood|sisterhood|academy|fellowship)\b/i.test(cmd)) {
+      const r = endless.foundOrder(state, W, foundMatch[1]);
+      if (!r.success) return sendCommand(req, res, r.message, 'found', { persist: false });
+      req.session.undoLocked = true;
+      return sendCommand(req, res, r.message, 'found', { hours: r.hours });
+    }
+    if (/^(?:i\s+)?(?:train|study|practise|practice|meditate)\b.*\bfor\b/i.test(cmd)) {
+      const r = endless.train(state, W, cmd);
+      if (!r.success) return sendCommand(req, res, r.message, 'train', { persist: false });
+      req.session.undoLocked = true;
+      return sendCommand(req, res, r.message + (r.levelUp ? `\nLevel ${r.levelUp.newLevel}!` : ''), 'train', { hours: r.hours });
+    }
+    const pursue = cmd.match(/^(?:i\s+)?(?:pursue|seek|undertake|perform|take)\s+(?:the\s+)?(?:path of\s+(?:the\s+)?)?(.+)$/i);
+    if (pursue) {
+      const target = pursue[1].toLowerCase();
+      const id = Object.keys(chronicle.LONGEVITY_PATHS).find(k => chronicle.LONGEVITY_PATHS[k].label.toLowerCase().split(/\s+/).filter(w => w.length > 3).some(w => target.includes(w.replace(/['’]s$/, ''))));
+      if (id) {
+        const r = chronicle.pursueLongevity(state, W, id, { countMaterial: world.countMaterial, consumeMaterial: world.consumeMaterial });
+        if (r.success) req.session.undoLocked = true;
+        return sendCommand(req, res, r.message, 'longevity', { persist: r.success, hours: r.success ? 7 * 24 : 0 });
+      }
+    }
+    const lesson = cmd.match(/^(?:i\s+)?(?:learn from|ask for a lesson from|take a lesson from|study under)\s+(.+)$/i);
+    if (lesson) {
+      const f = legacy.findFigure(W, state, lesson[1]);
+      if (!f || f.status === 'deceased' || f.seat !== state.character.region) return sendCommand(req, res, 'No such teacher is here.', 'legacy', { persist: false });
+      if (legacy.relation(f, W, state) !== 'mentor' && legacy.relation(f, W, state) !== 'patron') return sendCommand(req, res, `${f.name} has no interest in teaching you.`, 'legacy', { persist: false });
+      const msg = legacy.takeLesson(f, state);
+      return sendCommand(req, res, msg || `${f.name} has already taught you what they can.`, 'legacy', { persist: !!msg, hours: msg ? 24 : 0 });
+    }
 
     // ---------------- scholar's scrolls ----------------
     if (/^(?:i\s+)?(?:read|study|use|learn from)\s+(?:the\s+|a\s+|my\s+)?spell scroll$/i.test(cmd)) {
@@ -85,6 +174,7 @@ module.exports = function createWorldCommands(h) {
       const result = crafting.craft(state, craft);
       if (!result.success) return sendCommand(req, res, result.message, 'craft', { persist: false });
       events.push({ type: 'itemCrafted', item: result.item });
+      addTime(req, result.item && typeof result.item.tier === 'number' ? T.craftGear : T.craftItem);
       sys(events, result.message);
       appendHint(state, `[CRAFTED — the player made ${result.item.name} from their materials. Describe the work briefly. Do not invent other items.]`);
       return narrateAndRespond(req, res, input, events);
@@ -100,6 +190,7 @@ module.exports = function createWorldCommands(h) {
         ? Object.entries(result.choice.factions).map(([faction, delta]) => ({ faction, delta })) : []);
       for (const l of loyalty) sys(events, l);
       req.session.undoLocked = true;
+      addTime(req, 0);
       appendHint(state, `[STORY DECISION — the player chose: "${result.choice.label}". ${result.choice.text} Narrate the consequence in a few sentences. Do not add new rewards.]`);
       return narrateAndRespond(req, res, input, events);
     }
@@ -111,15 +202,17 @@ module.exports = function createWorldCommands(h) {
       if (!result.success) return sendCommand(req, res, result.message, 'story', { persist: false });
       startEncounter(state, result.enemy, `[BOSS — ${result.enemy.label} (Lv${result.enemy.level}). ${result.enemy.desc} This is a major story battle. Make its arrival dramatic.]`);
       events.push({ type: 'combatStart', label: result.enemy.label, level: result.enemy.level, boss: true });
+      addTime(req, T.boss);
       sys(events, `BOSS: ${result.enemy.label} — Lv${result.enemy.level}, ${result.enemy.maxHP} HP. Watch for telegraphed attacks and defend against them. Type "abilities" for your options.`);
       req.session.undoLocked = true;
       return narrateAndRespond(req, res, input, events);
     }
 
     if (campaign.detectRift(input)) {
-      const result = campaign.startRift(state);
+      const result = endless.startRift(state);
       if (!result.success) return sendCommand(req, res, result.message, 'rift', { persist: false });
       startEncounter(state, result.enemy, `[RIFT ${result.depth} — an echo of a past foe, ${result.enemy.label}, steps out of the rift.]`);
+      if (result.affixes.length) sys(events, `RIFT ${result.depth} (Lv${result.enemy.level}): ${result.affixes.map(a => `${a.label} — ${a.desc}`).join('; ')}.`);
       events.push({ type: 'combatStart', label: result.enemy.label, level: result.enemy.level, boss: true });
       req.session.undoLocked = true;
       return narrateAndRespond(req, res, input, events);
@@ -155,6 +248,17 @@ module.exports = function createWorldCommands(h) {
     // ---------------- talking to named people ----------------
     const talk = world.detectTalkIntent(input);
     if (talk) {
+      const fig = legacy.findFigure(W, state, talk.target);
+      if (fig && fig.status !== 'deceased' && fig.seat === state.character.region) {
+        const d = legacy.figureDialogue(fig, W, state);
+        req.sceneNpc = fig.name;
+        sys(events, d.text);
+        addTime(req, T.talk);
+        appendHint(state, `[LEGEND — the player meets ${fig.name}, ${fig.title}, a legendary figure of this world (a past hero). Relation: ${d.relation}. Personality: ${(fig.personality || []).join(', ')}. Stay faithful to: ${d.text}]`);
+        return narrateAndRespond(req, res, input, events);
+      }
+      if (fig && fig.status === 'deceased') return sendCommand(req, res, `${fig.name} is dead — ${chronicle.figureStatus(fig, W)}.`, 'talk', { persist: false });
+      if (fig && fig.seat && REGIONS[fig.seat]) return sendCommand(req, res, `${fig.name} holds their seat in ${REGIONS[fig.seat].label}.`, 'talk', { persist: false });
       const story = campaign.handleTalk(state, talk.target);
       const npc = world.findNpcInRegion(state.character.region, talk.target) || (story && story.npc);
       if (story && (story.notHere || story.notReady)) {
@@ -165,6 +269,7 @@ module.exports = function createWorldCommands(h) {
         if (rosterId) comps.onMeet(state, rosterId);
         world.recordMeeting(state, npc.id);
         state.currentNPC = npc.name;
+        addTime(req, T.talk);
         if (story) {
           pushCampaign(events, story);
           req.session.undoLocked = true;
@@ -172,9 +277,12 @@ module.exports = function createWorldCommands(h) {
           return narrateAndRespond(req, res, input, events);
         }
         const shunned = factions.isShunnedBy(state, npc.faction);
+        const holder = chronicle.currentHolder(W, npc);
+        req.sceneNpc = holder.name;
+        const rumor = legacy.rumorFor(W, state.character.region, state.actionCount || 0);
         const line = shunned
-          ? `${npc.name} turns away. The ${factions.FACTIONS[npc.faction].label} want nothing to do with you.`
-          : postgameLine(state, npc) || `${npc.name}, ${npc.role}: "${npc.greet}"`;
+          ? `${holder.name} turns away. The ${factions.FACTIONS[npc.faction].label} want nothing to do with you.`
+          : (postgameLine(state, holder) || `${holder.name}, ${npc.role}${holder.age ? ` (${holder.age})` : ''}: "${holder.greet}"`) + (rumor && !story ? `\n${rumor}` : '');
         sys(events, line + (rosterId && !shunned ? `\n${comps.ROSTER[rosterId].personality}` : ''));
         appendHint(state, `[NPC — the player talks with ${npc.name}, ${npc.role} (${factions.FACTIONS[npc.faction] ? factions.FACTIONS[npc.faction].label : 'local'}). ${shunned ? 'They are hostile to the player.' : `They say: "${npc.greet}"`} Keep them consistent with that. Do not grant items, coin or quests.]`);
         return narrateAndRespond(req, res, input, events);
@@ -182,6 +290,37 @@ module.exports = function createWorldCommands(h) {
     }
 
     // ---------------- exploration ----------------
+    const legacyPlace = /^(?:i\s+)?(?:explore|visit|enter|investigate|search)\b/i.test(cmd) ? legacy.findLegacyPlace(W, state, cmd) : null;
+    if (legacyPlace) {
+      if (!state.discoveredLandmarks) state.discoveredLandmarks = {};
+      const key = `${state.character.region}:${legacyPlace.id}`;
+      addTime(req, 2);
+      if (legacyPlace.kind === 'tomb' && legacyPlace.relic && !legacyPlace.relic.claimedBy) {
+        const level = Math.max(getPlayerLevel(state.totalXP || 0), REGIONS[state.character.region].levelRange[0]);
+        const enemy = spawnEnemy(state.character.region, level);
+        if (enemy) {
+          enemy.label = `Tomb-warden of ${legacyPlace.figure.name}`;
+          enemy.maxHP = enemy.currentHP = Math.round(enemy.maxHP * 1.8);
+          enemy.meta = { relic: legacyPlace.figure.characterId };
+          startEncounter(state, enemy, `[TOMB — ${legacyPlace.desc} A guardian rises.]`);
+          sys(events, `${legacyPlace.desc}`);
+          req.session.undoLocked = true;
+          return narrateAndRespond(req, res, input, events);
+        }
+      }
+      sys(events, legacyPlace.desc);
+      if (!state.discoveredLandmarks[key]) {
+        state.discoveredLandmarks[key] = { at: state.actionCount || 0 };
+        const { grantXP } = require('../../../game/character');
+        const xp = 20 * Math.min(100, getPlayerLevel(state.totalXP || 0));
+        const lu = grantXP(state, xp);
+        sys(events, `You learn something of the world's past. +${xp} XP.`);
+        if (lu) events.push(lu);
+      }
+      appendHint(state, `[HISTORY — ${legacyPlace.desc}]`);
+      return narrateAndRespond(req, res, input, events);
+    }
+
     const explore = world.detectExploreIntent(state, input);
     if (explore && explore.type === 'list') return sendCommand(req, res, world.buildLandmarkList(state), 'explore', { persist: false });
     if (explore && explore.type === 'landmark') {
@@ -189,6 +328,7 @@ module.exports = function createWorldCommands(h) {
       if (result.already) return sendCommand(req, res, result.message, 'explore', { persist: false });
       const hz = world.applyHazard(state);
       if (hz && !hz.warded) sys(events, hz.message);
+      addTime(req, T.explore);
       if (result.guardian) {
         const level = getPlayerLevel(state.totalXP || 0);
         const region = REGIONS[state.character.region];
@@ -220,6 +360,7 @@ module.exports = function createWorldCommands(h) {
       const result = world.gather(state, gatherIntent.target);
       if (!result.success) return sendCommand(req, res, result.message, 'gather', { persist: false });
       sys(events, result.message);
+      addTime(req, T.gather);
       const hz = world.applyHazard(state);
       if (hz && !hz.warded) sys(events, hz.message);
       appendHint(state, `[GATHERING — the player gathers ${result.material} in ${REGIONS[state.character.region].label}. Describe it briefly.]`);

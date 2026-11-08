@@ -15,6 +15,7 @@ const { getPlayerLevel, grantXP, recalculateResources } = require('./character')
 const { addCoin, addItem, formatCoin } = require('./economy');
 const { changeStanding, formatStandingChanges, getStanding } = require('./factions');
 const { npcMatches } = require('./world');
+const chronicle = require('./chronicle');
 
 const CONFRONT_PATTERN = /^(?:i\s+)?(?:confront|challenge|face|fight|attack|hunt|duel|engage|seek out|go after)\s+(?:the\s+)?(.+?)[.!?]*$/i;
 const CHOICE_PATTERN   = /^(?:i\s+)?(?:choose|choice|pick|select|decide|option)\s*(?:option\s*)?#?(\d)\b/i;
@@ -25,6 +26,16 @@ const STORY_PATTERN    = /^(?:story|main quest|main story|campaign|story journal
 // ---------------------------------------------
 function ensureCampaign(state) {
   if (!state.character || !state.character.region) return null;
+  const world = chronicle.worldOf(state);
+  if ((!state.campaign || typeof state.campaign !== 'object') && world && world.ending) {
+    // Born into a world whose great story is already history: the
+    // Sovereign's tale is not replayed. This character's story is their own.
+    state.campaign = {
+      chapter: null, step: 0, startRegion: state.character.region, inherited: true,
+      flags: {}, choices: {}, completed: [], bossesDefeated: [], unlocked: ['shattered_throne'],
+      ending: world.ending, postgame: true, riftDepth: 0, started: state.actionCount || 0
+    };
+  }
   if (!state.campaign || typeof state.campaign !== 'object') {
     state.campaign = {
       chapter: 1, step: 0,
@@ -196,6 +207,7 @@ function finishChapter(state, chapter, out) {
   for (const r of chapter.unlocks || []) if (!c.unlocked.includes(r)) { c.unlocked.push(r); lines.push(`The way to ${REGIONS[r].label} is open.`); }
   if (chapter.outro) lines.push('', chapter.outro);
   out.chapterComplete = chapter.id;
+  chronicle.addEvent(chronicle.worldOf(state), { type: 'chapter', importance: 2, title: `${state.character.name} completes "${chapter.title}"`, actor: chronicle.actorOf(state) }, `chapter:${state.characterId}:${chapter.id}`);
 
   const next = CHAPTERS.find(x => x.id === chapter.id + 1);
   if (next && !c.ending) {
@@ -263,6 +275,7 @@ function onEvent(state, event) {
   }
   if (event.type === 'bossDefeated' && step.type === 'boss' && event.boss === step.boss) {
     if (!state.campaign.bossesDefeated.includes(event.boss)) state.campaign.bossesDefeated.push(event.boss);
+    chronicle.addEvent(chronicle.worldOf(state), { type: 'victory', importance: 3, title: `${state.character.name} defeats ${BOSSES[event.boss].label}`, region: state.character.region, actor: chronicle.actorOf(state) }, `boss:${state.characterId}:${event.boss}`);
     merge(out, completeStep(state, `${BOSSES[event.boss].label} is defeated.`));
   }
   return out;
@@ -374,6 +387,7 @@ function makeChoice(state, n) {
   const standing = formatStandingChanges(changes);
   if (standing) lines.push(`Standing: ${standing}`);
 
+  chronicle.addEvent(chronicle.worldOf(state), { type: 'decision', importance: cur.step.final ? 5 : 2, title: `${state.character.name} chooses: ${opt.label}`, text: `Chapter ${cur.chapter.id}, "${cur.chapter.title}".`, actor: chronicle.actorOf(state) }, `choice:${state.characterId}:${cur.chapter.id}`);
   if (cur.step.final) c.ending = opt.id;
   const result = completeStep(state, lines.join('\n'));
   if (cur.step.final) {
@@ -382,6 +396,12 @@ function makeChoice(state, n) {
     const e = ENDINGS[opt.id];
     result.messages.push(`\n═══ THE END — ${e.title} ═══\n${e.epilogue}\n\n${epilogueFor(state)}\n\nThe game continues: bounties remain across the world, and at the Shattered Throne you may "enter the rift" to face echoes of everything you defeated.`);
     result.ending = opt.id;
+    const w = chronicle.worldOf(state);
+    if (w) {
+      const era = chronicle.applyEnding(w, state, opt.id);
+      if (era) result.messages.push(`\n═══ A NEW AGE: ${era.name} ═══\n${era.threat}\n\nWhat now?\n  • "continue" — go on as ${state.character.name}, with everything you have won.\n  • "new character in this world" — begin someone new, years from now, in the world you changed.\n  • "new world" — start a fresh world. This one is kept, and you can return to it.`);
+      c.afterEnding = 'pending';
+    }
   }
   return { success: true, choice: opt, ...result };
 }
@@ -426,6 +446,7 @@ function onRiftCleared(state, depth) {
   const c = state.campaign;
   if (depth <= (c.riftDepth || 0)) return null;   // each depth rewards once
   c.riftDepth = depth;
+  if (depth % 10 === 0) chronicle.addAchievement(chronicle.worldOf(state), state, `reaches depth ${depth} of the rift`, `rift:${state.characterId}:${depth}`);
   const coin = 2000 + depth * 500;
   addCoin(state, coin);
   return `Rift ${depth} cleared. +${formatCoin(coin)}. The rift opens deeper.`;

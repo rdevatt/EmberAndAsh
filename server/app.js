@@ -82,9 +82,12 @@ function setSession(sessionId, data) {
 }
 
 // Persist session to DB
+const worldStore = require('./world-store')(db);
+
 async function persistSession(sessionId) {
   const session = sessions.get(sessionId);
   if (!session) return;
+  try { worldStore.persist(session.state, session, sessionId); } catch (e) { console.error('[World] persist failed:', e.message); }
 
   if (session.playerId && session.saveSlot) {
     const result = db.saveGame(session.playerId, session.saveSlot, session.state);
@@ -158,6 +161,7 @@ function requireSession(req, res, next) {
 
   req.sessionId = sessionId;
   req.session   = session;
+  try { worldStore.bind(session.state, session, sessionId); } catch (e) { console.error('[World] bind failed:', e.message); }
   next();
 }
 
@@ -171,6 +175,7 @@ function requireSession(req, res, next) {
 
 registerAuthRoutes(app, {
   db,
+  worldStore,
   uuidv4,
   hashPassword,
   verifyPassword,
@@ -190,6 +195,7 @@ registerAuthRoutes(app, {
 
 registerSaveRoutes(app, {
   db,
+  worldStore,
   requireSession,
   setSession,
   persistSession,
@@ -219,6 +225,7 @@ registerQuestRoutes(app, {
 
 registerSettingsRoutes(app, {
   db,
+  worldStore,
   requireSession,
   setSession,
   persistSession
@@ -226,6 +233,7 @@ registerSettingsRoutes(app, {
 
 registerStateRoutes(app, {
   db,
+  worldStore,
   requireSession,
   buildCharacterPanelData,
   buildProgressionPanelData,
@@ -236,8 +244,16 @@ registerStateRoutes(app, {
   isReady
 });
 
+const worldRoutes = require('./routes/world/register')(app, {
+  db, worldStore, requireSession, setSession, persistSession, newCreationState,
+  buildCharacterPanelData, buildProgressionPanelData, buildEconomyPanelData, buildRightPanelData, buildBoardDisplayData,
+  isInCreation, getPlayerLevel
+});
+
 registerGameplayRoutes(app, {
   db,
+  worldStore,
+  worldRoutes,
   REGIONS,
   requireSession,
   persistSession,
@@ -388,4 +404,4 @@ async function shutdown() {
 process.on('SIGTERM', shutdown);
 process.on('SIGINT',  shutdown);
 
-module.exports = { app, start, sessions, persistSession };
+module.exports = { app, start, sessions, persistSession, worldStore };

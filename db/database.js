@@ -19,6 +19,12 @@ const { serializeState, deserializeState } = require('../game/state');
 // =============================================
 // Use Railway volume (/data) if available, otherwise local ./data directory
 // EMBER_DB_PATH overrides everything (used by tests and local experiments).
+// Safety: test runs (node --test sets NODE_TEST_CONTEXT) and development shells
+// that set EMBER_REQUIRE_DB_PATH=1 must name an explicit, isolated database —
+// they can never fall through to the real player database.
+if (!process.env.EMBER_DB_PATH && (process.env.NODE_TEST_CONTEXT || process.env.EMBER_REQUIRE_DB_PATH === '1')) {
+  throw new Error('[DB] Refusing to open the default (real) database: set EMBER_DB_PATH to an isolated file.');
+}
 const DB_PATH = process.env.EMBER_DB_PATH
   ? path.resolve(process.env.EMBER_DB_PATH)
   : path.join(fs.existsSync('/data') ? '/data' : path.join(__dirname, '..', 'data'), 'emberandash.db');
@@ -109,6 +115,32 @@ function initializeSchema() {
     -- Player sessions table
     -- Maps a logged-in session ID to its account + save slot so a session
     -- survives server restarts and idle eviction from the in-memory store.
+    -- Persistent worlds: calendar, chronicle, legacy figures, rulers, crises.
+    -- One world can host many sequential characters.
+    CREATE TABLE IF NOT EXISTS worlds (
+      id          TEXT PRIMARY KEY,
+      owner_key   TEXT NOT NULL,
+      name        TEXT,
+      data_json   TEXT NOT NULL,
+      created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_worlds_owner ON worlds(owner_key);
+
+    -- Characters set aside when the player switches to another character or
+    -- world. Nothing is deleted on a switch; any archived character can be
+    -- resumed later.
+    CREATE TABLE IF NOT EXISTS character_archive (
+      character_id TEXT PRIMARY KEY,
+      owner_key    TEXT NOT NULL,
+      world_id     TEXT,
+      name         TEXT,
+      level        TEXT,
+      state_json   TEXT NOT NULL,
+      archived_at  TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_archive_owner ON character_archive(owner_key);
+
     CREATE TABLE IF NOT EXISTS player_sessions (
       session_id   TEXT    PRIMARY KEY,
       player_id    INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
@@ -519,6 +551,64 @@ function cleanExpiredGuestSessions() {
 
 
 // =============================================
+// WORLDS & CHARACTER ARCHIVE
+// =============================================
+function saveWorld(world, ownerKey) {
+  const json = JSON.stringify(world);
+  db.prepare(`
+    INSERT INTO worlds (id, owner_key, name, data_json, updated_at)
+    VALUES (?, ?, ?, ?, datetime('now'))
+    ON CONFLICT(id) DO UPDATE SET
+      owner_key = CASE WHEN excluded.owner_key LIKE 'player:%' THEN excluded.owner_key ELSE worlds.owner_key END,
+      name = excluded.name, data_json = excluded.data_json, updated_at = datetime('now')
+  `).run(world.id, ownerKey, world.name || null, json);
+}
+
+function loadWorld(worldId) {
+  const row = db.prepare('SELECT data_json FROM worlds WHERE id = ?').get(worldId);
+  if (!row) return null;
+  try { return JSON.parse(row.data_json); } catch (e) { console.error('[DB] corrupt world', worldId); return null; }
+}
+
+function listWorlds(ownerKeys) {
+  const keys = (Array.isArray(ownerKeys) ? ownerKeys : [ownerKeys]).filter(Boolean);
+  if (!keys.length) return [];
+  return db.prepare(`SELECT id, name, owner_key, data_json, updated_at FROM worlds WHERE owner_key IN (${keys.map(() => '?').join(',')}) ORDER BY updated_at DESC`)
+    .all(...keys).map(r => { let d = {}; try { d = JSON.parse(r.data_json); } catch (e) { /* skip */ } return { id: r.id, name: r.name, updatedAt: r.updated_at, day: d.calendar ? d.calendar.day : 0, events: (d.history || []).length, figures: (d.figures || []).length, era: d.era || null }; });
+}
+
+function archiveCharacter(characterId, ownerKey, worldId, name, level, state) {
+  db.prepare(`
+    INSERT INTO character_archive (character_id, owner_key, world_id, name, level, state_json, archived_at)
+    VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+    ON CONFLICT(character_id) DO UPDATE SET owner_key = excluded.owner_key, world_id = excluded.world_id,
+      name = excluded.name, level = excluded.level, state_json = excluded.state_json, archived_at = datetime('now')
+  `).run(characterId, ownerKey, worldId || null, name || null, String(level || 1), serializeState(state));
+}
+
+function listArchivedCharacters(ownerKeys) {
+  const keys = (Array.isArray(ownerKeys) ? ownerKeys : [ownerKeys]).filter(Boolean);
+  if (!keys.length) return [];
+  return db.prepare(`SELECT character_id, world_id, name, level, archived_at FROM character_archive WHERE owner_key IN (${keys.map(() => '?').join(',')}) ORDER BY archived_at DESC`).all(...keys);
+}
+
+function loadArchivedCharacter(characterId) {
+  const row = db.prepare('SELECT * FROM character_archive WHERE character_id = ?').get(characterId);
+  return row ? { ...row, state: deserializeState(row.state_json) } : null;
+}
+
+// Moving a character back into play: its archive row is replaced by the
+// live save, so this only runs after the restored state has been persisted.
+function removeArchivedCharacter(characterId) {
+  db.prepare('DELETE FROM character_archive WHERE character_id = ?').run(characterId);
+}
+
+function reassignOwner(oldKey, newKey) {
+  db.prepare('UPDATE worlds SET owner_key = ? WHERE owner_key = ?').run(newKey, oldKey);
+  db.prepare('UPDATE character_archive SET owner_key = ? WHERE owner_key = ?').run(newKey, oldKey);
+}
+
+// =============================================
 // MAINTENANCE
 // =============================================
 
@@ -567,6 +657,14 @@ setInterval(runMaintenance, 6 * 60 * 60 * 1000).unref();
 
 
 module.exports = {
+  saveWorld,
+  loadWorld,
+  listWorlds,
+  archiveCharacter,
+  listArchivedCharacters,
+  loadArchivedCharacter,
+  removeArchivedCharacter,
+  reassignOwner,
   // Players
   createPlayer,
   getPlayerByUsername,
