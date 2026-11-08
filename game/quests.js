@@ -239,6 +239,30 @@ function generateBoardQuests(state) {
     });
   }
 
+  // ---- SUPPLY CONTRACT (profession work: deliver real materials) ----
+  const resources = (region.resources || []).filter(r => ['timber', 'hide', 'herbs', 'iron ore', 'bone', 'silver ore', 'mithril ore'].includes(r));
+  if (resources.length) {
+    const material = resources[Math.floor(Math.random() * resources.length)];
+    const qty      = 3 + Math.floor(Math.random() * 3);
+    const supReward = calculateQuestReward(tier, 'normal');
+    const giver    = (region.npcs && region.npcs[0] && region.npcs[0].name) || 'the quartermaster';
+    quests.push({
+      id:         `q_${idCounter++}`,
+      type:       QUEST_TYPES.SUPPLY,
+      tier,
+      difficulty: 'normal',
+      label:      `Supply: ${qty} × ${material}`,
+      desc:       `${giver} needs ${qty} ${material}. Gather, buy or loot them, then return here and "deliver" them.`,
+      target:     material,
+      targetCount: qty,
+      progress:   0,
+      giver,
+      regionKey,
+      reward:     { coin: Math.round(supReward.coin * 1.2), xp: Math.round(supReward.xp * 0.8) },
+      hint:       `[QUEST ACTIVE — Supply contract: deliver ${qty} ${material} to ${giver} in ${region.label}.]`
+    });
+  }
+
   // ---- ADVANCE QUEST (fires when player is 1+ level over area cap) ----
   if (playerLevel >= areaMax + 1) {
     // Only offer destinations reachable by road from here; otherwise
@@ -441,14 +465,44 @@ function checkQuestProgress(state, playerInput, gameEvents) {
 
     if (quest.type === QUEST_TYPES.RETRIEVE) {
       const location = quest.location || quest.target;
-      if (quest.guardianPending && kills.length > 0) {
+      const itemName = `${quest.target} (quest item)`;
+      const carrying = (state.inventory || []).some(i => (typeof i === 'string' ? i : i.name) === itemName);
+      const inRegion = !quest.regionKey || quest.regionKey === here;
+      const guardianDown = kills.some(k => k.meta && k.meta.questGuardian === quest.id);
+      if (quest.guardianPending && guardianDown) {
+        // The item is real: it goes in the pack and must be brought back.
         quest.guardianPending = false;
+        quest.recovered = true;
+        if (!carrying) (state.inventory = state.inventory || []).push({ name: itemName, type: 'quest item', questId: quest.id, value: 0 });
+        updates.push({ questId:quest.id, label:quest.label, type:'stage', message:`You recover the ${quest.target}. Bring it back${quest.regionKey && REGIONS[quest.regionKey] ? ` to ${REGIONS[quest.regionKey].label}` : ''} and "turn in" the quest.` });
+      } else if (quest.recovered && carrying && inRegion && /\b(turn in|hand in|hand over|deliver|return|report|give)\b/.test(t)) {
+        state.inventory = state.inventory.filter(i => (typeof i === 'string' ? i : i.name) !== itemName);
         quest.progress = 1;
-        updates.push({ questId:quest.id, label:quest.label, type:'progress', progress:1, total:1, message:`You recover the ${quest.target}.` });
-      } else if (!quest.guardianPending && !state.inCombat && (mentionsLocation(t, location) || mentionsLocation(t, quest.target))) {
+        updates.push({ questId:quest.id, label:quest.label, type:'progress', progress:1, total:1 });
+      } else if (quest.recovered && !carrying) {
+        quest.recovered = false;   // lost or sold it: go back for it
+        updates.push({ questId:quest.id, label:quest.label, type:'stage', message:`You no longer have the ${quest.target}. Return to ${location} for it.` });
+      } else if (!quest.recovered && !quest.guardianPending && !state.inCombat && inRegion && (mentionsLocation(t, location) || mentionsLocation(t, quest.target))) {
         // Reaching the site triggers a guardian fight (spawned by the caller).
         quest.guardianPending = true;
         updates.push({ questId:quest.id, label:quest.label, type:'guardian', location });
+      }
+    }
+
+    if (quest.type === QUEST_TYPES.SUPPLY) {
+      const inRegion = !quest.regionKey || quest.regionKey === here;
+      if (inRegion && /\b(deliver|turn in|hand in|hand over|supply|give)\b/.test(t)) {
+        const name = quest.target.toLowerCase();
+        const have = (state.inventory || []).filter(i => (typeof i === 'string' ? i : i.name).toLowerCase() === name).length;
+        if (have >= quest.targetCount) {
+          let left = quest.targetCount;
+          state.inventory = state.inventory.filter(i => !((typeof i === 'string' ? i : i.name).toLowerCase() === name && left-- > 0));
+          quest.progress = quest.targetCount;
+          if (state.profession) state.profXP = (state.profXP || 0) + 10 * (quest.tier || 1);
+          updates.push({ questId:quest.id, label:quest.label, type:'progress', progress:quest.targetCount, total:quest.targetCount });
+        } else {
+          updates.push({ questId:quest.id, label:quest.label, type:'stage', message:`You have ${have}/${quest.targetCount} ${quest.target}.` });
+        }
       }
     }
 
@@ -456,7 +510,7 @@ function checkQuestProgress(state, playerInput, gameEvents) {
       if (!quest.scouted && mentionsLocation(t, quest.location || quest.target)) {
         quest.scouted = true;
         updates.push({ questId:quest.id, label:quest.label, type:'stage', message:'You have seen enough. Report back to collect your pay.' });
-      } else if (quest.scouted && /\b(report|return|head back|go back|come back|turn in|hand in)\b/.test(t)) {
+      } else if (quest.scouted && (!quest.regionKey || quest.regionKey === here) && /\b(report|return|head back|go back|come back|turn in|hand in)\b/.test(t)) {
         quest.progress = 1;
         updates.push({ questId:quest.id, label:quest.label, type:'progress', progress:1, total:1 });
       }
@@ -471,7 +525,7 @@ function checkQuestProgress(state, playerInput, gameEvents) {
 
     // Escort without a destination: deliver once the road is behind you.
     if (quest.type === QUEST_TYPES.ESCORT && !quest.destination) {
-      if (arrival || /\b(arrived|delivered|we're here|we are here)\b/.test(t)) {
+      if (arrival) {
         quest.progress = 1;
         updates.push({ questId:quest.id, label:quest.label, type:'progress', progress:1, total:1 });
       }

@@ -233,7 +233,9 @@ test('retrieve quests need the guardian defeated, not just a keyword', () => {
   assert.equal(s.activeQuests[0].progress, 0);
   const u = quests.checkQuestProgress(s, 'I sneak into the bandit camp', []);
   assert.equal(u[0].type, 'guardian');
-  quests.checkQuestProgress(s, 'I strike', [{ type: 'enemyDefeated', enemyLabel: 'Road Bandit' }]);
+  quests.checkQuestProgress(s, 'I strike', [{ type: 'enemyDefeated', enemyLabel: 'Road Bandit', meta: { questGuardian: 'r' } }]);
+  assert.equal(s.activeQuests[0].recovered, true, 'guardian down: item recovered');
+  quests.checkQuestProgress(s, 'I turn in the ledger', []);
   assert.equal(s.activeQuests[0].progress, 1);
 });
 

@@ -7,7 +7,8 @@ const QUEST_TYPES = {
   ESCORT:  'escort',
   RETRIEVE:'retrieve',
   SCOUT:   'scout',
-  ADVANCE: 'advance'
+  ADVANCE: 'advance',
+  SUPPLY:  'supply'
 };
 
 const QUEST_REWARD_BASE = {

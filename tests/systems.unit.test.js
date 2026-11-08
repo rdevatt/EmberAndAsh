@@ -281,3 +281,45 @@ test('companions must be earned, and loyalty follows faction choices', () => {
   factions.changeStanding(s, { compact: 60 });
   assert.ok(factions.getPriceModifier(s) < 1, 'Compact friends get better prices');
 });
+
+// ---------------- quests ----------------
+const quests = require('../game/quests');
+
+test('retrieve quests need the guardian, the item, and a turn-in at home', () => {
+  const s = ready('thornwick', 5);
+  const q = { id: 'q1', type: 'retrieve', target: 'stolen ledger', location: 'the old mill', targetCount: 1, progress: 0, regionKey: 'thornwick', reward: { coin: 10, xp: 10 } };
+  s.activeQuests = [q];
+  quests.checkQuestProgress(s, 'I walk to the old mill', []);
+  assert.equal(q.guardianPending, true);
+  quests.checkQuestProgress(s, 'x', [{ type: 'enemyDefeated', enemyLabel: 'Road Wolf', meta: null }]);
+  assert.equal(q.recovered, undefined, 'an unrelated kill does not count');
+  quests.checkQuestProgress(s, 'x', [{ type: 'enemyDefeated', enemyLabel: 'Road Wolf', meta: { questGuardian: 'q1' } }]);
+  assert.equal(q.recovered, true);
+  assert.ok(s.inventory.some(i => i.name === 'stolen ledger (quest item)'));
+  assert.equal(q.progress, 0, 'not complete until turned in');
+  s.character.region = 'dustfall';
+  quests.checkQuestProgress(s, 'I turn in the ledger', []);
+  assert.equal(q.progress, 0, 'must turn in where the job was posted');
+  s.character.region = 'thornwick';
+  quests.checkQuestProgress(s, 'I turn in the ledger', []);
+  assert.equal(q.progress, 1);
+  assert.ok(!s.inventory.some(i => i.name === 'stolen ledger (quest item)'), 'item handed over');
+});
+
+test('supply contracts consume real materials; escorts cannot be talked into completion', () => {
+  const s = ready('thornwick', 5);
+  const sup = { id: 'q2', type: 'supply', target: 'timber', targetCount: 3, progress: 0, regionKey: 'thornwick', tier: 1, reward: { coin: 10, xp: 10 } };
+  s.activeQuests = [sup];
+  world.addMaterial(s, 'timber', 2);
+  quests.checkQuestProgress(s, 'deliver the timber', []);
+  assert.equal(sup.progress, 0);
+  world.addMaterial(s, 'timber', 2);
+  quests.checkQuestProgress(s, 'deliver the timber', []);
+  assert.equal(sup.progress, 3);
+  assert.equal(world.countMaterial(s, 'timber'), 1, 'exactly 3 consumed');
+
+  const esc = { id: 'q3', type: 'escort', targetCount: 1, progress: 0, reward: { coin: 1, xp: 1 } };
+  s.activeQuests = [esc];
+  quests.checkQuestProgress(s, "we're here, we arrived", []);
+  assert.equal(esc.progress, 0);
+});

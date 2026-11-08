@@ -173,6 +173,12 @@ module.exports = function registerGameplayRoutes(app, deps) {
     changeReputation(state, state.character.region, -5);
 
     // Wake at the nearest settlement rather than in a hostile wild.
+    // Whoever you were escorting does not survive your death.
+    const failed = (state.activeQuests || []).filter(q => q.type === 'escort');
+    if (failed.length) {
+      state.activeQuests = state.activeQuests.filter(q => q.type !== 'escort');
+      for (const q of failed) events.push({ type: 'system', message: `QUEST FAILED — ${q.label}. Your charge did not survive.` });
+    }
     const revival = getRevivalRegion(state);
     if (revival && revival !== state.character.region) {
       state.character.region = revival;
@@ -219,7 +225,7 @@ module.exports = function registerGameplayRoutes(app, deps) {
       if (msg) events.push({ type: 'system', message: msg });
     }
 
-    applyQuestUpdates(state, events, input, [{ type: 'enemyDefeated', enemyLabel: kill.label }]);
+    applyQuestUpdates(state, events, input, [{ type: 'enemyDefeated', enemyLabel: kill.label, meta }]);
   }
 
   function applyQuestUpdates(state, events, input, gameEvents) {
@@ -252,8 +258,10 @@ module.exports = function registerGameplayRoutes(app, deps) {
     const level = getPlayerLevel(state.totalXP || 0);
     const enemy = spawnEnemy(state.character.region, level + 1);
     if (!enemy) return;
+    enemy.meta = { questGuardian: update.questId };
     state.inCombat     = true;
     state.currentEnemy = enemy;
+    tactics.clearCombatEffects(state);
     appendHint(state, `[QUEST SITE — the player reached ${update.location}. A ${enemy.label} guards what they came for and attacks. ${enemy.desc}]`);
   }
 
