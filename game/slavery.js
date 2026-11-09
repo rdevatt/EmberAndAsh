@@ -117,6 +117,7 @@ function handle(state, input) {
     const s = addSlave(state, { name: o.name, gender: o.gender, age: o.age, origin: o.origin });
     s.fear = 50;
     require('./morality').shift(state, -3, 'bought a person');
+    require('./companion-quests').react(state, 'slavery', 3);
     return { success: true, hours: 1, message: `You pay ${o.price} copper. ${s.name} is yours. ("slaves" to see them.)`, event: { type: 'slaves', action: 'bought', name: s.name }, hint: `[SLAVERY — the player bought ${s.name} (${s.gender}, ${s.age}), ${s.origin}, at the market. Narrate the transaction and the person, as the player described.]` };
   }
   if (RE.market.test(text)) {
@@ -164,6 +165,7 @@ function act(state, s, kind, text) {
   if (kind === 'free') {
     state.slaves = state.slaves.filter(x => x !== s);
     require('./morality').shift(state, 8, `freed ${s.name}`);
+    require('./companion-quests').react(state, 'mercy', 3);
     const applied = factions.changeStanding(state, { wardens: 4, compact: 3 }, 'mercy');
     if (s.loyalty >= 40 || s.kindness >= 3) state.freedFriends = [...(state.freedFriends || []), s.name];
     if (world) chronicle.addEvent(world, { type: 'deed', importance: 2, title: `${state.character.name} frees ${s.name}`, actor: chronicle.actorOf(state), region: state.character.region });

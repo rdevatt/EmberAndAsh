@@ -195,11 +195,20 @@ function resolve(state, crime, extra = {}) {
   require('./morality').shift(state, -rec.heinous * 3, TYPES[rec.type] ? TYPES[rec.type].label : rec.type);
 
   // Companions see everything; whether they stay depends on who they are.
+  const VALUES = require('./companion-quests').VALUES;
   for (const c of companionWitnesses) {
-    const cold = c.faction === 'choir' || c.hired;
-    const loss = cold ? Math.round(rec.heinous / 2) : rec.heinous * 6;
-    c.loyalty = Math.max(0, (c.loyalty || 50) - loss);
-    if (!cold && loss >= 18) lines.push(`${c.name} saw it. They will not forget (loyalty ${c.loyalty}).`);
+    const v = VALUES[c.rosterId];
+    const cold = !v && (c.faction === 'choir' || c.hired);
+    // Each companion judges by their own values: a smuggler shrugs at
+    // theft, a Warden does not, a priest will not forgive a murder.
+    let loss;
+    if (v) {
+      const per = (v.crime || 0) + (rec.type === 'murder' ? (v.murder || 0) : 0) + (['torture', 'coercion'].includes(rec.type) ? (v.cruelty || 0) : 0) + (rec.type === 'theft' ? (v.theft || 0) : 0) + (rec.type === 'slaveholding' ? (v.slavery || 0) : 0);
+      loss = -per * rec.heinous * 2;
+    } else loss = cold ? Math.round(rec.heinous / 2) : rec.heinous * 6;
+    c.loyalty = Math.max(0, Math.min(100, (c.loyalty || 50) - loss));
+    if (loss < 0) lines.push(`${c.name} grins. They approve (loyalty ${c.loyalty}).`);
+    else if (!cold && loss >= 12) lines.push(`${c.name} saw it. They will not forget (loyalty ${c.loyalty}).`);
     if (c.loyalty <= 10 && extra.removeCompanion) { extra.removeCompanion(state, c.id); lines.push(`${c.name} walks away from you — and may talk.`); if (Math.random() < 0.5) extra.forceKnown = true; }
   }
 

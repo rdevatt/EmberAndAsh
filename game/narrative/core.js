@@ -272,6 +272,11 @@ function buildSceneContext(state) {
   if (state.currentNPC) {
     lines.push(`[Interacting with: ${state.currentNPC}]`);
   }
+  // The named people here: goals, worries, rivalries and views, from the world.
+  if (!state.inCombat) {
+    const people = require('../npc-life').sceneBlock(state, { focus: state.currentNPC, limit: state.currentNPC ? 2 : 1 });
+    if (people) lines.push(people);
+  }
 
   if (state.sceneContext && state.sceneContext !== 'neutral') {
     lines.push(`[Scene tone: ${state.sceneContext}]`);

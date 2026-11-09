@@ -215,6 +215,21 @@ module.exports = function createWorldCommands(h) {
       return narrateAndRespond(req, res, input, events);
     }
 
+    // A companion's story choice takes "decide N" when no campaign choice is open.
+    // "companion decide N" always reaches the companion's story.
+    const decideMatch = cmd.match(/^(companion\s+)?(?:decide|choose)\s+(\d)$/);
+    const campaignStep = campaign.getCurrentStep(state);
+    if (decideMatch && state.pendingCompanionChoice && !state.inCombat && (decideMatch[1] || !(campaignStep && campaignStep.step.type === 'choice'))) {
+      const cq = require('../../../game/companion-quests');
+      const r = cq.decide(state, parseInt(decideMatch[2], 10), { removeCompanion, spawnEnemy });
+      if (!r.success) return sendCommand(req, res, r.message, 'companionStories', { persist: false });
+      req.session.undoLocked = true;
+      sys(events, r.message);
+      if (r.startFight) { startEncounter(state, r.startFight, `[COMPANION STORY — ${r.startFight.label} stands before the player. Narrate it.]`); events.push({ type: 'combatStart' }); }
+      appendHint(state, `[COMPANION STORY — the player decided: ${r.message.split('\n')[0]} Narrate it and what follows.]`);
+      return narrateAndRespond(req, res, input, events);
+    }
+
     // ---------------- story choices ----------------
     const choice = campaign.detectChoice(cmd);
     if (choice) {
@@ -300,6 +315,11 @@ module.exports = function createWorldCommands(h) {
       }
       if (!t.executed && t.sentence !== 'prison') appendHint(state, `[TRIAL — the player pleaded "${t.plea}". Verdict: ${t.sentence}. Narrate the hall, the magistrate and the verdict.]`);
       return narrateAndRespond(req, res, input, events);
+    }
+
+    // ---------------- companion stories ----------------
+    if (/^(?:companion stories|stories|companion quests|my companions' stories)$/.test(cmd)) {
+      return sendCommand(req, res, require('../../../game/companion-quests').listText(state), 'companionStories', { persist: false });
     }
 
     if (/^(?:deeds|my deeds|my crimes|what have i done|my sins|remember what i have done)$/.test(cmd)) {
@@ -399,11 +419,11 @@ module.exports = function createWorldCommands(h) {
       if (fig && fig.status === 'deceased') return sendCommand(req, res, `${fig.name} is dead — ${chronicle.figureStatus(fig, W)}.`, 'talk', { persist: false });
       if (fig && fig.seat && REGIONS[fig.seat]) return sendCommand(req, res, `${fig.name} holds their seat in ${REGIONS[fig.seat].label}.`, 'talk', { persist: false });
       const story = campaign.handleTalk(state, talk.target);
-      const npc = world.findNpcInRegion(state.character.region, talk.target) || (story && story.npc);
+      const npc = world.findNpcInRegion(state.character.region, talk.target, W) || (story && story.npc);
       if (story && (story.notHere || story.notReady)) {
         return sendCommand(req, res, story.message, 'talk', { persist: false });
       }
-      if (npc && (story || world.findNpcInRegion(state.character.region, talk.target))) {
+      if (npc && (story || world.findNpcInRegion(state.character.region, talk.target, W))) {
         const rosterId = comps.findRosterId(npc.name);
         if (rosterId) comps.onMeet(state, rosterId);
         world.recordMeeting(state, npc.id);
@@ -427,8 +447,11 @@ module.exports = function createWorldCommands(h) {
           ? `${holder.name} turns away. The ${factions.FACTIONS[npc.faction].label} want nothing to do with you.`
           : reaction ? `${holder.name}, ${npc.role}: ${reaction}`
           : (postgameLine(state, holder) || `${holder.name}, ${npc.role}${holder.age ? ` (${holder.age})` : ''}: "${holder.greet}"`) + (rumor && !story ? `\n${rumor}` : '');
-        sys(events, line + (rosterId && !shunned ? `\n${comps.ROSTER[rosterId].personality}` : ''));
-        appendHint(state, `[NPC — the player talks with ${npc.name}, ${npc.role} (${factions.FACTIONS[npc.faction] ? factions.FACTIONS[npc.faction].label : 'local'}). ${shunned ? 'They are hostile to the player.' : `They say: "${npc.greet}"`} Keep them consistent with that. Do not grant items, coin or quests.]`);
+        // Their own life: what they want, what worries them, what they think of you.
+        const life = W ? require('../../../game/npc-life').profile(W, state, state.character.region, npc) : null;
+        const mind = life && !wronged && !shunned && life.concerns.length ? `\n(${holder.name} has things on their mind: ${life.concerns[0]}. They seem ${life.view.word} towards you.)` : '';
+        sys(events, line + mind + (rosterId && !shunned ? `\n${comps.ROSTER[rosterId].personality}` : ''));
+        appendHint(state, `[NPC — the player talks with ${holder.name}, ${npc.role} (${factions.FACTIONS[npc.faction] ? factions.FACTIONS[npc.faction].label : 'local'}). ${shunned ? 'They are hostile to the player.' : `They say: "${holder.greet}"`} ${life ? `Their life: ${require('../../../game/npc-life').promptLine(life)}.` : ''} Keep them consistent with that. Do not grant items, coin or quests.]`);
         return narrateAndRespond(req, res, input, events);
       }
     }

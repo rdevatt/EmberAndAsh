@@ -258,9 +258,17 @@ function npcMatches(npc, text) {
   return words.some(w => tWords.includes(w)) || (npc.role && t === npc.role.toLowerCase());
 }
 
-function findNpcInRegion(regionKey, text) {
+// With a world, the person who holds the role now (an heir) answers to their own name too.
+function findNpcInRegion(regionKey, text, world = null) {
   const r = REGIONS[regionKey];
-  return r ? (r.npcs || []).find(n => npcMatches(n, text)) || null : null;
+  if (!r) return null;
+  const npcs = r.npcs || [];
+  if (world) {
+    const chronicle = require('./chronicle');
+    const byHolder = npcs.find(n => { const h = chronicle.currentHolder(world, n); return h.name !== n.name && npcMatches({ ...n, name: h.name }, text); });
+    if (byHolder) return byHolder;
+  }
+  return npcs.find(n => npcMatches(n, text)) || null;
 }
 
 function detectTalkIntent(input) {

@@ -231,7 +231,8 @@ function enlist(state, world, text) {
   const changes = { [f]: 10 };
   for (const p of POWERS) if (p !== f && relation(world, f, p).state === 'war') changes[p] = -10;
   require('./factions').changeStanding(state, changes, 'allegiance');
-  return { success: true, message: `You take ${NAMES[f]}'s colours${old && old !== f ? `, leaving ${NAMES[old]}'s` : ''}. ${activeWars(world).filter(w => w.a === f || w.b === f).length ? 'They are at war: "fight in the war" in a contested region.' : 'They are at peace — for now.'}` };
+  const reactions = require('./companion-quests').react(state, f, 5);
+  return { success: true, message: `${reactions.length ? reactions.join(' ') + '\n' : ''}You take ${NAMES[f]}'s colours${old && old !== f ? `, leaving ${NAMES[old]}'s` : ''}. ${activeWars(world).filter(w => w.a === f || w.b === f).length ? 'They are at war: "fight in the war" in a contested region.' : 'They are at peace — for now.'}` };
 }
 
 function renounce(state) {

@@ -10,10 +10,10 @@ The completion brief has 15 sections. This file records what is done, what is in
 | 2 | HTTP, auth and session hardening; authorisation tests; backups | M1/M2 | `tests/security.test.js` (9 tests); browser 58/58 under strict CSP |
 | 4 | Permanent canon (two-layer memory): people, reigns, wars, territory, foundations, artifacts, oaths, choices, lineage, marriage | M4 | `tests/canon.test.js` (5): 300 years, contradictions, compaction, worlds, restart. Live multi-generation check is pending in the final live pass |
 | 3 | Player agency: four-layer turns, action guard, repetition across replies | M3 | `tests/agency.test.js` (12); live: 7 invented sentences removed in 11 turns, 0 fallbacks |
+| 5 | Companion stories for all 8 (go/act/fight/choice; abilities, gear, factions, settlements, rulers, oaths, deaths, partings; canon); in-character reactions; NPC goals, concerns, views, relations, retirement and successors | M5 | `tests/companion-stories.test.js` (8), `tests/npc-life.test.js` (7); suite 181/181; browser 58/58 |
 
 ## Next, in order
 
-5. Companion personal storylines (all 8) and NPC depth.
 6. Living world: campaigns, succession, economy, institutions, ruler gameplay, visible consequences.
 7. Procedural adventure variety built from world state.
 8. Profession opportunities; class acquisition audit; bard and druid pacing.

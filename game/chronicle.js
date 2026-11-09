@@ -351,7 +351,7 @@ function currentHolder(world, npc) {
     id: npc.id,
     name: rec.name,
     age: Math.floor((nowDay(world) - rec.born) / DAYS_PER_YEAR),
-    greet: `${rec.name} took on the work after ${rec.predecessor} died. ${npc.greet}`,
+    greet: `${rec.name} took on the work after ${rec.predecessor} ${rec.predecessorRetired ? 'retired' : 'died'}. ${npc.greet}`,
     heirOf: rec.predecessor
   };
 }
@@ -717,6 +717,7 @@ function evolve(world, state) {
     const open = world.crises.filter(x => x.status === 'active').length;
     if (open < 2 && hashInt(world.id + world.nextEvolutionDay) % 4 === 0) out.push(spawnCrisis(world, levelHint));
     if ((world.nextEvolutionDay / 30) % 12 === 0) {
+      out.push(...require('./npc-life').retire(world));
       out.push(...ageNpcs(world));
       out.push(...ageFigures(world, state && state.characterId));
       evolveSettlements(world);
@@ -781,7 +782,7 @@ module.exports = {
   addEvent, actorOf, buildChronicleText,
   ageOf, bodyAge, lifespan, longevity, ageModifiers, ageBand, syncAge, isPastLifespan,
   longevityOptions, pursueLongevity,
-  npcRecord, currentHolder, ageNpcs,
+  npcRecord, currentHolder, ageNpcs, HEIR_NAMES,
   applyEnding, eraEffects,
   recordFigure, addAchievement, figureAge, figureStatus, ageFigures, snapshotOf, personalityOf,
   spawnCrisis, resolveCrisis, failCrisis, evolve,

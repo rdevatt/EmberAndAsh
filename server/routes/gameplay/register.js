@@ -227,6 +227,16 @@ module.exports = function registerGameplayRoutes(app, deps) {
   }
 
   // Applies an enemy kill: XP + level-ups, corpse loot, quest progress.
+  // Losing (or fleeing) a companion story's fight: an outcome-deciding fight
+  // settles the story the hard way; otherwise the foe can be faced again.
+  function storyFightLost(state, id, events) {
+    const cq = require('../../../game/companion-quests');
+    const st = cq.ensure(state)[id];
+    if (!st) return;
+    if (st.pendingOutcome) for (const l of cq.onStoryFightEnd(state, id, false, { removeCompanion: require('../../../game/economy').removeCompanion })) events.push({ type: 'system', message: l });
+    else { st.foe = null; events.push({ type: 'system', message: 'The fight is lost — for now. You can face it again.' }); }
+  }
+
   function applyKill(state, events, input) {
     const kill = state.pendingEnemyKill;
     if (!kill) return;
@@ -270,6 +280,12 @@ module.exports = function registerGameplayRoutes(app, deps) {
     if (meta.saga && W) {
       const r = endless.onSagaEvent(state, W, { type: 'kill', meta });
       if (r) { events.push({ type: 'system', message: r.message }); if (r.levelUp) events.push(r.levelUp); }
+    }
+    if (meta.companionStory) {
+      // A companion story's foe falls: the story moves on, or settles.
+      const cq = require('../../../game/companion-quests');
+      for (const r of cq.advance(state, { type: 'fightWon', foe: meta.storyFoe })) events.push({ type: 'system', message: r.message });
+      for (const l of cq.onStoryFightEnd(state, meta.companionStory, true, { removeCompanion: require('../../../game/economy').removeCompanion })) events.push({ type: 'system', message: l });
     }
     if (meta.war && W) {
       const msg = require('../../../game/politics').onBattleWon(state, W, meta.war);
@@ -390,6 +406,17 @@ module.exports = function registerGameplayRoutes(app, deps) {
   async function narrateAndRespond(req, res, input, events, extra = {}) {
     const state     = req.session.state;
     for (const note of settleTime(req)) events.push({ type: 'system', message: note });
+    // Companion stories: offered when trust is earned; advanced by what the
+    // player does and where they go; a story's foe comes to them.
+    if (state.character && state.character.region && !isInCreation(state)) {
+      const cq = require('../../../game/companion-quests');
+      for (const o of cq.offerStories(state)) events.push({ type: 'system', message: o.message });
+      if (!state.inCombat) for (const r of cq.advance(state, { type: 'input', input })) events.push({ type: 'system', message: r.message });
+      if (!state.inCombat && !isDead(state)) {
+        const foe = cq.pendingFight(state, spawnEnemy);
+        if (foe) { startEncounter(state, foe, `[COMPANION STORY — ${foe.label} confronts the player and their companion. Narrate its arrival.]`); events.push({ type: 'system', message: `${foe.label} is here.` }); events.push({ type: 'combatStart' }); }
+      }
+    }
     const progress  = processPendingProgressEvents(state);
     events.push(...progress);
 
@@ -428,6 +455,7 @@ module.exports = function registerGameplayRoutes(app, deps) {
       state.pendingContextHint = fleeResult.hint;
       const dead = isDead(state);
       if (fleeing && fleeing.meta && fleeing.meta.rebellion && (fleeResult.success || dead)) events.push({ type: 'system', message: slavery.endRebellion(state, false) });
+      if (fleeing && fleeing.meta && fleeing.meta.companionStory && (fleeResult.success || dead)) storyFightLost(state, fleeing.meta.companionStory, events);
       if (fleeResult.success || dead) slavery.afterFight(state, false);
       if (dead) applyDeath(state, events);
       return narrateAndRespond(req, res, input, events);
@@ -446,6 +474,7 @@ module.exports = function registerGameplayRoutes(app, deps) {
       slavery.afterFight(state, !!combatResult.enemyKilled);
       if (state.buffs) delete state.buffs.next;
       if (enemyBefore && enemyBefore.meta && enemyBefore.meta.rebellion) events.push({ type: 'system', message: slavery.endRebellion(state, !!combatResult.enemyKilled && !fell) });
+      if (fell && enemyBefore && enemyBefore.meta && enemyBefore.meta.companionStory) storyFightLost(state, enemyBefore.meta.companionStory, events);
     }
     if (fell) applyDeath(state, events);
 

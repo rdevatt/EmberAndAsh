@@ -126,6 +126,8 @@ function recruit(state, text) {
   const id = findRosterId(text);
   if (!id) return { success: false, unknown: true, message: 'Nobody by that name is willing to follow you. Companions are people you have earned — type "companions" to see who might join, or "hire a sellsword" at an inn.' };
   if ((state.companions || []).some(c => c.rosterId === id)) return { success: false, message: `${ROSTER[id].name} is already with you.` };
+  if (state.killedCompanions && state.killedCompanions[id]) return { success: false, message: `${ROSTER[id].name} is dead.` };
+  if (state.estrangedCompanions && state.estrangedCompanions[id]) return { success: false, message: `${ROSTER[id].name} wants nothing more to do with you.` };
   const reasons = checkRequirements(state, id);
   if (reasons.length) return { success: false, message: reasons.join(' ') };
   const c = ROSTER[id];
@@ -173,8 +175,10 @@ function companionTurn(state, enemy, resistMultiplier) {
     const loyaltyMod = 0.85 + (c.loyalty || 50) / 300;
     const base = (6 + level * 0.55 + levelGearBonus(level) * 0.6) * loyaltyMod;
     const role = c.role === 'ally' ? 'striker' : c.role;
+    // What their own story taught them (game/companion-quests.js).
+    const sa = c.storyAbility || {};
     if (role === 'healer' && state.hp < state.maxHp * 0.75) {
-      const heal = Math.max(2, Math.round(state.maxHp * 0.07 * loyaltyMod));
+      const heal = Math.max(2, Math.round(state.maxHp * (0.07 + (sa.heal || 0) * 0.5) * loyaltyMod));
       const before = state.hp;
       state.hp = Math.min(state.maxHp, state.hp + heal);
       results.push({ name: c.name, hit: true, damage: state.hp - before, heal: true, verb: 'mends your wounds' });
@@ -184,8 +188,8 @@ function companionTurn(state, enemy, resistMultiplier) {
     const mult = role === 'striker' ? 1.0 : role === 'caster' ? 1.05 : 0.55;
     const hitChance = role === 'caster' ? 0.8 : Math.min(0.85, Math.max(0.35, 0.65 + (level * 0.3 - enemy.effectiveDex + 5) / 40));
     const hit = Math.random() < hitChance;
-    const element = role === 'caster' || role === 'healer' ? (c.element || 'arcane') : 'physical';
-    const dmg = hit ? Math.max(1, Math.round(base * mult * (0.8 + Math.random() * 0.4) * (resistMultiplier ? resistMultiplier(enemy, element) : 1))) : 0;
+    const element = sa.element || (role === 'caster' || role === 'healer' ? (c.element || 'arcane') : 'physical');
+    const dmg = hit ? Math.max(1, Math.round(base * mult * (1 + (sa.bonus || 0)) * (0.8 + Math.random() * 0.4) * (resistMultiplier ? resistMultiplier(enemy, element) : 1))) : 0;
     if (dmg) enemy.currentHP = Math.max(0, enemy.currentHP - dmg);
     results.push({ name: c.name, hit, damage: dmg, verb: role === 'caster' ? 'casts' : role === 'guardian' ? 'bashes' : 'strikes' });
   }
@@ -193,8 +197,8 @@ function companionTurn(state, enemy, resistMultiplier) {
 }
 
 function guardianShare(state) {
-  const g = (state.companions || []).filter(c => c.role === 'guardian').length;
-  return Math.min(0.35, g * 0.22);
+  const gs = (state.companions || []).filter(c => c.role === 'guardian');
+  return Math.min(0.45, gs.reduce((t, c) => t + 0.22 + ((c.storyAbility && c.storyAbility.guard) || 0), 0));
 }
 
 // After a victory: loyalty and shared experience.
