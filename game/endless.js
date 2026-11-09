@@ -304,6 +304,7 @@ function onCrisisWon(state, world, crisisId) {
   const c = (world.crises || []).find(x => x.id === crisisId && x.status === 'active');
   if (!c) return null;
   chronicle.resolveCrisis(world, c, state);
+  require('./morality').shift(state, 5, 'ended a crisis');
   const coin = 120 * c.level;
   addCoin(state, coin);
   const lvl = getPlayerLevel(state.totalXP || 0);

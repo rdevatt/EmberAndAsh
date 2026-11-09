@@ -510,3 +510,10 @@ button.retry-btn:not(.story-btn):hover {
 
 /* Long modals (settings with mature content) scroll instead of overflowing. */
 .modal-box { max-height: calc(100vh - 32px); overflow-y: auto; overscroll-behavior: contain; }
+
+/* ---------- The road you walk (good ↔ evil) ---------- */
+.road-meter { margin: 6px 0 4px; width: 120px; }
+.road-track { position: relative; height: 8px; border-radius: 4px; background: linear-gradient(90deg, #6a0a0a 0%, #2a0a0a 35%, #3a3a3a 50%, #8a7a4a 70%, #f0e0a0 100%); border: 1px solid #000; }
+.road-marker { position: absolute; top: -3px; width: 4px; height: 14px; margin-left: -2px; background: #fff; border: 1px solid #000; border-radius: 2px; left: 50%; transition: left 0.6s ease; }
+.road-label { margin-top: 2px; }
+@media (prefers-reduced-motion: reduce) { .road-marker { transition: none; } }

@@ -11,6 +11,7 @@ const { buildShopText, buyItem, drinkPotion } = require('../../../game/shop');
 const createWorldCommands = require('./world-commands');
 const { extraPanels } = require('../extra-panels');
 const campaign  = require('../../../game/campaign');
+const slavery   = require('../../../game/slavery');
 const comps     = require('../../../game/companions');
 const factions  = require('../../../game/factions');
 const world     = require('../../../game/world');
@@ -297,6 +298,7 @@ module.exports = function registerGameplayRoutes(app, deps) {
     }
     for (const c of processQuestCompletions(state)) {
       events.push({ type: 'questComplete', quest: c.quest, reward: c.reward, hint: c.hint });
+      require('../../../game/morality').shift(state, 1, 'helped people');
       if (c.levelUp) events.push(c.levelUp);
       appendHint(state, c.hint);
       // Bounties earn the standing of whoever holds sway locally, and the
@@ -424,7 +426,10 @@ module.exports = function registerGameplayRoutes(app, deps) {
         if (fleeing && fleeing.isBoss) events.push({ type: 'system', message: `You escape. ${fleeing.label} will be waiting, fully recovered, when you return.` });
       }
       state.pendingContextHint = fleeResult.hint;
-      if (isDead(state)) applyDeath(state, events);
+      const dead = isDead(state);
+      if (fleeing && fleeing.meta && fleeing.meta.rebellion && (fleeResult.success || dead)) events.push({ type: 'system', message: slavery.endRebellion(state, false) });
+      if (fleeResult.success || dead) slavery.afterFight(state, false);
+      if (dead) applyDeath(state, events);
       return narrateAndRespond(req, res, input, events);
     }
 
@@ -435,7 +440,13 @@ module.exports = function registerGameplayRoutes(app, deps) {
     if (combatResult.enemyKilled || !state.inCombat) addTime(req, chronicle.TIME_COST.fight);
 
     if (combatResult.enemyKilled) applyKill(state, events, input);
-    if (isDead(state)) applyDeath(state, events);
+    const fell = isDead(state);
+    if (!state.inCombat || fell) {
+      // The fight is over: fighting slaves grow harder; a revolt ends one way or the other.
+      slavery.afterFight(state, !!combatResult.enemyKilled);
+      if (enemyBefore && enemyBefore.meta && enemyBefore.meta.rebellion) events.push({ type: 'system', message: slavery.endRebellion(state, !!combatResult.enemyKilled && !fell) });
+    }
+    if (fell) applyDeath(state, events);
 
     return narrateAndRespond(req, res, input, events, { combatLog: combatResult.combatLog, combatResult: combatResult.result, killed: combatResult.enemyKilled, killedEnemy: combatResult.enemyKilled ? enemyBefore : null });
   }
@@ -586,6 +597,17 @@ module.exports = function registerGameplayRoutes(app, deps) {
       }
 
       for (const msg of comps.tickContracts(state)) events.push({ type: 'system', message: msg });
+
+      // A slave revolt does not wait for you to finish what you were doing.
+      if (state.pendingRebellion && !state.pendingRebellion.started && !state.inCombat) {
+        const rebels = slavery.rebellionEnemy(state, spawnEnemy);
+        state.pendingRebellion.started = true;
+        req.session.undoLocked = true;
+        startEncounter(state, rebels, `[SLAVE REVOLT — the player's slaves (${state.pendingRebellion.names.join(', ')}) rise against them. Narrate the attack.]`);
+        events.push({ type: 'system', message: `Your slaves have risen against you: ${rebels.label}. Fight them — or flee, and let them go.` });
+        events.push({ type: 'combatStart' });
+        return narrateAndRespond(req, res, cleanInput, events);
+      }
 
       // Drawing or sheathing a weapon is the player's call, in their own words.
       if (!state.inCombat && /^i\b/i.test(cleanInput)) {

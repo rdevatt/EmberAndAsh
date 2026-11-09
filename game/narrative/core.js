@@ -57,7 +57,15 @@ function getGroqClient() {
   });
   return groq;
 }
-const MODEL          = 'llama-3.3-70b-versatile';
+// The model is configurable (GROQ_MODEL). Providers retire models; if the
+// chosen one is gone, the next that works is used and remembered.
+const MODEL_CANDIDATES = [process.env.GROQ_MODEL, 'qwen/qwen3.8-27b', 'qwen/qwen3.6-27b', 'openai/gpt-oss-120b', 'llama-3.3-70b-versatile'].filter(Boolean);
+let MODEL = MODEL_CANDIDATES[0];
+function modelExtras(model) {
+  if (/qwen3/i.test(model)) return { reasoning_format: 'hidden' };      // no visible "thinking"
+  if (/gpt-oss/i.test(model)) return { reasoning_effort: 'low' };
+  return {};
+}
 const MAX_TOKENS     = 600;   // Per narrative response
 const SUMMARY_TOKENS = 300;   // Per summary update
 const SUMMARY_EVERY  = 10;    // Update story summary every N actions
@@ -342,7 +350,7 @@ function tripBreaker(err) {
 // Removes things narration must never claim: bracketed engine notes and
 // invented rewards. The engine's own announcements are appended separately.
 function sanitizeNarrative(text) {
-  let t = String(text || '');
+  let t = String(text || '').replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/^[\s\S]*?<\/think>/i, '');
   t = t.replace(/^\s*\[[^\]\n]{0,400}\]\s*$/gm, '');
   t = t.replace(/\(?\+\s?\d+\s*(?:xp|experience|gold|silver|copper|coins?)\b\)?/gi, '');
   t = t.replace(/\b(?:you (?:gain|earn|receive|obtain|are awarded))\s+\d+\s*(?:xp|experience|gold|silver|copper|coins?)\b[.!]?/gi, '');
@@ -358,16 +366,30 @@ async function callGroq(prompt, systemOverride = null, history = []) {
     return { success: false, offline: true, text: '', error: aiHealth.reason, tokens: 0 };
   }
   try {
-    const response = await getGroqClient().chat.completions.create({
-      model:       MODEL,
+    const request = (model) => getGroqClient().chat.completions.create({
+      model,
       max_tokens:  MAX_TOKENS,
       temperature: 0.85,
+      ...modelExtras(model),
       messages: [
         { role: 'system', content: systemOverride || SYSTEM_PROMPT },
         ...history,
         { role: 'user', content: prompt }
       ]
     });
+    let response;
+    try {
+      response = await request(MODEL);
+    } catch (err) {
+      const status = err && (err.status || (err.response && err.response.status));
+      if (status !== 404 && status !== 400) throw err;
+      // The model was retired or is not available to this key: try the others once.
+      let ok = false;
+      for (const m of MODEL_CANDIDATES.filter(x => x !== MODEL)) {
+        try { response = await request(m); MODEL = m; ok = true; console.warn(`[Narrative] Using model ${m}`); break; } catch (e2) { /* next */ }
+      }
+      if (!ok) throw err;
+    }
     const raw = response && response.choices && response.choices[0] && response.choices[0].message && response.choices[0].message.content;
     const text = typeof raw === 'string' ? sanitizeNarrative(raw) : '';
     if (text.length < 2) throw Object.assign(new Error('Malformed or empty AI response'), { status: 'malformed' });

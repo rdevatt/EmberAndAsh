@@ -132,6 +132,8 @@ function portraitData(state, extras = {}) {
     crown: !!extras.ruler,
     undead: !!(state.longevity && state.longevity.undead),
     immortalGlow: !!(state.longevity && state.longevity.immortal),
+    // The road they walk shows in the face.
+    road: require('./morality').marks(state),
     title: extras.title || null
   };
 }

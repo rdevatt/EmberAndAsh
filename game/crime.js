@@ -192,6 +192,7 @@ function resolve(state, crime, extra = {}) {
 
   state.deeds.push({ ...rec, when: world ? chronicle.formatDate(rec.at) : '', seen, perfect: !seen && !victimReports && rec.clues === 0 });
   state.corruption = Math.min(100, state.corruption + Math.ceil(rec.heinous * 2.25));
+  require('./morality').shift(state, -rec.heinous * 3, TYPES[rec.type] ? TYPES[rec.type].label : rec.type);
 
   // Companions see everything; whether they stay depends on who they are.
   for (const c of companionWitnesses) {

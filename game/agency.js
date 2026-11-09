@@ -177,10 +177,20 @@ function enforcePlayerVoice(narrative, input) {
     }
   }
   for (const e of edits.sort((a, b) => b.start - a.start)) text = text.slice(0, e.start) + e.rep + text.slice(e.end);
-  // Exact speech the narration left out entirely is added, word for word.
-  if (exact && used < allowed.length) {
-    const missing = allowed.slice(used).filter(q => !text.includes(q));
-    if (missing.length) text = `${missing.map(q => `"${q}"`).join(' ')} ${text}`.trim();
+  // Exact speech the model reworded slightly (capitals, punctuation) is put
+  // back word for word where it stands; speech it left out entirely is added.
+  if (exact) {
+    const norm = x => x.toLowerCase().replace(/[^a-z0-9' ]+/g, '').replace(/\s+/g, ' ').trim();
+    for (const q of allowed) {
+      if (text.includes(q)) continue;
+      const re = /"([^"]*)"|“([^”]*)”/g;
+      let m, fixed = false;
+      while ((m = re.exec(text))) {
+        const inner = m[1] !== undefined ? m[1] : m[2];
+        if (norm(inner) === norm(q)) { text = text.slice(0, m.index) + `"${q}"` + text.slice(m.index + m[0].length); fixed = true; break; }
+      }
+      if (!fixed) text = `"${q}" ${text}`.trim();
+    }
   }
   return text.replace(/[ \t]{2,}/g, ' ').replace(/\s+([.,!?])/g, '$1').replace(/^[\s,.]+/, '').trim();
 }

@@ -96,12 +96,19 @@
     const r = (species === 'dwarf' ? 21 : species === 'halfling' ? 19 : 20) * youth * (a.build === 'broad' ? 1.05 : 1);
     const cy = 58 + (species === 'dwarf' ? 6 : 0) + (a.height === 'tall' ? -3 : a.height === 'short' ? 3 : 0);
     const trim = trimFor(d.armor ? d.armor.tier : 0);
-    const bg = d.crown ? '#3a2a12' : d.regalia === 'archmage' ? '#1c2244' : '#1a1a20';
+    // The road they walk: light and warm toward good; red and black, red
+    // eyes and growing horns toward evil.
+    const road = d.road || {};
+    if (road.tone === 'light') skin = mix(skin, '#fff6e0', 0.12);
+    const bg = road.tone === 'dark' ? (road.horns >= 2 ? '#1a0204' : '#2a0a0c') : road.tone === 'light' ? '#4a4434' : d.crown ? '#3a2a12' : d.regalia === 'archmage' ? '#1c2244' : '#1a1a20';
     const out = [];
     out.push(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" class="ea-portrait" role="img" aria-label="${esc(`Portrait of ${d.name || 'your character'}`)}">`);
-    out.push(`<defs><radialGradient id="pg${seed}" cx="50%" cy="40%" r="70%"><stop offset="0" stop-color="${shade(bg, 0.18)}"/><stop offset="1" stop-color="${bg}"/></radialGradient></defs>`);
-    out.push(`<rect width="${W}" height="${H}" rx="8" fill="url(#pg${seed})"/>`);
+    const gid = `pg${seed}${road.tone || 'n'}${road.horns || 0}${d.crown ? 'c' : ''}${d.regalia ? 'r' : ''}`;
+    out.push(`<defs><radialGradient id="${gid}" cx="50%" cy="40%" r="70%"><stop offset="0" stop-color="${shade(bg, 0.18)}"/><stop offset="1" stop-color="${bg}"/></radialGradient></defs>`);
+    out.push(`<rect width="${W}" height="${H}" rx="8" fill="url(#${gid})"/>`);
     if (d.immortalGlow) out.push(`<circle cx="${cx}" cy="${cy}" r="${r * 2}" fill="#f0d070" opacity="0.12"/>`);
+    if (road.tone === 'light') out.push(`<circle cx="${cx}" cy="${cy - 6}" r="${r * 2.1}" fill="#fff0c0" opacity="${road.glow ? 0.28 : 0.16}" class="ea-road-light"/>`);
+    if (road.tone === 'dark') out.push(`<path d="M0 ${H} Q${cx} ${H - 50} ${W} ${H}Z" fill="#6a0a0a" opacity="0.45"/><circle cx="${cx}" cy="${cy}" r="${r * 2.2}" fill="#3a0000" opacity="0.35" class="ea-road-dark"/>`);
     // behind: weapon and long hair
     out.push(weaponBehind(d.weapon ? d.weapon.kind : 'none', trim, cx + 30, 118));
     out.push(hairShapes(a.hairStyle, hair, cx, cy, r, true));
@@ -123,7 +130,7 @@
     if (age >= 55) out.push(`<path d="M${cx - 9} ${cy - r * 0.55} q9 -3 18 0" stroke="${shade(skin, -0.3)}" fill="none" stroke-width="0.9"/><path d="M${cx - 13} ${cy + 9} q2 4 5 5 M${cx + 13} ${cy + 9} q-2 4 -5 5" stroke="${shade(skin, -0.3)}" fill="none" stroke-width="0.9"/>`);
     if (age >= 70) out.push(`<path d="M${cx - 8} ${cy - r * 0.7} q8 -3 16 0 M${cx - 15} ${cy - 1} l-3 -2 M${cx + 15} ${cy - 1} l3 -2" stroke="${shade(skin, -0.32)}" fill="none" stroke-width="0.9"/>`);
     // eyes
-    const eye = d.undead ? '#7fffd0' : (a.eyeHex || '#5a4030');
+    const eye = road.redEyes ? '#d01818' : d.undead ? '#7fffd0' : (a.eyeHex || '#5a4030');
     const patch = (a.marks || []).includes('eyepatch');
     out.push(`<ellipse cx="${cx - 7}" cy="${cy - 1}" rx="3.6" ry="2.4" fill="#f4f0e8"/><circle cx="${cx - 7}" cy="${cy - 1}" r="1.8" fill="${eye}"/>`);
     if (patch) out.push(`<ellipse cx="${cx + 7}" cy="${cy - 1}" rx="5" ry="4" fill="#1a1a1a"/><path d="M${cx - r} ${cy - 7} L${cx + r} ${cy - 3}" stroke="#1a1a1a" stroke-width="1.5"/>`);
@@ -146,6 +153,12 @@
     else if (a.beard === 'stubble') out.push(`<path d="M${cx - r * 0.8} ${cy + 6} Q${cx} ${cy + r * 1.35} ${cx + r * 0.8} ${cy + 6}" fill="none" stroke="${hair}" stroke-width="5" opacity="0.3"/>`);
     // front hair
     out.push(hairShapes(a.hairStyle, hair, cx, cy, r, false));
+    // The road's marks: shadow across the face and horns, or a halo.
+    if (road.tone === 'dark') out.push(`<ellipse cx="${cx}" cy="${cy + 4}" rx="${r * 0.95}" ry="${r * 1.15}" fill="#1a0000" opacity="${road.horns >= 2 ? 0.32 : 0.2}"/>`);
+    if (road.redEyes) out.push(`<circle cx="${cx - 7}" cy="${cy - 1}" r="3.4" fill="#ff2020" opacity="0.25"/><circle cx="${cx + 7}" cy="${cy - 1}" r="3.4" fill="#ff2020" opacity="0.25"/>`);
+    if (road.horns === 1) out.push(`<path d="M${cx - 10} ${cy - r * 0.9} q-5 -10 -2 -16 q2 8 7 13z M${cx + 10} ${cy - r * 0.9} q5 -10 2 -16 q-2 8 -7 13z" fill="#2a1a1a" stroke="#0a0000"/>`);
+    if (road.horns >= 2) out.push(`<path d="M${cx - 12} ${cy - r * 0.8} q-16 -6 -20 -24 q-2 -10 6 -12 q-6 6 -2 14 q4 10 20 16z M${cx + 12} ${cy - r * 0.8} q16 -6 20 -24 q2 -10 -6 -12 q6 6 2 14 q-4 10 -20 16z" fill="#1a0a0a" stroke="#4a0a0a" stroke-width="1.2"/>`);
+    if (road.glow) out.push(`<ellipse cx="${cx}" cy="${cy - r - 10}" rx="${r * 0.8}" ry="4" fill="none" stroke="#ffe08a" stroke-width="2" opacity="0.85"/>`);
     // headwear
     if (d.crown) out.push(`<path d="M${cx - 16} ${cy - r * 0.95} l3 -12 l6 7 l7 -11 l7 11 l6 -7 l3 12z" fill="#e0b84a" stroke="#8a6a1a"/><circle cx="${cx}" cy="${cy - r - 9}" r="2" fill="#c03a3a"/>`);
     else if (d.regalia === 'archmage') out.push(`<path d="M${cx - 17} ${cy - r * 0.8} q17 -6 34 0" stroke="#f0d070" stroke-width="2.5" fill="none"/><circle cx="${cx}" cy="${cy - r * 0.95}" r="2.4" fill="#8ad0ff"/>`);
@@ -235,7 +248,9 @@
       // A beard follows the jaw from ear to ear and leaves the mouth clear,
       // so on any skin tone it reads as hair rather than an open mouth.
       (a.beard === 'beard' ? `<path d="M-8.6 ${12 + stoop} Q-8 ${24 + stoop} 0 ${26 + stoop} Q8 ${24 + stoop} 8.6 ${12 + stoop} Q7 ${17 + stoop} 4 ${17 + stoop} Q0 ${15.5 + stoop} -4 ${17 + stoop} Q-7 ${17 + stoop} -8.6 ${12 + stoop}Z" fill="${hair}"/><path d="M-2.6 ${18.4 + stoop} q2.6 1.2 5.2 0" stroke="${shade(skin, -0.45)}" stroke-width="0.9" fill="none"/>` : '') +
-      `<circle cx="4" cy="${11 + stoop}" r="1.3" fill="${d.undead ? '#7fffd0' : '#222'}"/>` +
+      `<circle cx="4" cy="${11 + stoop}" r="1.3" fill="${d.road && d.road.redEyes ? '#ff2020' : d.undead ? '#7fffd0' : '#222'}"/>` +
+      (d.road && d.road.horns ? `<path d="M-5 ${4 + stoop} q-3 ${d.road.horns > 1 ? -9 : -5} 0 ${d.road.horns > 1 ? -12 : -7} q0 5 3 8z M5 ${4 + stoop} q3 ${d.road.horns > 1 ? -9 : -5} 0 ${d.road.horns > 1 ? -12 : -7} q0 5 -3 8z" fill="#2a1414"/>` : '') +
+      (d.road && d.road.glow ? `<ellipse cx="0" cy="${-1 + stoop}" rx="7" ry="2" fill="none" stroke="#ffe08a" stroke-width="1.2"/>` : '') +
       (d.crown ? `<path d="M-7 ${3 + stoop} l2 -6 l3 4 l2 -6 l2 6 l3 -4 l2 6z" fill="#e0b84a"/>` : '');
     const torsoShape = nudeLvl ? nudeTorso(w, skin, hair, female, nudeLvl, stoop)
       : `<path d="M${-w} 56 Q${-w} 26 0 ${22 + stoop} Q${w} 26 ${w} 56Z" fill="${body}" stroke="${shade(body, -0.35)}"/>` + (trim && armorKind !== 'clothes' ? `<path d="M${-w + 2} 30 L${w - 2} 30" stroke="${trim}" stroke-width="1.5"/>` : '');
@@ -502,8 +517,9 @@
         ? `<g class="ea-actor ea-npc" transform="translate(262 80)">${figure(vd, 'fallen', fopts)}</g>`
         : `<g class="ea-actor ea-npc" transform="translate(250 80) scale(-1 1)">${figure(vd, sc.npc.pose, fopts)}</g>`);
     } else if (sc.npc && sc.npc.victim) {
-      // Villainy: the threat and the aftermath, never the act. The character
-      // looms; the victim cowers, or has fought free and is running.
+      // Villainy: the threat and the aftermath, never the act. The character's
+      // shadow falls over the victim; the victim cowers, or has fought free.
+      if (!sc.npc.escaped) out.push(`<g opacity="0.55" style="filter:brightness(0)" class="ea-shadow" transform="translate(212 -10) scale(2.1)">${figure(sc.player, 'idle', fopts)}</g>`);
       out.push(`<g class="ea-actor ea-player" transform="translate(170 80) scale(1.08)">${figure(sc.player, 'idle', fopts)}</g>`);
       const vd = { appearance: sc.npc.appearance, gender: sc.npc.gender, age: sc.npc.age || 35, armor: { kind: 'clothes' }, weapon: { kind: 'none' } };
       out.push(sc.npc.escaped

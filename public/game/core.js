@@ -234,6 +234,16 @@ function applyPanels(data) {
     if (data.party)       updatePartyPanel(data.party);
     if ('world' in data)  updateWorldPanel(data.world);
     if (data.portrait && window.EmberScene) EmberScene.renderPortrait(document.getElementById('portrait-holder'), data.portrait);
+    // The road: −100 (monstrous) at the left, +100 (saintly) at the right.
+    if (data.morality) {
+      const meter = document.getElementById('road-meter');
+      if (meter) {
+        meter.classList.remove('hidden');
+        document.getElementById('road-marker').style.left = `${(data.morality.value + 100) / 2}%`;
+        document.getElementById('road-label').textContent = `${data.morality.label} (${data.morality.value > 0 ? '+' : ''}${data.morality.value})`;
+        meter.dataset.value = String(data.morality.value);
+      }
+    }
     if (data.scene && window.EmberScene) showScene(data.scene, data.inCreation);
     updateCombatActions(data);
   } catch (e) {

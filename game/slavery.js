@@ -116,6 +116,7 @@ function handle(state, input) {
     m.offers = m.offers.filter(x => x !== o);
     const s = addSlave(state, { name: o.name, gender: o.gender, age: o.age, origin: o.origin });
     s.fear = 50;
+    require('./morality').shift(state, -3, 'bought a person');
     return { success: true, hours: 1, message: `You pay ${o.price} copper. ${s.name} is yours. ("slaves" to see them.)`, event: { type: 'slaves', action: 'bought', name: s.name }, hint: `[SLAVERY — the player bought ${s.name} (${s.gender}, ${s.age}), ${s.origin}, at the market. Narrate the transaction and the person, as the player described.]` };
   }
   if (RE.market.test(text)) {
@@ -162,6 +163,7 @@ function act(state, s, kind, text) {
   const world = chronicle.worldOf(state);
   if (kind === 'free') {
     state.slaves = state.slaves.filter(x => x !== s);
+    require('./morality').shift(state, 8, `freed ${s.name}`);
     const applied = factions.changeStanding(state, { wardens: 4, compact: 3 }, 'mercy');
     if (s.loyalty >= 40 || s.kindness >= 3) state.freedFriends = [...(state.freedFriends || []), s.name];
     if (world) chronicle.addEvent(world, { type: 'deed', importance: 2, title: `${state.character.name} frees ${s.name}`, actor: chronicle.actorOf(state), region: state.character.region });
@@ -177,6 +179,8 @@ function act(state, s, kind, text) {
   }
   if (kind === 'kind') {
     treat(state, s, 'kind');
+    const w = chronicle.worldOf(state); const now = w ? chronicle.nowHour(w) : (state.actionCount || 0);
+    if (now - (s.lastKindAt || -1e9) >= 24) { s.lastKindAt = now; require('./morality').shift(state, 1, `kindness to ${s.name}`); }
     return { success: true, message: `${s.name} (loyalty ${s.loyalty}, fear ${s.fear}, health ${s.health}).`, event: { type: 'slaves', action: 'kind', name: s.name }, hint: `[SLAVERY — the player treats ${s.name} kindly, as they described. Narrate it.]` };
   }
   // Cruelty: a deed remembered; a crime where slavery is outlawed, and
@@ -210,6 +214,7 @@ function monthly(state, months) {
   const out = [];
   const crime = require('./crime');
   for (let m = 0; m < Math.min(months, 24); m++) {
+    if (!state.pendingRebellion && Math.random() < rebellionChance(state)) { out.push(...rebel(state)); continue; }
     for (const s of [...state.slaves]) {
       const tier = (REGIONS[s.location === 'with you' ? state.character.region : s.location] || {}).tier || 1;
       if (s.job === 'labour') state.coin = (state.coin || 0) + 12 * tier;
@@ -234,6 +239,121 @@ function monthly(state, months) {
   return out;
 }
 
+// ---------------------------------------------
+// Slaves who fight
+// ---------------------------------------------
+function fighters(state) {
+  return ensure(state).filter(s => s.job === 'fighter' && s.location === 'with you' && s.health > 20);
+}
+
+// How likely a slave is to turn on their master in a fight.
+function betrayalChance(state, s) {
+  if (s.loyalty >= 40) return 0;
+  let p = 0.05 + s.fear / 600 + (s.cruelty || 0) * 0.03 + (s.violated ? 0.15 : 0) - s.loyalty / 400;
+  if (state.maxHp && state.hp < state.maxHp * 0.3) p += 0.15;          // the master is weak: now is the moment
+  return Math.max(0, Math.min(0.45, p));
+}
+
+// One round: each fighter strikes the enemy — or, on the first round of a
+// fight, a slave who hates you may turn instead: a blow, and they run.
+function combatTurn(state, enemy) {
+  const attacks = [], betrayals = [];
+  const lvl = require('./character').getPlayerLevel(state.totalXP || 0);
+  for (const s of fighters(state)) {
+    if ((state.combatRound || 1) === 1 || (state.maxHp && state.hp < state.maxHp * 0.3 && !s.testedThisFight)) {
+      s.testedThisFight = true;
+      if (Math.random() < betrayalChance(state, s)) {
+        const dmg = Math.max(1, Math.round(state.maxHp * (0.08 + Math.random() * 0.08)));
+        state.hp = Math.max(1, state.hp - dmg);
+        state.slaves = state.slaves.filter(x => x !== s);
+        betrayals.push(`⚠ ${s.name} turns on you — ${dmg} damage — and runs.`);
+        if (s.cruelty > 0 || s.violated) {
+          const crime = require('./crime');
+          betrayals.push(crime.makeKnown(state, { id: `cruelty_${s.id}`, type: 'assault', heinous: Math.min(9, 2 + (s.cruelty || 0)), victim: s.name, region: state.character.region }, `${s.name}, who ran, talks`));
+        }
+        continue;
+      }
+    }
+    const hit = Math.random() < Math.min(0.85, 0.6 + (s.training || 0) * 0.02);
+    const dmg = hit ? Math.max(1, Math.round((4 + lvl * 0.8) * (1 + Math.min(1, (s.training || 0) * 0.05)) * (0.8 + Math.random() * 0.4))) : 0;
+    if (hit) enemy.currentHP = Math.max(0, enemy.currentHP - dmg);
+    attacks.push({ name: s.name, hit, damage: dmg, slave: true });
+  }
+  return { attacks, betrayals };
+}
+
+// After a fight: those who stood with you grow harder, and a little closer.
+function afterFight(state, won) {
+  for (const s of fighters(state)) {
+    s.testedThisFight = false;
+    if (won) { s.training = (s.training || 0) + 1; s.loyalty = Math.min(100, s.loyalty + 1); }
+    s.health = Math.max(0, s.health - (won ? 3 : 10));
+  }
+}
+
+// ---------------------------------------------
+// Rebellion: many slaves, a cruel master
+// ---------------------------------------------
+function rebellionChance(state) {
+  const sl = ensure(state);
+  if (sl.length < 3) return 0;
+  const avg = (k) => sl.reduce((t, s) => t + (s[k] || 0), 0) / sl.length;
+  const p = (sl.length - 2) * 0.03 + avg('cruelty') * 0.04 + (avg('loyalty') < 20 ? 0.08 : 0) + (avg('fear') > 60 ? 0.05 : 0) - avg('loyalty') / 300;
+  return Math.max(0, Math.min(0.5, p));
+}
+
+// The slaves rise. Those with you attack (a fight); those kept elsewhere
+// break out, burn what they can and scatter — and all of them talk.
+function rebel(state) {
+  const sl = ensure(state);
+  const crime = require('./crime');
+  const out = [];
+  const withYou = sl.filter(s => s.location === 'with you');
+  const elsewhere = sl.filter(s => s.location !== 'with you');
+  if (elsewhere.length) {
+    state.slaves = state.slaves.filter(s => s.location === 'with you');
+    out.push(`Your slaves in ${REGIONS[elsewhere[0].location] ? REGIONS[elsewhere[0].location].label : 'your holding'} rise up: ${elsewhere.map(s => s.name).join(', ')} break their chains, set fire to what you owned there, and scatter.`);
+  }
+  if (withYou.length) {
+    state.pendingRebellion = { names: withYou.map(s => s.name), count: withYou.length };
+    out.push(`In the dead of night the chains go slack. ${withYou.map(s => s.name).join(', ')} have risen against you.`);
+  }
+  const cruelty = sl.reduce((t, s) => t + (s.cruelty || 0) + (s.violated ? 3 : 0), 0);
+  out.push(crime.makeKnown(state, { id: `revolt_${state.actionCount || 0}`, type: 'slaveholding', heinous: Math.min(10, 3 + Math.round(cruelty / 2)), victim: 'their slaves', region: state.character.region }, 'a slave revolt'));
+  const world = chronicle.worldOf(state);
+  if (world) chronicle.addEvent(world, { type: 'revolt', importance: 3, title: `The slaves of ${state.character.name} rise against them`, actor: chronicle.actorOf(state), region: state.character.region });
+  return out;
+}
+
+// The rebels with you become a fight.
+function rebellionEnemy(state, spawnEnemy) {
+  const r = state.pendingRebellion;
+  if (!r) return null;
+  const lvl = require('./character').getPlayerLevel(state.totalXP || 0);
+  const e = spawnEnemy(state.character.region, Math.max(1, lvl - 2));
+  e.label = r.count > 1 ? `Your rebelling slaves (${r.count})` : `${r.names[0]}, in revolt`;
+  e.maxHP = e.currentHP = Math.round(e.maxHP * (0.6 + 0.35 * r.count));
+  e.effectiveStr = Math.round(e.effectiveStr * (0.8 + 0.1 * r.count));
+  e.meta = { ...(e.meta || {}), rebellion: r.names };
+  e.desc = 'Chains swung like flails, knives taken from your own packs. They have nothing left to lose.';
+  return e;
+}
+
+// How the revolt ends: put down, or they get away.
+function endRebellion(state, won) {
+  const r = state.pendingRebellion || { names: [] };
+  state.pendingRebellion = null;
+  const rebels = state.slaves.filter(s => r.names.includes(s.name));
+  if (won) {
+    for (const s of rebels) { s.fear = 100; s.loyalty = 0; s.health = Math.max(5, s.health - 40); s.job = 'none'; }
+    const dead = rebels.filter((_, i) => i % 2 === 0 && rebels.length > 1);
+    state.slaves = state.slaves.filter(s => !dead.includes(s));
+    return `The revolt is put down.${dead.length ? ` ${dead.map(s => s.name).join(', ')} did not survive it.` : ''} The rest are back in chains, and they will never forget.`;
+  }
+  state.slaves = state.slaves.filter(s => !r.names.includes(s.name));
+  return `${r.names.join(', ')} are gone into the dark, free.`;
+}
+
 // Being seen with slaves where slavery is outlawed.
 function onArrive(state) {
   ensure(state);
@@ -250,4 +370,4 @@ function sceneSlaves(state) {
   return ensure(state).filter(s => s.location === 'with you').slice(0, 2).map(s => ({ name: s.name, gender: s.gender, age: s.age, hurt: s.health < 50, fear: s.fear }));
 }
 
-module.exports = { handle, addSlave, monthly, onArrive, sceneSlaves, legalHere, market, listText, ensure, JOBS };
+module.exports = { handle, addSlave, monthly, onArrive, sceneSlaves, legalHere, market, listText, ensure, JOBS, combatTurn, afterFight, betrayalChance, rebellionChance, rebel, rebellionEnemy, endRebellion, fighters };

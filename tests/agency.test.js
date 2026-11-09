@@ -110,3 +110,10 @@ test('the live narrator path filters an AI reply that speaks for the player', as
   assert.match(r.narrative, /"Two coppers\."/);
   process.env.NARRATIVE_OFFLINE = '1'; delete process.env.GROQ_API_KEY;
 });
+
+test('a quote the model re-capitalised is restored in place, not duplicated', () => {
+  const ai = 'You turn to the bar.\n\n"Hey barkeep, how about an ale?"\n\nHe grunts. "Five coppers."';
+  const out = A.enforcePlayerVoice(ai, QUOTED);
+  assert.equal((out.match(/hey barkeep how about an ale/gi) || []).length, 1, 'once');
+  assert.ok(out.includes('"hey barkeep how about an ale"'), 'exactly as the player wrote it');
+});

@@ -718,6 +718,12 @@ function applyCombatRound(state, input) {
 
   // Companion attacks
   const companionResults = enemy.currentHP > 0 ? resolveCompanionAttacks(state, enemy) : [];
+  // Slaves set to fight stand with you — unless they would rather not.
+  if (enemy.currentHP > 0 && (state.slaves || []).length) {
+    const sl = require('./slavery').combatTurn(state, enemy);
+    companionResults.push(...sl.attacks);
+    result.preLines.push(...sl.betrayals);
+  }
   result.companionAttacks = companionResults;
 
   // Boss phase triggers
