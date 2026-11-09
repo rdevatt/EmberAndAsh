@@ -428,7 +428,9 @@ function promptBlock(state, input) {
 function panelSummary(state) {
   const m = ensure(state);
   const last = m.chapters[m.chapters.length - 1];
-  return last ? last.text : '';
+  // Since the last chapter note: the notable things that have happened.
+  const since = m.events.filter(e => e.t > m.chapterFrom && e.w >= 2).slice(-3).map(e => e.text);
+  return [last ? last.text : '', since.length ? `Lately: ${since.join('; ')}.` : ''].filter(Boolean).join(' ');
 }
 
 module.exports = { ensure, note, event, record, recall, promptBlock, parseNotes, maybeCloseChapter, panelSummary, threads, NOTES_INSTRUCTION, CAPS, CHAPTER_TURNS, keyOf };

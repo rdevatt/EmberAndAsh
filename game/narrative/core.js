@@ -742,7 +742,7 @@ function buildRightPanelData(state) {
     sceneContext: state.sceneContext || 'neutral',
 
     // Story summary
-    storySummary: state.storySummary || '',
+    storySummary: require('./memory').panelSummary(state) || state.storySummary || '',
 
     // Ambient threats
     regionThreats: region ? region.monsters.slice(0, 3) : [],
@@ -781,7 +781,14 @@ async function processNarrative(state, playerInput, events = []) {
   // Recent exchanges, compact: the player's words and what was narrated —
   // the full context is rebuilt each turn from the notes, not replayed.
   const history  = (state.conversationHistory || []).slice(-8);
-  const aiResult = await callGroq(prompt, null, history);
+  let aiResult = await callGroq(prompt, null, history);
+  // A model sometimes repeats its last reply word for word. Ask once more,
+  // pointedly; if it repeats again, the game's own narrator tells it.
+  const head = (t) => String(t || '').replace(/\s+/g, ' ').trim().slice(0, 160).toLowerCase();
+  if (aiResult.success && state.lastAiNarrative && head(aiResult.text) === head(state.lastAiNarrative)) {
+    const retry = await callGroq(`${prompt}\n\n[Your last reply repeated the previous turn. Narrate ONLY this new action and its result, freshly, from where the story now stands.]`, null, history);
+    aiResult = retry.success && head(retry.text) !== head(state.lastAiNarrative) ? retry : { success: false, text: '', error: 'repeated' };
+  }
   if (!aiResult.success) {
     // AI unavailable — keep the game playable with engine-driven prose.
     aiResult.text = buildOfflineNarrative(state, playerInput, hintForFallback);
@@ -790,6 +797,7 @@ async function processNarrative(state, playerInput, events = []) {
     }
   }
 
+  if (aiResult.success) state.lastAiNarrative = aiResult.text;
   // The narrator's notes come off the reply before anyone sees it.
   const memory = require('./memory');
   let narratorNotes = [];

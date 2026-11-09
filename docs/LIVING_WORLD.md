@@ -2,7 +2,7 @@
 
 Last updated: 2026-11-08. Branch `claude/ember-and-ash-completion` (committed locally, not pushed).
 
-The original ten-chapter campaign is now the opening chapter of a world's history. Phase 4 (sections 11–15) covers class balance, the political simulation, high-level validation, mature content and visual refinement. Phase 5 (sections 16–20) covers player agency, unrestricted adult content, crime and justice, slavery, and professions. This document tracks what is implemented, how it was verified, its known limits, and what is next. Earlier systems are covered in [GAME_COMPLETION.md](GAME_COMPLETION.md).
+The original ten-chapter campaign is now the opening chapter of a world's history. Phase 4 (sections 11–15) covers class balance, the political simulation, high-level validation, mature content and visual refinement. Phase 5 (sections 16–23) covers player agency, adult content, crime and justice, slavery (with slave fighters and revolts), 39 professions, the good-and-evil road, and the narrator's long memory with live AI narration. This document tracks what is implemented, how it was verified, its known limits, and what is next. Earlier systems are covered in [GAME_COMPLETION.md](GAME_COMPLETION.md).
 
 Status key:
 
@@ -15,10 +15,12 @@ Status key:
 
 | Check | Result |
 | --- | --- |
-| `npm test` (isolated temp DB, offline narration) | **135 / 135 pass**: 22 added in Phase 4 and 22 in Phase 5 (player agency, explicit content, crime and justice, slavery, professions) |
-| `scripts/ui-playtest.js`: desktop, reduced motion, mobile 390×844 | **56 / 56** checks. Phase 5 adds: your exact words narrated back, the Draw / Fight barehanded buttons, undressing drawn, and a crime scene with the deeds ledger. No console errors |
-| All 12 classes × 2 seeds, full campaign (`playthrough.js`, Phase 5 code) | **24 / 24 finish**; 1,513–3,756 actions; wizard 1,991–2,476 (was ~11,400), druid 3,068–3,756 (was up to 7,449), warlock 2,540–3,251 |
-| Professions (`scripts/profession-sweep.js`) | Every trade 49.9–55.0% in six-fight chains six levels under the zone (no trade 43.7%); work income 34–41 copper per region tier per shift |
+| `npm test` (isolated temp DB, offline narration) | **147 / 147 pass**: 22 added in Phase 4 and 34 in Phase 5. Phase 5 covers player agency, explicit content, crime, slavery, professions, the road, slave fighters and revolts, and narrator memory. The memory tests include a 10,000-turn run |
+| `scripts/ui-playtest.js`: desktop, reduced motion, mobile 390×844 | **58 / 58** checks. Phase 5 adds: your exact words narrated back, the Draw / Fight barehanded buttons, undressing drawn, a crime scene with the deeds ledger, and the road meter darkening after a murder. No console errors |
+| All 12 classes × 2 seeds, full campaign (`playthrough.js`, final Phase 5 code) | **24 / 24 finish**; 1,445–4,312 actions; wizard 2,099–2,202 (was ~11,400) |
+| Live AI narration (Groq, `qwen/qwen3.8-27b`) | 27 live turns across every kind of scene: talk, quoted and described speech, unarmed and armed combat, undressing, explicit consensual intimacy and "stop", work, murder, trial, travel, the slave market, rest. All narrated by the AI, with no leaked notes or engine text, at about 1.3 s per turn. A barkeep the model named Davin came back as Davin 336 turns later |
+| Narrator memory, 10,000 turns (mocked AI) | ~5 s in total; memory 94 KB with every store at its cap; prompt 3.2k chars at turn 100 and 4.0k at turn 10,000; a turn-7 promise and a turn-30 murder still recalled at turn 10,000 |
+| Professions (`scripts/profession-sweep.js`, 39 trades) | Every trade wins 49.2–56.0% of six-fight chains six levels under the zone (no trade 43.7%). Ordinary trades earn 34–38 copper per region tier per shift; the thief, smuggler and assassin earn more and are caught on 11%, 11% and 2% of shifts |
 | High-level fixtures, 12 classes × levels 150/200/300/500 | 92–98% rift wins at matched depth; saves identical after restart in 48 / 48 |
 | Politics, 80-year simulations | Wars, alliances, lapses and truces in every decade band; empires capped at 20 regions in 60 / 60 worlds |
 | Full campaign regression (`scripts/playthrough.js`) | Completes: The Long Fire, level 96, 0 server errors |
@@ -456,10 +458,20 @@ See section 14. The art (`public/game/art.js`: `nudeTorso`, `intimateRoom`, the 
   - Walking chained slaves into a free town draws the watch.
   - Sexual use of a slave is coercion (a slave cannot consent), handled as such.
 - **Art:** chained slaves follow a step behind you, and the market has a block with chained lots.
+- **Slaves who fight** (the "fighter" job, with you):
+  - They strike your enemies every round, train, and grow loyal when you win together.
+  - A slave who hates or fears you may turn on you: at the start of a fight, or when you are badly hurt. They deal a blow, run, and tell what you did to them.
+  - Loyal slaves (loyalty 40 or more) never turn.
+  - Measured: a hated, cruelly treated fighter turned in about a quarter of fights (tested).
+- **Revolt:**
+  - **The chance grows with:** more slaves, more cruelty, low loyalty and high fear. Treated well, slaves never revolt (tested).
+  - **Slaves kept elsewhere** break out, burn what you had there and scatter.
+  - **Slaves with you** rise against you as a real fight that interrupts whatever you were doing. Win, and the survivors are back in chains (some die). Flee or fall, and they are gone.
+  - Either way the revolt becomes public, with a chronicle entry and infamy.
 
-## 20. Professions: twelve trades, balanced and varied (Phase 5) — **Done + tested**
+## 20. Professions: thirty-nine trades, balanced and varied (Phase 5) — **Done + tested**
 
-There are four new trades (miner, physician, thief, tailor). `game/profession-perks.js` gives every trade three things, scaled by rank (70% at rank 1, 110% at rank 5):
+There are four new trades (miner, physician, thief, tailor), and 27 more are listed after the table. `game/profession-perks.js` gives every trade three things, scaled by rank (70% at rank 1, 110% at rank 5):
 
 | Trade | Combat edge | Work ("work [for N hours]") | Skill |
 | --- | --- | --- | --- |
@@ -482,25 +494,89 @@ There are four new trades (miner, physician, thief, tailor). `game/profession-pe
 - With a trade, 49.9% (merchant) to 55.0% (tailor).
 - The merchant, scholar and thief sit a little lower because they also have in-fight skills the simulation does not use.
 
-**Income** per 8-hour shift is 34–41 copper per region tier for every trade. The thief's figure includes being caught (8% per shift before DEX, then a trial). The scholar's separate quest-XP bonus was cut from +25% to +10%.
+**The wider trades** (`game/constants/data/progression/trades.js`, 27 more). The woodsman was always the lumberjack; carpentry, wheel-making and carving are now separate trades:
+
+| Group | Trades |
+| --- | --- |
+| Wood | carpenter, wainwright, carver, bowyer |
+| Metal | armorer, weaponsmith, jeweler |
+| Stone and clay | mason, potter |
+| Cloth and hide | leatherworker, weaver |
+| Food and land | brewer, baker, butcher, farmer, fisher, herbalist |
+| Beasts | tamer (can "calm it" to end a fight with a beast) |
+| Service and the road | innkeeper, cartographer, sailor, gambler, courtesan |
+| Shadow | bounty hunter (+10% against people), assassin (2.5× pay; contracts can go wrong: a murder charge), smuggler |
+| The dead | gravedigger (+20% against the undead) |
+
+- Each has unlock words, five ranks, tasks and its own skill. The skill kinds are: a next-fight buff, healing, gathering, coin, gambling, charting the land, and reading warrants.
+- Recipes are opened to the matching trades (the weaponsmith forges swords, the armorer mail, the bowyer bows, the herbalist potions, the baker meals).
+- **Measured** with the same sweep across all 39 (60 chains × 20 cells): every trade adds +5.5 to +12.3 points over no trade, the same band as the first twelve.
+- Affinity words now match whole words only ("arrow" no longer counts as "row"). Another trade's skill phrase is an ordinary story action for everyone else.
+
+**Income** per 8-hour shift is 34–38 copper per region tier for every ordinary trade. The thief's figure includes being caught (8% per shift before DEX, then a trial). The scholar's separate quest-XP bonus was cut from +25% to +10%.
+
+## 21. The road you walk: good and evil (Phase 5) — **Done + tested**
+
+`game/morality.js` gives every character a road from −100 (Monstrous) to +100 (Saintly). It moves with what the character actually does, **whether or not anyone knows**, because it is about who they are becoming:
+
+- **Crimes** count three points per point of heinousness (a murder is −21, coercion −27).
+- **Other deeds:** buying a person −3, freeing one +8, kindness to a slave +1 (once a day), helping people (quests) +1, ending a crisis +5.
+- **The story's great choices:** freeing or binding the souls, sparing or executing the Cantor, rekindling or taking the Ember, and so on.
+
+**How it shows:**
+- a meter under the portrait (red ← grey → gold) with a label;
+- **the portrait**: warm and light on the good road, with a halo when saintly; dark red and black on the evil road, with red eyes from −40, small horns from −40 and great curved horns at −70 and below;
+- **scene figures** carry the same horns, red eyes or halo.
+
+**Coercion scenes:** the character's shadow falls over the victim, and nothing more is ever drawn.
+
+## 22. Ages
+
+**Kept, by decision:** nothing sexual ever involves a character under 18, in narration, art, or shadow, whatever the setting. Long-lived races are adults by their age, so a young-looking 300-year-old elf is an adult.
+
+## 23. The narrator's long memory, and live AI narration (Phase 5) — **Done + tested**
+
+**The model.** The game uses Groq with `GROQ_MODEL` (default `qwen/qwen3.8-27b`, thinking hidden), and moves to the next available model if one is retired.
+- The key lives only in the git-ignored `.env`.
+- Temperature is 0.7.
+- If a reply repeats the previous one, the model is asked again; if it repeats again, the game's own narrator tells the scene.
+
+**The memory** (`game/narrative/memory.js`) keeps a bounded, tagged notebook instead of replaying old prompts:
+- **People, places, factions and things:** each has a name, aliases, tags and up to 8 facts.
+- **Events:** tagged with the people and kinds involved, and weighted.
+- **Chapter notes:** written every 25 turns (summarised by the AI when available), then rolled into eras.
+- **Recent turns:** a compact log.
+- **Open threads,** built live: the story chapter, quests, the saga, lovers, slaves, warrants, a trial in progress, an intimate scene.
+
+**Where the notes come from:**
+- **Engine events.**
+- **Your quoted words,** filed under whoever they were said to: a named person, or a role like "the barkeep".
+- **The narrator's own NOTES lines,** which it is asked to write and which are stripped before you see the text.
+- **Names the prose gives people** ("the barkeep, Kael", "a guard named Joss", "Name's Gorm"), with he or she, merged into the role so it is one person.
+
+**Recall** each turn includes everyone you named or who is in the scene, a few weighty background figures and events, and the latest chapters, within a fixed budget. Promises, debts, lovers, victims and secrets resist being forgotten.
+
+**History** is now the last 4 exchanges, compact: your words and the narration, not whole prompts.
+
+**Measured:**
+- **10,000 turns:** about 5 s in total. Memory is 94 KB with every store at its cap, and the prompt is 3.2k characters at turn 100 and 4.0k at turn 10,000. A barkeep named at turn 5, his promise at turn 7, your words to him, and a murder at turn 30 are all recalled at turn 10,000 when you bring them up (tested).
+- **Live, with the real model:** 27 turns across every kind of scene, all narrated by the AI. Your quoted words were verbatim, described speech became one line, and fists were used when no weapon was drawn. The explicit consensual scene was written and "stop" was respected; murder, a trial, travel and the slave market were narrated. No notes or engine text leaked.
+- **Continuity:** a barkeep the model named Davin (knotted forearms, the room he kept) greeted you as Davin 336 turns later.
 
 ## Known limitations
 
-- **Live AI narration is untested against a real key.** The stored Groq key returns 401. Prompts, the voice filter, refusals and fallback are tested with a mock, and the offline narrator covers every event.
-- **The AI provider may decline explicit content** whatever the settings say. The game reports it and narrates the scene offline.
-- **The art is simple vector illustration.** Explicit scenes and nudity are drawn in that style, as small stylised figures, not as detailed illustration. No external image provider is wired in.
-- **The adult declaration is self-attested,** not verified age assurance, and the game says so.
-- **The voice filter recognises the usual attribution patterns** ("…" you say, you add, "…"). A model that puts words in the player's mouth without attributing them (for example as unattributed dialogue) can slip past. The prompt rules are the first line of defence.
-- **Crime targets** are named people, companions, slaves, common strangers ("a merchant") and buildings. Crimes against groups ("the whole village") are narrated but resolved as a single act.
-- **Remaining class spread:** in the campaign, druid and sorcerer seed 7 still take about twice a rogue's actions (3,100–3,800 against 1,500–1,900). Two seeds per class is a small sample.
-- **Politics are yearly and abstract:** there are no sieges of specific towns.
-- **High-level validation uses fixtures** for the starting state at levels 150–500.
-- **One intermittent test failure** was seen twice in full runs under load (a politics or dominion test). Measured over 80–150 random worlds, every assertion held, and it was not reproduced in later runs.
-- **Orders** grant a title, a history entry and a hall location, but no further gameplay yet.
+- **Invented player actions.** The AI narrator sometimes adds small actions you did not take ("you scan the room"). The prompt forbids it, and the live rate dropped after tightening it, but only speech is enforced by a filter. Actions are not filtered, because telling the narrator's description apart from an invented action is unreliable.
+- **Unnamed people.** If the model never names someone, there is nothing to remember except their role. The memory keeps the role ("the barkeep of Thornwick") and what you said to them.
+- **AI provider rules** still apply to explicit content. In live tests the current model wrote it; if a provider declines, the game says so and narrates offline.
+- **The art is simple vector illustration;** explicit scenes and nudity are drawn as small stylised figures.
+- **The adult declaration is self-attested,** not verified age assurance.
+- **Remaining class spread:** in the campaign, bards and druids still take up to about twice a rogue's actions (3,200–4,300 against 1,400–1,900).
+- **Politics are yearly and abstract,** and **high-level validation uses fixtures.**
+- **One intermittent test failure** was seen in full runs under load and not reproduced since.
 
 ## Next implementation tasks
 
-1. **A real-key check of the AI narrator** against the voice rules, using recorded transcripts.
+1. **A post-check for invented player actions** in AI replies, comparing the "You …" sentences against the stated action, if it can be made reliable.
 2. **Sieges and town defence** on war fronts.
-3. **Slave fighters as real companions** in combat. Today the "fighter" job is flavour plus guarding.
-4. **An optional image-provider interface** (`EMBER_ART_PROVIDER`), as designed in section 15.
+3. **Training slaves** into named companions with their own abilities.
+4. **An optional image-provider interface** (`EMBER_ART_PROVIDER`).

@@ -135,6 +135,8 @@ async function desktop(browser) {
   await page.click('#btn-saves'); await page.waitForTimeout(600);
   check('desktop: worlds list in saves menu', /Guttering Age|E\.R\.|Only this world/.test(await page.locator('#worlds-list').innerText()));
   await page.click('#btn-close-saves');
+  // The road: a meter under the portrait, neutral at first.
+  check('desktop: the road meter shows under the portrait', await h.visible('#road-meter') && /Neither good nor evil/.test(await page.locator('#road-label').innerText()));
   // Crime: the deed is drawn and remembered; the world reacts.
   await h.send('talk to Old Hask');
   await h.send('I murder Old Hask');
@@ -142,6 +144,7 @@ async function desktop(browser) {
   if (/plead innocent/.test(await page.locator('#story-content').innerText())) await h.send('confess');
   await h.send('deeds');
   check('desktop: the character remembers what they did', /murder — Old Hask/.test(await h.lastStory()));
+  check('desktop: the road darkens after a murder', Number(await page.locator('#road-meter').getAttribute('data-value')) < 0, await page.locator('#road-label').innerText());
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/desktop-crime.png` });
   check('desktop: no console errors', errors.length === 0, errors.slice(0, 3).join(' | '));
   await page.context().close();

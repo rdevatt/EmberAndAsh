@@ -108,3 +108,15 @@ test('names the narration gives are kept, merged with their role, with the right
   assert.ok(!people.some(e => /wipes|his/i.test(e.name)), 'no false names');
   assert.match(memory.promptBlock(s, 'I look for the barkeep'), /Kael/, '"the barkeep" finds Kael');
 });
+
+test('a reply that repeats the last one is retried, then told by the game itself', async () => {
+  process.env.NARRATIVE_OFFLINE = '0'; process.env.GROQ_API_KEY = 'test-key';
+  let calls = 0;
+  narrative.__setGroqClientForTests({ chat: { completions: { create: async () => { calls++; return { choices: [{ message: { content: 'The heat in the Old Veldrath is a physical weight, pressing down on the red dunes until the air itself seems to shimmer and warp. The sand sings at noon.' } }] }; } } } });
+  const s = person();
+  s.actionCount = 1; const a = await narrative.processNarrative(s, 'I feed Hessa well', []);
+  s.actionCount = 2; const b = await narrative.processNarrative(s, 'I put Hessa to work as a fighter', []);
+  assert.notEqual(b.narrative.slice(0, 80), a.narrative.slice(0, 80), 'the same text is never shown twice in a row');
+  assert.ok(calls >= 3, 'it asked again first');
+  process.env.NARRATIVE_OFFLINE = '1'; delete process.env.GROQ_API_KEY;
+});
