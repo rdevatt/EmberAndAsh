@@ -19,6 +19,7 @@ const legacy    = require('../../../game/legacy');
 const romance   = require('../../../game/romance');
 const crime     = require('../../../game/crime');
 const slavery   = require('../../../game/slavery');
+const perks     = require('../../../game/profession-perks');
 const politics  = require('../../../game/politics');
 const infamy    = require('../../../game/infamy');
 const { removeCompanion } = require('../../../game/economy');
@@ -315,6 +316,31 @@ module.exports = function createWorldCommands(h) {
       if (owned.event) events.push(owned.event);
       if (owned.hint) appendHint(state, owned.hint);
       return narrateAndRespond(req, res, input, events);
+    }
+
+    // ---------------- earning a living, and trade skills ----------------
+    const job = !state.inCombat ? perks.detectWork(input) : null;
+    if (job) {
+      const w = perks.work(state, job.hours);
+      if (!w.success) return sendCommand(req, res, w.message, 'work', { persist: false });
+      addTime(req, w.hours);
+      sys(events, w.message);
+      events.push({ type: 'work', profession: state.profession });
+      appendHint(state, w.hint);
+      return narrateAndRespond(req, res, input, events);
+    }
+    const skill = !state.inCombat ? perks.detectSkill(state, input) : null;
+    if (skill) {
+      const k = perks.useSkill(state, skill);
+      if (!k || !k.success) return sendCommand(req, res, (k && k.message) || 'Nothing comes of it.', 'skill', { persist: false });
+      addTime(req, k.hours || 1);
+      sys(events, k.message);
+      appendHint(state, `[TRADE SKILL — the player uses their ${state.profession}'s skill: ${k.message} Narrate the work.]`);
+      return narrateAndRespond(req, res, input, events);
+    }
+    if (/^(?:my trade|my profession|profession|trade)$/.test(cmd)) {
+      const d = perks.describe(state);
+      return sendCommand(req, res, d ? `${state.profession.toUpperCase()} (rank ${state.professionLevel || 1}). ${d}` : 'You have no trade yet. Do the work of one — forge, brew, hunt, trade, cook, mine, treat the sick, sew, steal — and one will be offered.', 'profession', { persist: false });
     }
 
     // ---------------- hiding what was done ----------------

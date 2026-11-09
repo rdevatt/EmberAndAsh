@@ -546,6 +546,29 @@ function applyCombatRound(state, input) {
   if (!inHand) weapon = null;
   result.unarmed = !weapon;
   result.weaponUsed = weapon ? weapon.name : null;
+  // The character's trade: an edge of its own kind (game/profession-perks.js).
+  const perks = require('./profession-perks');
+  const prof = perks.combatMods(state, enemy);
+  if (prof.regen && state.hp > 0 && state.hp < state.maxHp) {
+    const r = Math.max(1, Math.round(state.maxHp * prof.regen));
+    state.hp = Math.min(state.maxHp, state.hp + r);
+    result.preLines.push(`✚ You keep yourself together — +${r} HP`);
+  }
+  // Trade skills in a fight: study it (scholar), bribe it (merchant), steal from it (thief).
+  if (action === 'attack' && !stunned) {
+    const fs = perks.detectFightSkill(state, input);
+    const used = fs ? perks.useFightSkill(state, fs) : null;
+    if (used) {
+      result.playerLines.push(`${used.success ? '✦' : '✕'} ${used.message}`);
+      if (used.success && used.endsFight) {
+        state.inCombat = false; state.currentEnemy = null;
+        T.clearCombatEffects(state);
+        state.pendingCombatResult = { ...result, bribed: true };
+        return { score, enemyKilled: false, bribed: true, result, combatLog: `\n${'─'.repeat(36)}\n${result.playerLines.join('\n')}\n${'─'.repeat(36)}`, hint: `[BRIBED — the player paid ${enemy.label} to leave. Narrate the deal.]` };
+      }
+      if (used.success) action = 'trade';
+    }
+  }
 
   // ---------- resolve the player's action ----------
   const staminaPct  = state.maxStamina > 0 ? state.stamina / state.maxStamina : 1;
@@ -558,7 +581,7 @@ function applyCombatRound(state, input) {
   const dexAdv      = (accuracy - enemy.effectiveDex) / (25 + playerLevel * 0.4);
   // Punching above your weight: every level a foe has over you counts.
   const levelGap    = Math.max(0, (enemy.level || 1) - playerLevel);
-  const dmgMult     = T.playerDamageMultiplier(state, enemy);
+  const dmgMult     = T.playerDamageMultiplier(state, enemy) * prof.dmg;
   const D = require('./durability');
   const weaponBonus = (weapon ? Math.round((weapon.weaponBonus || 0) * D.durabilityFactor(weapon)) : 0) + (state.bonusWeaponDamage || 0);
   const profile     = T.weaponProfile(weapon);
@@ -566,13 +589,12 @@ function applyCombatRound(state, input) {
 
   const rollWeaponHit = (hitMod, critBonus, mult, element) => {
     const atk    = T.attackStat(stats, weapon, ability);
-    const chance = Math.min(0.95, Math.max(0.05, 0.60 + dexAdv + bp.hitMod + qualityMod + staminaMod + (hitMod || 0) - (env.hitPenalty || 0) - levelGap * 0.01));
+    const chance = Math.min(0.95, Math.max(0.05, 0.60 + dexAdv + bp.hitMod + qualityMod + staminaMod + (hitMod || 0) + prof.hit - (env.hitPenalty || 0) - levelGap * 0.01));
     const hit    = Math.random() < chance;
-    const crit   = hit && (Math.random() < Math.min(critBonus >= 1 ? 1 : 0.4, stats.dex / 250 + bp.critBonus + (critBonus || 0)));
-    const raw    = (Math.max(1, atk - 7) + weaponBonus + Math.floor(playerLevel / 2)) * bp.damageMod * (mult || 1) * (crit ? 2 : 1);
-    // Hunters know where beasts are soft.
-    const hunterEdge = state.profession === 'hunter' && enemy.traits.tags.includes('beast') ? 1.15 : 1;
-    const dmg    = hit ? Math.max(1, Math.round(raw * dmgMult * hunterEdge * T.resistMultiplier(enemy, element || 'physical'))) : 0;
+    const crit   = hit && (Math.random() < Math.min(critBonus >= 1 ? 1 : 0.4 + prof.crit, stats.dex / 250 + bp.critBonus + (critBonus || 0) + prof.crit));
+    const raw    = (Math.max(1, atk - 7) + weaponBonus * prof.weapon + Math.floor(playerLevel / 2)) * bp.damageMod * (mult || 1) * (crit ? 2 : 1);
+    const rm     = T.resistMultiplier(enemy, element || 'physical');
+    const dmg    = hit ? Math.max(1, Math.round(raw * dmgMult * rm * (rm > 1.05 ? prof.weakness : 1))) : 0;
     return { hit, crit, dmg, chance };
   };
 
@@ -581,8 +603,9 @@ function applyCombatRound(state, input) {
     const chance = Math.min(0.95, Math.max(0.3, 0.78 + (castStat - 10) / 40 + qualityMod * 0.5));
     const hit    = Math.random() < chance;
     const crit   = hit && Math.random() < Math.min(0.4, castStat / 250);
-    const base   = T.spellPower(state, stats, playerLevel, weapon, castKey) * (power || 1) * (0.85 + Math.random() * 0.3);
-    const dmg    = hit ? Math.max(1, Math.round(base * dmgMult * T.resistMultiplier(enemy, element) * (crit ? 1.75 : 1))) : 0;
+    const base   = T.spellPower(state, stats, playerLevel, weapon, castKey) * (power || 1) * (0.85 + Math.random() * 0.3) * prof.spell;
+    const rm     = T.resistMultiplier(enemy, element);
+    const dmg    = hit ? Math.max(1, Math.round(base * dmgMult * rm * (rm > 1.05 ? prof.weakness : 1) * (crit ? 1.75 : 1))) : 0;
     return { hit, crit, dmg, chance };
   };
 
@@ -647,7 +670,7 @@ function applyCombatRound(state, input) {
         result.playerLines.push(`⚗ You drink a mana potion — Mana +${state.mana - before}`);
       } else {
         const before = state.hp;
-        state.hp = Math.min(state.maxHp, state.hp + Math.ceil(state.maxHp * ((potion && potion.heal) || 0.4)));
+        state.hp = Math.min(state.maxHp, state.hp + Math.ceil(state.maxHp * ((potion && potion.heal) || 0.4) * prof.potion));
         result.playerLines.push(`⚗ You drink a healing potion — HP +${state.hp - before}`);
       }
       result.usedItem = item;
@@ -710,12 +733,12 @@ function applyCombatRound(state, input) {
       const plan = T.planEnemyTurn(state, enemy);
       result.enemyLines.push(...plan.lines);
       if (!plan.windingUp) {
-        const hitChance = Math.min(0.8, Math.max(0.3, ((enemy.level || 1) < 5 ? 0.5 : 0.55) + (enemy.effectiveDex - stats.dex) / (40 + playerLevel * 0.6) + (plan.hitBonus || 0) - (armor && armor.armorLevel ? armor.armorLevel * 0.006 : 0)));
+        const hitChance = Math.min(0.8, Math.max(0.25, ((enemy.level || 1) < 5 ? 0.5 : 0.55) + (enemy.effectiveDex - stats.dex) / (40 + playerLevel * 0.6) + (plan.hitBonus || 0) - (armor && armor.armorLevel ? armor.armorLevel * 0.006 : 0) - prof.dodge));
         const magicResist = Math.min(0.35, Math.max(0, (stats.wis - 10) * 0.01));
         const armorReduce = armor && armor.armorLevel ? Math.round(armor.armorLevel * 2 * D.durabilityFactor(armor)) : 0;
         const strike = (mult) => {
           if (evade || Math.random() >= hitChance) return 0;
-          let raw = (enemy.effectiveStr * 1.5 + (enemy.level || 1) * 0.5) * (Math.random() * 0.5 + 0.75) * mult * T.enemyDamageMultiplier(state, enemy) * exposed * (1 + levelGap * 0.03);
+          let raw = (enemy.effectiveStr * 1.5 + (enemy.level || 1) * 0.5) * (Math.random() * 0.5 + 0.75) * mult * T.enemyDamageMultiplier(state, enemy) * exposed * (1 + levelGap * 0.03) * prof.armor;
           if (Math.random() < 0.05) raw *= 1.5;
           const physical = plan.element === 'physical' && !plan.ignoreArmor;
           let dmg = physical ? raw - armorReduce : raw * (1 - magicResist) - armorReduce * 0.4;
@@ -777,6 +800,7 @@ function applyCombatRound(state, input) {
     state.inCombat         = false;
     state.currentEnemy     = null;
     T.clearCombatEffects(state);
+    if (state.buffs) { delete state.buffs.sharpened; delete state.buffs.padded; delete state.buffs.studied; }
     state.stamina          = Math.min(state.maxStamina, state.stamina + 10);
     if (state.reputation && state.character) {
       const region = state.character.region;

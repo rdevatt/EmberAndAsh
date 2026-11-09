@@ -144,7 +144,8 @@ function recalculateResources(state) {
   const s     = getEffectiveStats(state);
   const level = getPlayerLevel(state.totalXP || 0);
 
-  const newMaxHp      = calculateMaxHP(s.vit, level);
+  // Some trades harden the body (woodsman).
+  const newMaxHp      = Math.round(calculateMaxHP(s.vit, level) * require('../profession-perks').combatMods(state, null).hp);
   const newMaxMana    = calculateMaxMana(s.int, s.wis, level, s.cha);
   const newMaxStamina = calculateMaxStamina(s.vit, s.dex, level);
 

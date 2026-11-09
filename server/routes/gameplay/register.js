@@ -706,7 +706,10 @@ module.exports = function registerGameplayRoutes(app, deps) {
         }
 
         if (!isSafe) {
-          const ambushChance = Math.min(0.35, 0.10 + (region.tier || 1) * 0.025);
+          // A woodsman's hidden shelter keeps the night quiet.
+          const sheltered = state.buffs && state.buffs.shelter;
+          if (sheltered) delete state.buffs.shelter;
+          const ambushChance = sheltered ? 0 : Math.min(0.35, 0.10 + (region.tier || 1) * 0.025);
           if (Math.random() < ambushChance) {
             const playerLevel = getPlayerLevel(state.totalXP || 0);
             const enemy = spawnEnemy(state.character.region, playerLevel);
@@ -866,7 +869,7 @@ module.exports = function registerGameplayRoutes(app, deps) {
         const resolvedLoot = resolveCorpseLoot(lastLoot.label);
         const items        = resolvedLoot.items;
         // Coin scales gently with the enemy's level.
-        const coinReward   = Math.round(resolvedLoot.coinReward * (1 + (lastLoot.level || 1) / 10));
+        const coinReward   = Math.round(resolvedLoot.coinReward * (1 + (lastLoot.level || 1) / 10) * require('../../../game/profession-perks').combatMods(state, null).loot);
 
         const lootTier = Math.max(0, getTierForLevelPublic(lastLoot.level || 1) - (lastLoot.isBoss || Math.random() < 0.25 ? 0 : 1));
         for (const item of items) addItem(state, { name: item, tier: lootTier, type: 'loot' });

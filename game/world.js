@@ -157,7 +157,7 @@ function completeLandmark(state, regionKey, landmarkId) {
   const parts = [];
   let levelUp = null;
   // Scholars learn more from what they find.
-  const xp = Math.round((rw.xp || 0) * (state.profession === 'scholar' ? 1.25 : 1));
+  const xp = Math.round((rw.xp || 0) * (state.profession === 'scholar' ? 1.10 : 1));   // scholars learn a little more from every task
   if (xp) { levelUp = grantXP(state, xp); parts.push(`+${xp} XP`); }
   if (rw.coin) { addCoin(state, rw.coin); parts.push(formatCoin(rw.coin)); }
   if (rw.material) { addMaterial(state, rw.material, 2); parts.push(`2 × ${rw.material}`); }
