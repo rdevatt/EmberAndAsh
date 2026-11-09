@@ -236,6 +236,8 @@ function commit(state, crime, helpers = {}) {
     return { success: true, crime: true, failed: true, hours: 1, message: [...lines, ...res.lines].join('\n'), hint: hintFor(state, crime, false, res), event: { type: 'crime', crime: type, victim: v ? v.name : null, failed: true, known: true, child: !!(v && v.child) }, trial: !!state.pendingTrial };
   }
   // Effects of the act itself.
+  // The dead and the taken are no longer the person you are talking to.
+  if (v && ['murder', 'kidnap'].includes(type) && state.currentNPC && String(state.currentNPC).toLowerCase().includes(String(v.name).toLowerCase().split(' ').pop())) state.currentNPC = null;
   if (type === 'murder' && v) {
     if (v.kind === 'npc' && world) killNpc(world, v);
     if (v.kind === 'companion' && helpers.removeCompanion) { helpers.removeCompanion(state, v.companion.id); state.killedCompanions = { ...(state.killedCompanions || {}), [v.id]: true }; }

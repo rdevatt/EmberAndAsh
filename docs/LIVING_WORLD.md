@@ -1,8 +1,8 @@
-# Ember and Ash — The Living World (Phases 3–4) tracker
+# Ember and Ash — The Living World (Phases 3–5) tracker
 
 Last updated: 2026-11-08. Branch `claude/ember-and-ash-completion` (committed locally, not pushed).
 
-The original ten-chapter campaign is now the opening chapter of a world's history. Phase 4 (sections 11–15) covers class balance, the political simulation, high-level validation, mature content and visual refinement. This document tracks what is implemented, how it was verified, its known limits, and what is next. Earlier systems are covered in [GAME_COMPLETION.md](GAME_COMPLETION.md).
+The original ten-chapter campaign is now the opening chapter of a world's history. Phase 4 (sections 11–15) covers class balance, the political simulation, high-level validation, mature content and visual refinement. Phase 5 (sections 16–20) covers player agency, unrestricted adult content, crime and justice, slavery, and professions. This document tracks what is implemented, how it was verified, its known limits, and what is next. Earlier systems are covered in [GAME_COMPLETION.md](GAME_COMPLETION.md).
 
 Status key:
 
@@ -15,9 +15,10 @@ Status key:
 
 | Check | Result |
 | --- | --- |
-| `npm test` (isolated temp DB, offline narration) | **113 / 113 pass**: 22 new in Phase 4, covering content preferences, romance and villainy, politics, gear recovery and traits |
-| `scripts/ui-playtest.js`: desktop, reduced motion, mobile 390×844 | **50 / 50** checks, including the mature-content settings on both layouts, with no console errors |
-| All 12 classes × 2 seeds, full campaign (`playthrough.js`) | **24 / 24 finish**; 1,709–7,449 actions; wizard 1,924–2,861 (was ~11,400) |
+| `npm test` (isolated temp DB, offline narration) | **135 / 135 pass**: 22 added in Phase 4 and 22 in Phase 5 (player agency, explicit content, crime and justice, slavery, professions) |
+| `scripts/ui-playtest.js`: desktop, reduced motion, mobile 390×844 | **56 / 56** checks. Phase 5 adds: your exact words narrated back, the Draw / Fight barehanded buttons, undressing drawn, and a crime scene with the deeds ledger. No console errors |
+| All 12 classes × 2 seeds, full campaign (`playthrough.js`, Phase 5 code) | **24 / 24 finish**; 1,513–3,756 actions; wizard 1,991–2,476 (was ~11,400), druid 3,068–3,756 (was up to 7,449), warlock 2,540–3,251 |
+| Professions (`scripts/profession-sweep.js`) | Every trade 49.9–55.0% in six-fight chains six levels under the zone (no trade 43.7%); work income 34–41 copper per region tier per shift |
 | High-level fixtures, 12 classes × levels 150/200/300/500 | 92–98% rift wins at matched depth; saves identical after restart in 48 / 48 |
 | Politics, 80-year simulations | Wars, alliances, lapses and truces in every decade band; empires capped at 20 regions in 60 / 60 worlds |
 | Full campaign regression (`scripts/playthrough.js`) | Completes: The Long Fire, level 96, 0 server errors |
@@ -229,9 +230,26 @@ Status key:
 
 At equal level, every boss gives 87–100% wins for every class (one fight, three potions). Four levels under, results spread widely: Kharzul is 57–100%, and early Varrick, with a level-4 character against a level-8 boss, is much harder for casters.
 
+**After Phase 5** (weapons drawn by choice, profession edges, gear recovery fixed), the same 24 campaigns took these numbers of actions, all finishing with no server errors:
+
+| Class | Seed 7 | Seed 11 |
+| --- | --- | --- |
+| Rogue | 1,513 | 1,938 |
+| Ranger | 1,970 | 2,015 |
+| Barbarian | 2,454 | 1,987 |
+| Wizard | 2,476 | 1,991 |
+| Paladin | 2,207 | 2,590 |
+| Monk | 2,259 | 2,596 |
+| Fighter | 2,488 | 2,652 |
+| Cleric | 2,378 | 2,540 |
+| Warlock | 2,540 | 3,251 |
+| Bard | 3,609 | 2,810 |
+| Sorcerer | 3,119 | 2,849 |
+| Druid | 3,756 | 3,068 |
+
 ### Remaining spread
 
-- **Warlocks and druids still take the longest** (4,400–7,400 actions). In matched-level simulations they are in the pack (88–100%), so the gap is mostly how they lose levels in the Crucible.
+- **Druids, bards and sorcerers take the longest** (up to about 3,750 actions, against 1,500–2,000 for rogues and rangers). The Phase 4 figures were up to 7,400. In matched-level simulations they are in the pack (88–100%).
 - **The Crucible is the hardest zone for everyone,** at 73–100% in six-fight chains.
 - **Rogues and rangers are the strongest classes;** wizards are no longer the weakest.
 - **Seed variance is large:** the same class can differ by 2× between seeds.
@@ -294,40 +312,44 @@ Results for all 12 classes on the final code (8 rift dives at matched depth and 
 - **Save, restart and reload are byte-identical** at every level tested. Numbers stay finite, and XP stays an exact integer string.
 - **Levels 1–100 are unchanged:** the same XP curve and chapter gates, and the full campaign regression above.
 
-## 14. Mature content, romance and villainy (Phase 4) — **Done + tested**
+## 14. Mature content, romance and villainy (Phases 4–5) — **Done + tested**
 
 - **Six independent categories,** each Off, Mild or Mature: violence and gore, horror, profanity, nudity in art, romance and intimacy, and sexual themes.
-  - Defaults: violence, horror, profanity and romance are Mild; nudity and sexual themes are Off.
-  - The categories live in Settings → MATURE CONTENT on desktop and mobile, and changes apply on the next turn with no restart.
+  - The game is primarily for adults, so **every category defaults to Mature**. Any player can turn any category down in Settings → MATURE CONTENT (desktop and mobile), and the change applies on the next turn.
 - **Eligibility is enforced on the server:**
-  - Nudity, sexual themes (Mild and up) and romance (Mature) need both the player's adult self-declaration and a character aged 18 or over.
-  - The declaration is labelled "not verified age assurance". It is a preference, not an age check.
+  - Nudity, sexual themes and Mature romance take effect only after the player's adult self-declaration, for a character aged 18 or over.
+  - The declaration is labelled "not verified age assurance".
   - A minor character gets romance, sexual themes and nudity forced Off, whatever is sent.
   - Sexual themes never exceed the romance level.
-- **Persistence:** preferences are saved with the account (`players.settings`) and on the character. They survive save/load, restart and login on another device, and a new generation in the same world inherits the player's settings, not the world's (API tested).
-- **What each renderer can actually do:**
-  - **Built-in art:** at most implied nudity (bare shoulders, under a blanket) and an implied intimate scene (a candlelit room, optionally fading out). It never draws explicit content.
-  - **Offline narrator:** non-explicit (fade or sensual).
-  - **AI narrator:** gets the exact preferences in its prompt. If it refuses, the game says so ("The AI narrator declined to write this scene…") and falls back offline; it does not pretend otherwise. No external image provider is wired in.
-- **Outcomes never change:** damage, kills and history are identical at every setting (tested). Only the depiction changes:
-  - **wounds:** none, a bandage, or blood;
-  - **kill lines** and blood pools;
-  - **horror imagery:** eyes in the dark and skulls at Mature;
-  - **profanity** in enemy taunts.
+- **Persistence:** preferences are saved with the account and the character. They survive save/load, restart and login on another device, and a new generation inherits the player's settings, not the world's.
+- **What is shown, for adults at Mature:**
+  - **Art draws it.**
+    - Nude adult bodies by gender, whenever the story has a character undressed. "I undress" and "I get dressed" are facts the scene follows. Mild covers chest and hips; Off draws a plain shift.
+    - Consensual sex is drawn in the pose the player describes: kiss, embrace, undress, lying together, astride, from behind, oral. Each has a small looping animation, which stops under reduced motion.
+    - The intimate scene continues across actions, following the player's words, until either partner says "stop" or the player turns to something else.
+  - **Narration tells it.** The offline narrator writes explicit consensual scenes by pose, with the partner's pronouns. The AI narrator is told to write explicit sex between consenting adults fully and frankly, following exactly what the player described.
+  - **Violence, horror and profanity** are drawn and told at full strength:
+    - wounds and blood;
+    - pools of blood under the dead;
+    - eyes in the dark and skulls;
+    - swearing NPCs.
+- **The two lines that do not move:**
+  1. Nothing sexual ever involves anyone under 18.
+  2. A coerced or forced sexual act is possible and narrated as the crime it is: that it happened, the threat, the victim's fear and the aftermath. It is drawn as threat and aftermath (the victim cowering, or fighting free and fleeing), never with sexual detail or imagery.
+
+  Every other act is narrated; nothing is refused.
+- **AI provider rules still apply.** The AI narrator's provider may decline some content. The game reports that ("The AI narrator declined to write this scene…") and its own narrator tells the scene; it never claims the provider complied.
+- **Outcomes never depend on settings:** damage, kills and history are identical at every level (tested). Only the depiction changes.
 - **Romance:**
-  - Flirting needs earned rapport and counts once per in-game day.
-  - Partners can refuse, and "no" or "stop" always ends a scene.
-  - A night together needs rapport 50 (70 for companions). It records a partner and a chronicle entry and is not undoable.
-  - Children can never be involved.
-- **Villainy** (an adult character with the adult declaration can be a villain):
-  - Sexual coercion is possible as a crime, but it is never depicted at any setting: the narrator is told not to, and the scene is a grim overlay with no figure drawn.
-  - **Consequences:**
-    - the victim never forgives you;
-    - witnesses lose loyalty, and companions may leave;
-    - corruption +20;
-    - a secret that surfaces about 8% per month.
-  - **Discovery costs:** faction standing (Compact −20, Wardens −25, the local power −30), local reputation −50, infamy +30, and a chronicle entry.
-  - **Infamy changes how the world treats you:** greetings turn hostile, companions refuse to join, and titles like "the Cruel" and "the Reviled" appear. It also feeds the legend's personality ("cruel"), which in turn drives politics.
+  - Flirting needs earned rapport (once per in-game day).
+  - Partners can refuse.
+  - A night together needs rapport 50 (70 for companions) and records a partner and a chronicle entry.
+  - Children are never involved.
+- **Coercion is a crime** handled by the crime system (section 18), at heinousness 9:
+  - the victim never forgives;
+  - witnesses lose loyalty and may leave and talk;
+  - the victim may name you;
+  - you may face an investigation, a trial and a sentence.
 
 ## 15. Visual refinement (Phase 4, priority 4) — **Done + tested**
 
@@ -355,20 +377,130 @@ Results for all 12 classes on the final code (8 rift dives at matched depth and 
   - The SVG portrait is always rendered first and stays if the provider fails or declines.
   - Content preferences would be passed through, and the provider's own restrictions reported as they are, never claimed.
 
+## 16. Player agency: the player's words and actions are theirs (Phase 5) — **Done + tested**
+
+`game/agency.js` makes the player the only author of what their character says and does.
+
+- **Speech, quoted:** quoted words are the character's only dialogue that turn, verbatim, with nothing before or after them. For `I turn to the bartender asking for a drink "hey barkeep how about an ale"`, the narration's only line for the character is `"hey barkeep how about an ale"`.
+- **Speech, described:** speech described without quotes becomes one short line that says exactly that. "…asking for a drink" becomes `"A drink, please."`; "asking the guard about the caravan" becomes `"What can you tell me about the caravan?"`. With no speech described, the character says nothing.
+- **The action:** the narration retells the player's action in the second person ("You walk down the street and stop at the bar, asking for a drink.").
+- **The AI narrator is held to this twice:**
+  - **Prompt:** the system prompt carries these rules with the user's examples.
+  - **Filter:** every AI reply is filtered after it is written. Lines the model wrote for the player are found by their attribution ("…" you say / you add, "…"). Invented ones are removed, paraphrases are replaced with the exact quote, and quoted speech the model left out is put back. NPC lines, even ones that mention "you", are untouched. Tested on a mocked reply that invented speech.
+- **Weapons and abilities:**
+  - A weapon stays sheathed until the player draws or names it ("I draw my sword", "I slash at it", "with my axe"). It stays in hand until sheathed, a long rest or travel.
+  - "I fight back" is fists, feet and elbows, in the engine (no weapon damage) and in the narration.
+  - Spells and abilities are used only when named.
+  - A class never decides the action: a wizard who "fights back" casts nothing and spends no mana (tested).
+  - The combat bar offers **Draw <weapon>** and **Fight barehanded** until a weapon is drawn, and the scene shows it sheathed at the hip.
+
+## 17. Undressing, intimacy and poses (Phase 5) — **Done + tested**
+
+See section 14. The art (`public/game/art.js`: `nudeTorso`, `intimateRoom`, the kneel, cower, run, kiss and embrace poses) and the narrators follow the player's words; nothing is drawn or narrated that the player did not describe.
+
+## 18. Crime and justice (Phase 5) — **Done + tested**
+
+`game/crime.js`. Nothing is prohibited: theft, assault, arson, kidnapping, murder and torture are possible against named people, companions, strangers ("a merchant", "the guard") or buildings, in the player's own words.
+
+- **Remembered, always.** Every deed goes into the character's memory (`deeds`), and the narrator is told of the last few.
+- **A perfect crime costs nothing.** If no one saw and nothing was left behind, the world never learns of it.
+  - Measured: a stealthy night strangling in the wild, with the body hidden, is perfect 91% of the time over 200 trials, and seen 9%.
+  - An open stabbing in a city by day is reported 56% of the time and left unsolved 44%.
+- **What the world can learn:**
+  - **Witnesses:** time of day, a crowd or empty country, stealth words, class and trade, and companions, who always see.
+  - **Clues:** a body, blood, the method ("poison", "strangle", "make it look like an accident"), and concealment afterwards ("hide the body", "clean up the blood"). Concealment can itself be seen.
+  - **A surviving victim** may name you.
+- **The law:**
+  - A witnessed crime brings the watch, in a town, or a warrant waiting in the nearest town.
+  - Unsolved cases are investigated monthly, by clues and by how far the investigators already suspect you.
+  - Others commit crimes too. When you are tried, unsolved cases nearby may be added to your charges, **including ones you did not commit**.
+- **Trials:**
+  - **Pleas:** innocent, confess, bribe (Warden magistrates often refuse), or flee (become an outlaw).
+  - **Evidence is weighed against standing:** local reputation, fame (a finished campaign, level), charisma, faction standing, and known infamy.
+  - Measured over 300 trials with equal evidence: a celebrated hero with no known crimes is convicted far less often than a known villain (tested).
+- **Sentences grow with heinousness:**
+  - a fine;
+  - months or years in prison, during which time passes and you age;
+  - exile, enforced: you are moved out, and coming back is a new crime;
+  - execution, for the worst. The character dies into the chronicle, and you continue as a new character in the same world or a new one.
+- **Consequences when a crime is known:**
+  - infamy (greetings turn cold, companions refuse to join, "the Cruel" and "the Reviled" titles);
+  - faction standing (the Wardens and Compact condemn, the Choir admires cruelty);
+  - regional reputation and a chronicle entry.
+- **The dead stay dead:** murdered and kidnapped named people are succeeded by heirs, and the story roles they held continue.
+- **Art:**
+  - the dead, with blood by the violence setting;
+  - victims cowering, kneeling or chained;
+  - a thief running;
+  - arson flames;
+  - a trial hall with a magistrate and crowd;
+  - prison bars.
+
+  A child victim is never drawn.
+
+## 19. Slavery (Phase 5) — **Done + tested**
+
+`game/slavery.js`.
+
+- **Where it is legal:** where the Remnant or the Choir hold power, and in lawless land (7 of 38 regions at the start; this follows the political map). It is outlawed in Warden and Compact lands.
+- **Getting slaves:**
+  - "visit the slave market", "buy slave 2";
+  - kidnapping (a crime);
+  - "slaves" lists them.
+- **Work:** porter, labour, household or fighter, each earning or helping in its own way.
+- **Treatment:** "feed X well" builds loyalty and health and lowers fear; "beat", "whip" and "torture" do the opposite. "free X" earns Warden and Compact regard. "sell X" works where it is legal.
+- **Consequences:**
+  - Cruelty is always remembered.
+  - Where slavery is legal, cruelty to your own slave is never prosecuted, though people still see it.
+  - Mistreated slaves run, and a runaway tells what was done to them, which becomes public.
+  - Walking chained slaves into a free town draws the watch.
+  - Sexual use of a slave is coercion (a slave cannot consent), handled as such.
+- **Art:** chained slaves follow a step behind you, and the market has a block with chained lots.
+
+## 20. Professions: twelve trades, balanced and varied (Phase 5) — **Done + tested**
+
+There are four new trades (miner, physician, thief, tailor). `game/profession-perks.js` gives every trade three things, scaled by rank (70% at rank 1, 110% at rank 5):
+
+| Trade | Combat edge | Work ("work [for N hours]") | Skill |
+| --- | --- | --- | --- |
+| Blacksmith | +10% weapon damage, 5% less damage taken | forge commissions | sharpen my blade (+15% next fight) |
+| Alchemist | potions +35%, +3% damage | brew for the apothecary | brew (recipes) |
+| Scout | +5% hit, +4% dodge (plus fewer ambushes and reagents) | guide travellers | scout ahead |
+| Merchant | +6% damage, +30% coin from the fallen | trade (high variance) | bribe it (end a fight with a person) |
+| Cook | +4% damage, 2% less damage taken | inn kitchens | cook a meal |
+| Hunter | +9% damage, +20% more against beasts | hunt (paid partly in hides) | snares, tracking |
+| Scholar | +5% damage, weaknesses +25%, +4% spells | copy texts, tutor | study it (+10% for the fight) |
+| Woodsman | +5% health, +8% with axes | fell timber (paid partly in timber) | build a shelter (no ambush at camp) |
+| Miner | 3% less damage taken, +2% health | dig ore (paid partly in ore) | prospect |
+| Physician | potions +25%, a little health back each round | treat the sick | treat my wounds (40%, every few hours) |
+| Thief | +10% crit, +5% damage | work the crowds (×1.6 pay, may be caught) | steal from it (in a fight) |
+| Tailor | 4% less damage taken, +3% dodge | take in tailoring | mend my armour (+10% next fight) |
+
+**Measured** (`scripts/profession-sweep.js`: rank 3; fighter, wizard, rogue and cleric; Dustfall, Greymere, the Deep Fens, Old Veldrath and the Crucible; 60 six-fight chains each, fought 6 levels under the zone so that the edge matters):
+
+- With no trade, 43.7% of chains are won.
+- With a trade, 49.9% (merchant) to 55.0% (tailor).
+- The merchant, scholar and thief sit a little lower because they also have in-fight skills the simulation does not use.
+
+**Income** per 8-hour shift is 34–41 copper per region tier for every trade. The thief's figure includes being caught (8% per shift before DEX, then a trial). The scholar's separate quest-XP bonus was cut from +25% to +10%.
+
 ## Known limitations
 
-- **Live AI narration is untested against a real key** (the stored Groq key returns 401). Prompt construction, refusal detection and fallback are tested with a mock. The offline narrator covers every event.
-- **AI provider rules apply:** at Mature, the AI narrator may still decline sexual content under its provider's rules. The game reports that and falls back; it cannot make the provider comply.
-- **The adult declaration is self-attested,** not verified age assurance, and the game says so in the UI.
-- **Class spread remains:** warlock and druid campaigns take 2–3× a rogue's actions (see section 11), and the Crucible is the hardest zone for all classes. Seed variance is large, so 2 seeds per class is a small sample.
-- **Politics are yearly and abstract.** Battles the player fights move a war score; there are no sieges of specific towns, and new legends only arise from player characters.
-- **High-level validation uses fixtures** for the starting state at levels 150–500 (XP, stats, gear). Everything from there is played through the API, but no bot has actually levelled from 100 to 500.
-- **One intermittent test failure** was seen once in a full run under heavy CPU load (24 bots running) and was not reproduced in 7 later runs. It is being watched.
+- **Live AI narration is untested against a real key.** The stored Groq key returns 401. Prompts, the voice filter, refusals and fallback are tested with a mock, and the offline narrator covers every event.
+- **The AI provider may decline explicit content** whatever the settings say. The game reports it and narrates the scene offline.
+- **The art is simple vector illustration.** Explicit scenes and nudity are drawn in that style, as small stylised figures, not as detailed illustration. No external image provider is wired in.
+- **The adult declaration is self-attested,** not verified age assurance, and the game says so.
+- **The voice filter recognises the usual attribution patterns** ("…" you say, you add, "…"). A model that puts words in the player's mouth without attributing them (for example as unattributed dialogue) can slip past. The prompt rules are the first line of defence.
+- **Crime targets** are named people, companions, slaves, common strangers ("a merchant") and buildings. Crimes against groups ("the whole village") are narrated but resolved as a single act.
+- **Remaining class spread:** in the campaign, druid and sorcerer seed 7 still take about twice a rogue's actions (3,100–3,800 against 1,500–1,900). Two seeds per class is a small sample.
+- **Politics are yearly and abstract:** there are no sieges of specific towns.
+- **High-level validation uses fixtures** for the starting state at levels 150–500.
+- **One intermittent test failure** was seen twice in full runs under load (a politics or dominion test). Measured over 80–150 random worlds, every assertion held, and it was not reproduced in later runs.
 - **Orders** grant a title, a history entry and a hall location, but no further gameplay yet.
 
 ## Next implementation tasks
 
-1. **Warlock and druid campaign pacing:** trace their Crucible deaths further. Candidates are the warlock's self-damage (Blood Magic) and the druid's low armour class.
-2. **Sieges and town defence:** let the player defend a specific settlement on a war front, with a win or loss deciding whether it changes hands that year.
-3. **Optional image-provider interface** (`EMBER_ART_PROVIDER`), as designed in section 15.
-4. **A bot that levels from 100 to 200 in real play,** to replace fixtures for the first high-level band.
+1. **A real-key check of the AI narrator** against the voice rules, using recorded transcripts.
+2. **Sieges and town defence** on war fronts.
+3. **Slave fighters as real companions** in combat. Today the "fighter" job is flavour plus guarding.
+4. **An optional image-provider interface** (`EMBER_ART_PROVIDER`), as designed in section 15.

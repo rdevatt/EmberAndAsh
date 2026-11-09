@@ -75,12 +75,22 @@ async function desktop(browser) {
   await h.send('I look around the valley');
   check('desktop: plain narrative keeps undo', (await page.locator('#story-content .story-entry').last().locator('.undo-btn').count()) === 1);
 
+  // The player's words, narrated back exactly; described speech voiced as one line.
+  await h.send('I walk to the well, asking for a drink of water.');
+  const echo = await h.lastStory();
+  check('desktop: the player\'s own action is narrated in their words', /You walk to the well, asking for a drink of water\./.test(echo), echo.slice(0, 120));
+  check('desktop: described speech becomes one short line', /"A drink of water, please\."/.test(echo));
+
   await h.send('I attack the nearest creature');
   check('desktop: combat shows enemy panel', await h.visible('#enemy-display'));
   check('desktop: combat action bar appears', (await page.locator('#combat-actions .combat-btn').count()) >= 4);
+  const sheathed = await page.locator('#combat-actions .combat-btn', { hasText: 'Draw' }).count();
+  check('desktop: weapon stays sheathed until drawn (Draw / Fight barehanded offered)', sheathed === 1 && (await page.locator('#combat-actions .combat-btn', { hasText: 'barehanded' }).count()) === 1);
   let rounds = 0;
   while (await h.visible('#enemy-display') && rounds < 40) {
     const defend = /defend to blunt/.test(await h.lastStory());
+    const draw = page.locator('#combat-actions .combat-btn', { hasText: 'Draw' });
+    if (!defend && await draw.count()) { await draw.first().click(); await h.idle(); rounds++; continue; }
     await page.locator('#combat-actions .combat-btn', { hasText: defend ? 'Defend' : 'Attack' }).first().click(); await h.idle();
     rounds++;
   }
@@ -106,7 +116,12 @@ async function desktop(browser) {
   await page.waitForTimeout(400);
   check('desktop: sexual themes limited without the adult declaration', /adult/.test(await page.locator('.content-row[data-category="sexual"]').innerText()));
   check('desktop: self-declaration is labelled as not verified', /not verified/i.test(await page.locator('.adult-confirm').innerText()));
+  await page.locator('#toggle-adult').check(); await page.waitForTimeout(500);
   await page.click('#btn-close-settings');
+  await h.send('I undress and wade into the stream');
+  await page.waitForTimeout(300);
+  check('desktop: undressing is drawn (adult declared, nudity Mature)', /r="3\.6"/.test(await page.locator('#scene-holder').innerHTML()));
+  await h.send('I get dressed');
 
   for (const cmd of ['abilities', 'recipes', 'companions', 'factions', 'story']) {
     await h.send(cmd);
@@ -120,6 +135,14 @@ async function desktop(browser) {
   await page.click('#btn-saves'); await page.waitForTimeout(600);
   check('desktop: worlds list in saves menu', /Guttering Age|E\.R\.|Only this world/.test(await page.locator('#worlds-list').innerText()));
   await page.click('#btn-close-saves');
+  // Crime: the deed is drawn and remembered; the world reacts.
+  await h.send('talk to Old Hask');
+  await h.send('I murder Old Hask');
+  check('desktop: a crime is drawn as a crime scene', /ea-grim/.test(await page.locator('#scene-holder').innerHTML()));
+  if (/plead innocent/.test(await page.locator('#story-content').innerText())) await h.send('confess');
+  await h.send('deeds');
+  check('desktop: the character remembers what they did', /murder — Old Hask/.test(await h.lastStory()));
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/desktop-crime.png` });
   check('desktop: no console errors', errors.length === 0, errors.slice(0, 3).join(' | '));
   await page.context().close();
 }
