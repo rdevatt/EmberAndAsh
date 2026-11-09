@@ -247,7 +247,9 @@
     if (d.wounds && v === 'mature') wounds = `<path d="M${-w + 3} 32 q4 6 2 14 M${2} 30 q3 8 1 18" stroke="#8a0f0f" stroke-width="${d.wounds > 1 ? 2.6 : 1.6}" fill="none" class="ea-blood"/>` + (d.wounds > 1 ? `<path d="M-3 ${8 + stoop} q2 4 0 7" stroke="#8a0f0f" stroke-width="1.4" fill="none"/>` : '');
     // A cloak marks well-made armour (tier 5+), so progression shows in scenes too.
     const cape = !nudeLvl && d.armor && d.armor.tier >= 5 && armorKind !== 'robe' && pose !== 'rest' ? `<path d="M${-w + 1} 26 Q${-w - 10} 56 ${-w - 6} 80 L${-w + 6} 78 Q${-w + 2} 50 ${-w + 6} 26Z" fill="${shade(trim, -0.45)}" opacity="0.95"/>` : '';
-    return `<g class="ea-figure ea-pose-${esc(pose || 'idle')}" transform="${tilt}">${cape}${legs}${robeSkirt}${torsoShape}${wounds}${arm}${weapon}${head}</g>`;
+    // Chains: an iron collar and manacles joined by a chain.
+    const chains = d.shackled ? `<rect x="-6" y="${19 + stoop}" width="12" height="3.2" rx="1.2" fill="#4a4a50" stroke="#2a2a30" stroke-width="0.6"/><path d="M-6 52 q6 6 12 0" stroke="#5a5a62" stroke-width="1.6" fill="none" stroke-dasharray="2 1.2"/><rect x="${w - 1}" y="49" width="5" height="3" fill="#4a4a50"/><rect x="${-w - 3}" y="49" width="5" height="3" fill="#4a4a50"/>` : '';
+    return `<g class="ea-figure ea-pose-${esc(pose || 'idle')}" transform="${tilt}">${cape}${legs}${robeSkirt}${torsoShape}${wounds}${arm}${weapon}${head}${chains}</g>`;
   }
 
   // Lying under a blanket. Implied nudity at most: bare shoulders are
@@ -475,7 +477,31 @@
     if (sc.enemy && !sc.enemy.dead) out.push(`<ellipse cx="290" cy="${sc.enemy.boss ? 178 : 170}" rx="${sc.enemy.boss ? 40 : 24}" ry="${sc.enemy.boss ? 6 : 4}" fill="#000" opacity="0.28"/>`);
     else if (!sc.enemy && sc.npc) out.push('<ellipse cx="290" cy="169" rx="15" ry="3.5" fill="#000" opacity="0.28"/>');
     const fopts = { violence: vio, nudity: (sc.content || {}).nudity || 'off' };
-    if (sc.npc && sc.npc.victim) {
+    // Slaves who walk with you, chained, a step behind.
+    (sc.slaves || []).forEach((sl, i) => {
+      out.push(`<g class="ea-actor" transform="translate(${66 - i * 26} 86) scale(0.88)">${figure({ appearance: sl.appearance, gender: sl.gender, age: sl.age, armor: { kind: 'clothes' }, weapon: { kind: 'none' }, shackled: true, wounds: sl.hurt ? 1 : 0 }, sl.fear > 70 ? 'hurt' : 'idle', fopts)}</g>`);
+      out.push(`<path d="M${66 - i * 26 + 4} 132 Q${88 - i * 13} 140 ${100} 128" stroke="#5a5a62" stroke-width="1.2" fill="none" stroke-dasharray="2 1.5"/>`);
+    });
+    if (sc.market && sc.market.length) {
+      out.push('<rect x="215" y="140" width="170" height="14" fill="#5a4030" stroke="#3a2818"/>');
+      sc.market.slice(0, 3).forEach((m, i) => out.push(`<g transform="translate(${240 + i * 52} 58) scale(0.92)">${figure({ appearance: m.appearance, gender: m.gender, age: m.age, armor: { kind: 'clothes' }, weapon: { kind: 'none' }, shackled: true }, 'idle', fopts)}</g>`));
+    }
+    if (sc.mood === 'crime' && sc.crime && sc.crime.kind === 'arson') {
+      for (let i = 0; i < 7; i++) out.push(`<path d="M${30 + i * 52} 150 q-10 -26 4 -46 q2 18 10 6 q8 22 -4 40z" fill="${i % 2 ? '#f0a040' : '#e0602a'}" opacity="0.85" class="ea-flicker" style="animation-delay:${i * 0.15}s"/>`);
+      out.push('<rect x="-400" width="1200" height="200" fill="#ff6020" opacity="0.12"/>');
+    }
+    if (sc.mood === 'trial') {
+      out.push('<rect x="-400" width="1200" height="200" fill="#2a2220"/><rect x="220" y="96" width="140" height="60" fill="#4a3424" stroke="#2a1a10"/><rect x="230" y="40" width="120" height="8" fill="#6a4a30"/>');
+      for (let i = 0; i < 8; i++) out.push(`<circle cx="${20 + i * 26}" cy="176" r="9" fill="#1a1412"/>`);
+    }
+    if (sc.npc && sc.npc.crimeVictim) {
+      const vd = { appearance: sc.npc.appearance, gender: sc.npc.gender, age: sc.npc.age || 35, armor: { kind: 'clothes' }, weapon: { kind: 'none' }, shackled: sc.npc.shackled, wounds: sc.npc.pose === 'cower' || sc.npc.dead ? 2 : 0 };
+      if (sc.npc.dead && vio !== 'off') out.push(`<ellipse cx="236" cy="170" rx="${vio === 'mature' ? 30 : 16}" ry="${vio === 'mature' ? 6 : 3}" fill="${vio === 'mature' ? '#6a0a0a' : '#3a2a26'}" opacity="0.85" class="ea-pool"/>`);
+      out.push(`<g class="ea-actor ea-player" transform="translate(150 80)">${figure(sc.player, sc.crime && sc.crime.kind === 'theft' && !sc.crime.failed ? 'run' : 'idle', fopts)}</g>`);
+      out.push(sc.npc.dead
+        ? `<g class="ea-actor ea-npc" transform="translate(262 80)">${figure(vd, 'fallen', fopts)}</g>`
+        : `<g class="ea-actor ea-npc" transform="translate(250 80) scale(-1 1)">${figure(vd, sc.npc.pose, fopts)}</g>`);
+    } else if (sc.npc && sc.npc.victim) {
       // Villainy: the threat and the aftermath, never the act. The character
       // looms; the victim cowers, or has fought free and is running.
       out.push(`<g class="ea-actor ea-player" transform="translate(170 80) scale(1.08)">${figure(sc.player, 'idle', fopts)}</g>`);
@@ -490,6 +516,12 @@
     }
     out.push(`<g class="ea-fore">${foreground(sc.biome, sc.season, seed)}</g>`);
     out.push('<g class="ea-fx"></g>');
+    if (sc.mood === 'prison') {
+      out.push('<rect x="-400" width="1200" height="200" fill="#000" opacity="0.5"/>');
+      for (let x = -380; x < 800; x += 22) out.push(`<rect x="${x}" y="0" width="5" height="200" fill="#3a3a40" stroke="#1a1a1e"/>`);
+      out.push('<rect x="-400" y="40" width="1200" height="6" fill="#3a3a40"/><rect x="-400" y="150" width="1200" height="6" fill="#3a3a40"/>');
+    }
+    if (sc.mood === 'crime') out.push('<rect x="-400" width="1200" height="200" fill="#1a0a10" opacity="0.35" class="ea-grim"/>');
     if (sc.mood === 'death') out.push('<rect x="-400" width="1200" height="200" fill="#000" opacity="0.45"/>');
     if (sc.mood === 'grim') out.push('<rect x="-400" width="1200" height="200" fill="#202028" opacity="0.55" class="ea-grim"/>');
     out.push('</svg>');

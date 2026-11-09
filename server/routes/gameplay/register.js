@@ -335,7 +335,8 @@ module.exports = function registerGameplayRoutes(app, deps) {
 
   const worldCommands = createWorldCommands({
     sendCommand, narrateAndRespond: (...a) => narrateAndRespond(...a), startEncounter, appendHint, spawnEnemy, getPlayerLevel,
-    addTime: (req, h) => addTime(req, h)
+    addTime: (req, h) => addTime(req, h),
+    executeCharacter: (req, cause) => endCharacter(req.session.state, cause)
   });
 
   // ---------------------------------------------
@@ -354,20 +355,34 @@ module.exports = function registerGameplayRoutes(app, deps) {
     const monthBefore = Math.floor(chronicle.nowDay(chronicle.worldOf(st)) / 30);
     const result = chronicle.advanceTime(st, hours);
     const monthsPassed = Math.floor(chronicle.nowDay(chronicle.worldOf(st)) / 30) - monthBefore;
-    if (monthsPassed > 0 && (st.secrets || []).length) result.messages.push(...require('../../../game/infamy').secretsSurface(st, monthsPassed));
+    if (monthsPassed > 0) {
+      // Others commit crimes, the law works its cases, slaves work or run.
+      result.messages.push(...require('../../../game/crime').monthly(st, monthsPassed));
+      result.messages.push(...require('../../../game/slavery').monthly(st, monthsPassed));
+    }
     const W = chronicle.worldOf(st);
     // Old age claims those who outlive their span.
     if (W && !st.deceased && chronicle.isPastLifespan(st, W)) {
-      st.deceased = true;
-      st.inCombat = false; st.currentEnemy = null;
-      chronicle.recordFigure(W, st, { status: 'deceased' });
-      const fig = W.figures.find(f => f.characterId === st.characterId);
-      if (fig) { fig.deathYear = chronicle.dateOf(chronicle.nowHour(W)).year; fig.tomb = st.character.region; }
-      if (fig && st.gear && st.gear.weapon && !W.relics.some(r => r.figureId === st.characterId)) W.relics.push({ id: `relic_${st.characterId}`, figureId: st.characterId, name: `${st.character.name}'s ${st.gear.weapon.name}`, region: st.character.region, claimedBy: null });
-      chronicle.addEvent(W, { type: 'death', importance: 4, title: `${st.character.name} dies of old age at ${chronicle.ageOf(st, W)}`, actor: chronicle.actorOf(st), region: st.character.region }, `death:${st.characterId}`);
-      result.messages.push(`\n— ${st.character.name.toUpperCase()} DIES OF OLD AGE —\nTheir story passes into the chronicle. Choose "new character in this world" to continue in the world they shaped, or "new world".`);
+      const msg = endCharacter(st, 'old age');
+      if (msg) result.messages.push(msg);
     }
     return result.messages;
+  }
+
+  // A character's life ends — of old age, or on the gallows. Their story
+  // passes into the chronicle and the world goes on.
+  function endCharacter(st, cause) {
+    const W = chronicle.worldOf(st);
+    if (!W || st.deceased) return null;
+    st.deceased = true;
+    st.inCombat = false; st.currentEnemy = null;
+    chronicle.recordFigure(W, st, { status: 'deceased' });
+    const fig = W.figures.find(f => f.characterId === st.characterId);
+    if (fig) { fig.deathYear = chronicle.dateOf(chronicle.nowHour(W)).year; fig.tomb = st.character.region; if (cause === 'executed') fig.executed = true; }
+    if (fig && st.gear && st.gear.weapon && !W.relics.some(r => r.figureId === st.characterId)) W.relics.push({ id: `relic_${st.characterId}`, figureId: st.characterId, name: `${st.character.name}'s ${st.gear.weapon.name}`, region: st.character.region, claimedBy: null });
+    const title = cause === 'executed' ? `${st.character.name} is executed for their crimes` : `${st.character.name} dies of old age at ${chronicle.ageOf(st, W)}`;
+    chronicle.addEvent(W, { type: 'death', importance: 4, title, actor: chronicle.actorOf(st), region: st.character.region }, `death:${st.characterId}`);
+    return `\n— ${st.character.name.toUpperCase()} ${cause === 'executed' ? 'IS EXECUTED' : 'DIES OF OLD AGE'} —\nTheir story passes into the chronicle. Choose "new character in this world" to continue in the world they shaped, or "new world".`;
   }
 
   async function narrateAndRespond(req, res, input, events, extra = {}) {
@@ -605,6 +620,12 @@ module.exports = function registerGameplayRoutes(app, deps) {
         if (state.profession === 'scout' && arrival) {
           events.push({ type: 'system', message: `Scout's eye: ${arrival.landmarks.map(l => l.name + (l.guarded ? ' (guarded)' : '')).join(', ')}${arrival.reagent ? `; rare ${arrival.reagent} grows here` : ''}.` });
         }
+        // A warrant waits in this town; slaves draw eyes where they are outlawed.
+        const crimeLib = require('../../../game/crime');
+        const arrest = crimeLib.checkWarrant(state);
+        if (arrest) events.push({ type: 'system', message: arrest });
+        const seenSlaves = require('../../../game/slavery').onArrive(state);
+        if (seenSlaves) events.push({ type: 'system', message: seenSlaves });
         applyQuestUpdates(state, events, cleanInput, [{ type: 'arrived', region: result.to }]);
         worldCommands.pushCampaign(events, campaign.onEvent(state, { type: 'arrived', region: result.to }));
         const W = chronicle.worldOf(state);

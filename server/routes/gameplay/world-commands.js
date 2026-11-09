@@ -17,6 +17,8 @@ const durability = require('../../../game/durability');
 const endless   = require('../../../game/endless');
 const legacy    = require('../../../game/legacy');
 const romance   = require('../../../game/romance');
+const crime     = require('../../../game/crime');
+const slavery   = require('../../../game/slavery');
 const politics  = require('../../../game/politics');
 const infamy    = require('../../../game/infamy');
 const { removeCompanion } = require('../../../game/economy');
@@ -30,7 +32,7 @@ const DISMISS_CMD   = /^(?:i\s+)?(?:dismiss|send away|part ways with|release)\s+
 const COMPANION_CMD = /^(?:companions|check companions|my companions|party|my party)[.!?]*$/i;
 
 module.exports = function createWorldCommands(h) {
-  const { sendCommand, narrateAndRespond, startEncounter, appendHint, spawnEnemy, getPlayerLevel, addTime } = h;
+  const { sendCommand, narrateAndRespond, startEncounter, appendHint, spawnEnemy, getPlayerLevel, addTime, executeCharacter } = h;
   const chronicle = require('../../../game/chronicle');
   const T = chronicle.TIME_COST;
 
@@ -277,6 +279,56 @@ module.exports = function createWorldCommands(h) {
       }
     }
 
+    // ---------------- justice: a trial waits on the player's answer ----------------
+    if (state.pendingTrial && !state.inCombat) {
+      const t = crime.resolveTrial(state, input);
+      req.session.undoLocked = true;
+      for (const l of t.lines) sys(events, l);
+      events.push({ type: 'trial', sentence: t.sentence, plea: t.plea });
+      if (t.sentence === 'prison') {
+        addTime(req, t.months * 30 * 24);
+        state.imprisonedUntil = null;
+        events.push({ type: 'prison', months: t.months });
+        appendHint(state, `[PRISON — the player character serves ${t.months} months. Narrate the sentence passing and their release, older and changed.]`);
+      }
+      if (t.executed && executeCharacter) {
+        const msg = executeCharacter(req, 'executed');
+        if (msg) sys(events, msg);
+        appendHint(state, '[EXECUTION — the player character is put to death for their crimes. Narrate the end.]');
+      }
+      if (!t.executed && t.sentence !== 'prison') appendHint(state, `[TRIAL — the player pleaded "${t.plea}". Verdict: ${t.sentence}. Narrate the hall, the magistrate and the verdict.]`);
+      return narrateAndRespond(req, res, input, events);
+    }
+
+    if (/^(?:deeds|my deeds|my crimes|what have i done|my sins|remember what i have done)$/.test(cmd)) {
+      return sendCommand(req, res, crime.ledger(state), 'deeds', { persist: false });
+    }
+
+    // ---------------- slaves ----------------
+    const owned = !state.inCombat ? slavery.handle(state, input) : null;
+    if (owned) {
+      if (owned.command) return sendCommand(req, res, owned.message, 'slaves', { persist: false });
+      if (!owned.success) return sendCommand(req, res, owned.message, 'slaves', { persist: false });
+      req.session.undoLocked = true;
+      addTime(req, owned.hours || 0);
+      sys(events, owned.message);
+      if (owned.event) events.push(owned.event);
+      if (owned.hint) appendHint(state, owned.hint);
+      return narrateAndRespond(req, res, input, events);
+    }
+
+    // ---------------- hiding what was done ----------------
+    if (!state.inCombat && crime.isConceal(input)) {
+      const c = crime.conceal(state, input);
+      if (!c.success) return sendCommand(req, res, c.message, 'crime', { persist: false });
+      req.session.undoLocked = true;
+      addTime(req, c.hours || 0);
+      sys(events, c.message);
+      if (c.event) events.push(c.event);
+      if (c.hint) appendHint(state, c.hint);
+      return narrateAndRespond(req, res, input, events);
+    }
+
     // ---------------- romance (and villainy) ----------------
     const love = romance.handle(state, input, { removeCompanion });
     if (love) {
@@ -288,6 +340,21 @@ module.exports = function createWorldCommands(h) {
       if (love.hint) appendHint(state, love.hint);
       if (love.event && love.event.partner) req.sceneNpc = love.event.type === 'villainy' ? null : love.event.partner;
       return narrateAndRespond(req, res, input, events);
+    }
+
+    // ---------------- crimes against people and places ----------------
+    const deed = crime.detect(state, input);
+    if (deed) {
+      const c = crime.commit(state, deed, { removeCompanion });
+      if (c) {
+        req.session.undoLocked = true;               // what is done cannot be undone
+        addTime(req, c.hours || 1);
+        sys(events, c.message);
+        events.push(c.event);
+        appendHint(state, c.hint);
+        if (c.event && c.event.victimNpc) req.sceneNpc = c.event.victimNpc;
+        return narrateAndRespond(req, res, input, events);
+      }
     }
 
     // ---------------- talking to named people ----------------

@@ -203,6 +203,37 @@ function buildOfflineNarrative(state, playerInput, hint) {
     lines.push('Nothing you do touches it. Every instinct screams at you to run.');
   } else if (h.includes('BOSS DEFEATED')) {
     lines.push(pick(state, 'bossdown', ['It is done. For a long moment you simply stand there, shaking, alive.', 'The great enemy falls, and the world feels — briefly, impossibly — lighter.'], seed));
+  } else if (h.includes('[CRIME —')) {
+    const v = prefsOf(state).violence;
+    const kind = (h.match(/(?:committed|attempted) (\w+)/) || [])[1] || 'crime';
+    const who = (h.match(/against (.+?)\. Narrate/) || [])[1] || 'them';
+    const child = /victim is a child/.test(h);
+    const seen = /Someone saw/.test(h);
+    const P = {
+      murder: child ? [`It is quick, and it is done, and it can never be undone.`] : v === 'mature'
+        ? [`${cap(who)} dies hard, choking, blood spreading black across the ground.`, `There is more blood than you expected. ${cap(who)} stops moving long before you stop.`]
+        : v === 'off' ? [`${cap(who)} is dead.`] : [`${cap(who)} falls and does not get up.`, `It is over quickly. ${cap(who)} lies still.`],
+      theft: [`Your hand is in and out before ${who} feels a thing.`, `A light touch, a heavier purse.`],
+      assault: v === 'mature' ? [`Something in ${who}'s face breaks under your knuckles.`, `${cap(who)} goes down, spitting blood and teeth.`] : [`${cap(who)} goes down under your blows.`],
+      torture: v === 'mature' ? [`${cap(who)} screams until there is no voice left, and then makes other sounds.`, `You take your time. ${cap(who)} begs, and it changes nothing.`] : [`${cap(who)} breaks, slowly.`],
+      arson: [`The fire catches, climbs, roars. Smoke rolls over the rooftops and people start to scream.`],
+      kidnapping: [`${cap(who)} struggles, then stops struggling. The chains are cold.`]
+    };
+    lines.push(pick(state, `crime_${kind}`, P[kind] || [`It is done.`], seed));
+    lines.push(seen ? pick(state, 'crimeSeen', ['A shout goes up. Someone saw.', 'Across the way, a face in a window — and then gone.'], seed) : pick(state, 'crimeUnseen', ['No one comes. The world goes on, unaware.', 'Silence. You are alone with what you did.'], seed));
+  } else if (h.includes('CONCEALMENT')) {
+    lines.push(pick(state, 'conceal', ['It takes hours, and it is filthy work, but when you are done the place tells no story.', 'You work in the dark until there is nothing left to find.'], seed));
+  } else if (h.includes('EXECUTION')) {
+    lines.push('Dawn. A crowd, a scaffold, a priest who will not meet your eye. Then nothing at all.');
+  } else if (h.includes('PRISON —')) {
+    lines.push(pick(state, 'prison', ['Stone, damp, the same square of sky through the bars for longer than you can bear. When they finally open the door, the world outside has moved on without you.', 'Seasons turn beyond the wall. You count them. When you walk out, you are thinner, older, and not the same.'], seed));
+  } else if (h.includes('TRIAL —')) {
+    lines.push(pick(state, 'trial', ['The hall is packed and hostile. The magistrate reads the charges in a dry, unhurried voice.', 'Every eye in the hall is on you as the verdict is read.'], seed));
+  } else if (h.includes('SLAVE MARKET')) {
+    lines.push('Chains clink on the block. Buyers prod and haggle; the people for sale keep their eyes down.');
+  } else if (h.includes('[SLAVERY') || h.includes('[CRUELTY')) {
+    const v = prefsOf(state).violence;
+    lines.push(h.includes('[CRUELTY') ? (v === 'mature' ? 'The lash opens skin; they cry out, then stop crying out, which is worse.' : 'They take it in silence, and remember.') : 'Coin, chains and a name exchanged like any other goods.');
   } else if (h.includes('VILLAIN ACT')) {
     // Narrated as the crime it is: that it happened, the threat and the
     // victim's fear, the aftermath — never with sexual detail.

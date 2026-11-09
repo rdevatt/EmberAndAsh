@@ -243,6 +243,13 @@ function buildCombatContext(state) {
 function buildSceneContext(state) {
   const lines = [];
   if (state.undressed) lines.push('[The player character is naked.]');
+  // The character's own memory of what they have done, known or not.
+  const deeds = (state.deeds || []).slice(-3);
+  if (deeds.length) lines.push(`[The character remembers what they have done: ${deeds.map(d => `${d.type}${d.victim ? ` of ${d.victim}` : ''} (${d.perfect ? 'no one will ever know' : d.known ? 'known' : 'unsolved'})`).join('; ')}. Let it colour the scene only as the player's actions invite.]`);
+  const wanted = Object.keys(state.warrants || {});
+  if (wanted.length) lines.push(`[Wanted by the law in: ${wanted.join(', ')}.]`);
+  const chained = (state.slaves || []).filter(x => x.location === 'with you');
+  if (chained.length) lines.push(`[Slaves with them, in chains: ${chained.map(x => `${x.name} (${x.fear > 60 ? 'terrified' : x.loyalty > 50 ? 'devoted' : 'wary'}${x.health < 50 ? ', hurt' : ''})`).join(', ')}.]`);
   if (state.intimate) lines.push(`[In an intimate scene with ${state.intimate.name}${state.intimate.undressed ? ', both undressed' : ''}.]`);
 
   if (state.currentLocation) {

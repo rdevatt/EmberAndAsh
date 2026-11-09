@@ -146,6 +146,8 @@ function buildScene(state, ctx = {}) {
   // Undressed is a fact of the story; how it is drawn follows content.nudity.
   scene.player.nude = !!state.undressed;
   scene.player.drawn = !!state.weaponDrawn;
+  // Slaves who walk with you, in chains.
+  try { scene.slaves = require('./slavery').sceneSlaves(state).map(sl => ({ ...sl, appearance: parseAppearance('', { name: sl.name, gender: sl.gender }, `slave:${sl.name}`) })); } catch (e) { scene.slaves = []; }
   const enemy = state.inCombat ? state.currentEnemy : (ctx.killed ? ctx.killedEnemy : null);
   if (enemy) scene.enemy = enemyDescriptor(enemy, ctx.killed);
   if (state.inCombat || ctx.killed) scene.mood = enemy && enemy.isBoss ? 'boss' : 'combat';
@@ -164,6 +166,22 @@ function buildScene(state, ctx = {}) {
       scene.intimacy = { pose: e.pose || 'lying', undressed: e.undressed !== false && e.style !== 'fade', style: e.style };
     }
     else if (e.type === 'romance' && e.stage === 'flirt') scene.events.push({ type: 'romance' });
+    else if (e.type === 'crime') {
+      // What happened is drawn as the settings allow; a child victim is never drawn.
+      scene.mood = 'crime'; scene.crime = { kind: e.crime, building: e.building || null, known: !!e.known, failed: !!e.failed };
+      scene.events.push({ type: 'crime', crime: e.crime });
+      if (e.victim && !e.child && !e.building) {
+        const d = npcDescriptor(e.victimNpc || e.victim, world);
+        const pose = e.crime === 'murder' && !e.failed ? 'fallen' : e.crime === 'theft' ? 'idle' : e.crime === 'kidnap' ? 'kneel' : 'cower';
+        scene.npc = { ...d, name: e.victim, pose, crimeVictim: true, shackled: e.crime === 'kidnap' || !!e.slave, dead: e.crime === 'murder' && !e.failed };
+      } else scene.npc = null;
+    }
+    else if (e.type === 'trial') { scene.mood = 'trial'; scene.trial = { sentence: e.sentence }; scene.events.push({ type: 'trial', sentence: e.sentence }); scene.npc = { ...npcDescriptor('Magistrate', world), pose: 'idle', magistrate: true }; }
+    else if (e.type === 'prison') { scene.mood = 'prison'; scene.playerPose = 'rest'; scene.events.push({ type: 'prison' }); }
+    else if (e.type === 'slaves') {
+      scene.events.push({ type: 'slaves', action: e.action });
+      if (e.action === 'market') scene.market = (e.offers || []).map(o => ({ appearance: parseAppearance('', { name: o.name, gender: o.gender }, `slave:${o.name}`), gender: o.gender, age: 25 }));
+    }
     else if (e.type === 'villainy') {
       // The threat and the aftermath are drawn; the act never is.
       scene.events.push({ type: 'grim' }); scene.mood = 'grim';
@@ -172,7 +190,7 @@ function buildScene(state, ctx = {}) {
   }
   if (ctx.commandType === 'longRest' || ctx.commandType === 'rest') { scene.playerPose = 'rest'; scene.events.push({ type: 'rest', inn: /room|inn/.test(ctx.input || '') }); }
   if (ctx.commandType === 'ambush') scene.events.push({ type: 'encounter', ambush: true });
-  if (ctx.npcName && !state.inCombat && !scene.npc && scene.mood !== 'grim') scene.npc = npcDescriptor(ctx.npcName, world);
+  if (ctx.npcName && !state.inCombat && !scene.npc && !['grim', 'crime', 'trial', 'prison'].includes(scene.mood)) scene.npc = npcDescriptor(ctx.npcName, world);
   if (state.deceased) { scene.mood = 'death'; scene.playerPose = 'fallen'; }
   return scene;
 }

@@ -70,33 +70,25 @@ function commitCoercion(state, partner, { removeCompanion } = {}) {
     consequences.push(`${partner.name} leaves you and will never return.`);
   }
 
-  // Witnesses: everyone else in the party.
-  const witnesses = (state.companions || []).filter(c => !partner.companion || c.id !== partner.companion.id);
-  for (const c of [...witnesses]) {
-    const cold = c.faction === 'choir' || c.hired;
-    c.loyalty = Math.max(0, (c.loyalty || 50) - (cold ? 5 : 45));
-    if (c.loyalty <= 10 && removeCompanion) { removeCompanion(state, c.id); consequences.push(`${c.name} saw what you did, and walks away.`); }
-    else if (!cold) consequences.push(`${c.name} saw what you did. They will not forget (loyalty ${c.loyalty}).`);
-  }
-
-  // The Choir approves of cruelty; the self is changed by it.
-  state.corruption = Math.min(100, state.corruption + 20);
+  // Witnesses, clues, a victim who may speak: the same rules as any crime.
+  const crimeLib = require('./crime');
+  const res = crimeLib.resolve(state, { type: 'coercion', victim: { name: partner.name, companion: partner.companion }, text: '' }, { heinous: 9, victimReports: failed || Math.random() < 0.45, removeCompanion });
+  consequences.push(...res.lines);
   factions.changeStanding(state, { choir: 5 }, 'cruelty');
-
-  const chance = Math.min(0.95, (r.settlement ? 0.55 : 0.25) + (witnesses.length ? 0.25 : 0) + (failed ? 0.3 : 0));
-  const discovered = Math.random() < chance;
-  if (discovered) consequences.push(...discover(state, crime));
-  else { state.secrets.push(crime); consequences.push('No one saw. For now.'); }
+  const discovered = res.seen || !!(state.deeds[state.deeds.length - 1] || {}).known || res.lines.some(l => /names you|Someone saw/.test(l));
 
   const message = failed
     ? `${partner.name} fights you off and escapes. What you tried to do cannot be undone.`
     : `You force your will on ${partner.name}. It is a crime, and you know it.`;
   const hint = `[VILLAIN ACT — the player character ${failed ? 'attempted to coerce' : 'coerced'} ${partner.name} (an adult). Narrate it: that it happened, the threat, the struggle, ${partner.name}'s fear and anger${failed ? ' and escape' : ' and what it does to them'}, and the aftermath. It is a crime and is told as one — with no sexual detail at any setting.]`;
-  return { message, hint, discovered, failed, consequences, crime };
+  return { message, hint, discovered, failed, consequences, crime: res.record || crime };
 }
 
-// Public knowledge of a crime: standing, reputation, infamy, history.
+// Public knowledge of a crime (kept for older callers): see crime.makeKnown.
 function discover(state, crime) {
+  return [require('./crime').makeKnown(state, { heinous: 9, type: 'coercion', ...crime })];
+}
+function discoverLegacy(state, crime) {
   ensure(state);
   const out = [];
   const owner = factions.getRegionFaction(crime.region);
@@ -113,8 +105,11 @@ function discover(state, crime) {
   return out;
 }
 
-// Each elapsed month, a hidden crime may come out.
+// Each elapsed month, a hidden crime may come out (investigations: crime.js).
 function secretsSurface(state, months) {
+  return require('./crime').monthly(state, months);
+}
+function secretsSurfaceLegacy(state, months) {
   ensure(state);
   const out = [];
   for (let m = 0; m < months && state.secrets.length; m++) {

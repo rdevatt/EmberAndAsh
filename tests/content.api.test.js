@@ -129,8 +129,15 @@ test('romance and villainy over the API, with the world reacting', async () => {
   assert.equal(crime.scene.mood, 'grim');
   assert.equal(crime.scene.npc.victim, true, 'the threat and aftermath are drawn, the act never is');
   assert.ok(s.corruption >= 20);
-  const greet = await c.act('talk to Old Hask');
-  assert.match(greet.output, /Stay away from me/);
+  assert.equal(s.npcRelationships.hask.wronged, true, 'the victim never forgives');
+  if (s.pendingTrial) {
+    const verdict = await c.act('plead innocent');
+    assert.match(verdict.output, /Guilty|Not guilty/, 'reported: the player stands trial');
+  }
+  if (s.character.region === 'thornwick' && !s.pendingTrial) {
+    const greet = await c.act('talk to Old Hask');
+    assert.match(greet.output, /Stay away from me/);
+  }
 });
 
 test('an intimate scene follows the player\'s words until they stop', async () => {
