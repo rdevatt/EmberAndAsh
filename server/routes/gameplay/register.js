@@ -349,6 +349,8 @@ module.exports = function registerGameplayRoutes(app, deps) {
     req.timeHours = 0; req.timeDefault = false;
     if (!hours || !chronicle.worldOf(req.session.state) || !req.session.state.character || !req.session.state.character.region) return [];
     const st = req.session.state;
+    // Nobody walks for days or sleeps with a blade in hand.
+    if (hours >= 6 && !st.inCombat) st.weaponDrawn = false;
     const monthBefore = Math.floor(chronicle.nowDay(chronicle.worldOf(st)) / 30);
     const result = chronicle.advanceTime(st, hours);
     const monthsPassed = Math.floor(chronicle.nowDay(chronicle.worldOf(st)) / 30) - monthBefore;
@@ -569,6 +571,9 @@ module.exports = function registerGameplayRoutes(app, deps) {
       }
 
       for (const msg of comps.tickContracts(state)) events.push({ type: 'system', message: msg });
+
+      // Drawing or sheathing a weapon is the player's call, in their own words.
+      if (!state.inCombat && /^i\b/i.test(cleanInput)) require('../../../game/agency').updateWeaponInHand(state, cleanInput, null);
 
       // Story, factions, companions, exploration, gathering, crafting.
       const worldResponse = await worldCommands.handle(req, res, cleanInput, cmd, events);

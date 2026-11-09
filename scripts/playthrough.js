@@ -121,6 +121,9 @@ async function fightToEnd() {
       else if (ward && hpPct() < 0.8 && !/ward \d/.test(lastOut)) input = `I use ${ward.label}`;
       else if (strike) input = `I use ${strike.label}`;
     }
+    // Like a player, the bot draws its weapon (once) in its own words.
+    const ss0 = sessionsState();
+    if (ss0 && ss0.gear && ss0.gear.weapon && !ss0.weaponDrawn && /^I /.test(input)) input = `I draw my ${String(ss0.gear.weapon.name).split(' ').pop()} and ${input.slice(2)}`;
     const r = await act(input);
     lastOut = r.output || '';
     if (!r.rightPanel || !r.rightPanel.inCombat) break;

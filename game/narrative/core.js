@@ -89,7 +89,7 @@ STRICT RULES:
 - DO reflect physical state through description — a wounded character moves differently, breathes harder
 - DO use the character's appearance, background, and gear in your descriptions naturally
 - Response length should match the scene. Quiet moments can breathe. Action can be punchy. Rich scenes deserve rich prose. Do not artificially cap length.
-- End on an open beat — describe the world settling into stillness, waiting. Never write the player's next action or decision for them.
+- End on an open beat — the world settling, waiting. Never write the player's next action or decision for them.
 
 CHARACTER PHYSICALITY:
 - The player's physical description is CANON. Use it. Reference it. Let NPCs react to it.
@@ -100,19 +100,17 @@ CHARACTER PHYSICALITY:
 - In physical or intimate scenes, the character's body as described is the body that exists in the story.
 - Do not sanitize or ignore physical details the player established — they are part of the character, used in appropriate context.
 
-PLAYER AGENCY — THIS IS ABSOLUTE AND INVIOLABLE:
-- The player character is "you" but YOU DO NOT CONTROL THEM.
-- NEVER write what the player character says. No dialogue from them. Not even implied speech.
-- NEVER write what the player character thinks or feels internally. No "you feel proud", no "you realize", no "a sense of X washes over you".
-- NEVER narrate the player's actions back to them. If they said "I stir the pot", do NOT write "You stir the pot" or "You busy yourself at the hearth". START with what happens NEXT — the smell rising, the fire crackling, an NPC reacting.
-- NEVER decide what the player does after the current beat. No "you glance up", no "you turn to face", no "you consider your options".
-- Write ONLY: the world's response, NPC actions and dialogue, environmental details, consequences of the player's stated action.
-- End scenes in stillness. The world waits. The player chooses what happens next.
+${require('../agency').PROMPT_RULES}
 
-CORRECT EXAMPLE:
-Player: "I stir the stew and add herbs"
-WRONG: "You stir the stew carefully, adding a pinch of rosemary. The smell makes you smile."
-RIGHT: "The herbs dissolve into the broth. Steam rises, carrying the scent of rosemary and thyme through the cabin. Elara inhales deeply. 'You know your way around a cookfire,' she says."
+EXAMPLES:
+Player: "I walk down the street and stop at the bar, asking for a drink."
+RIGHT: "You walk down the street to the bar. 'A drink, please.' The barkeep sets down a rag and reaches for a mug without a word."
+WRONG: "'Hey there, friend — long day, how about a drink and a hot meal?' you call out with a grin." (invented words and a grin the player never gave)
+Player: I turn to the bartender asking for a drink "hey barkeep how about an ale"
+RIGHT: "'hey barkeep how about an ale' The barkeep grunts and pulls the tap." (those words, exactly, and no others from the player)
+Player: "I fight back." (facts: unarmed)
+RIGHT: "You swing your fist at your assailant and catch him in the lower ribs, but he bites your ear in return."
+WRONG: "You draw your sword and…" (no weapon was drawn)
 
 INTIMATE SCENES:
 - If instructed to write an intimate scene, treat it as one story beat among many
@@ -234,6 +232,9 @@ function buildCombatContext(state) {
     '[COMBAT ACTIVE]',
     `Fighting: ${enemy.label} (${status}, behavior: ${enemy.behavior})`,
     enemy.desc,
+    state.gear && state.gear.weapon
+      ? (state.weaponDrawn ? `In hand: ${state.gear.weapon.name}.` : `UNARMED: their ${state.gear.weapon.name} is still sheathed — they fight with fists, feet and whatever their own hands can do until they draw it.`)
+      : 'UNARMED: they carry no weapon.',
     'Maintain tension. Describe physical details — movement, weight, sound, impact.',
     'Never mention HP, damage numbers, levels, or stats in narrative.'
   ].join('\n');
@@ -288,7 +289,7 @@ function buildFullPrompt(state, playerInput) {
   const contextBlock = sections.join('\n\n');
 
   // Reinforcement reminder placed right before player action
-  const agencyReminder = '[REMEMBER: Do not restate the player\'s action. Do not write their dialogue, thoughts, or feelings. Start with what happens NEXT in the world.]';
+  const agencyReminder = '[REMEMBER: The player\'s words are their only words: quoted speech verbatim, described speech as one short line, otherwise silence. Do not invent their actions, thoughts, feelings, weapons or abilities.]';
 
   return contextBlock
     ? `${contextBlock}\n\n${agencyReminder}\n\n[Player action]: ${playerInput}`
@@ -745,6 +746,9 @@ async function processNarrative(state, playerInput, events = []) {
       aiResult.text += '\n\n[The AI narrator declined to write this scene. The game\'s own narrator has told it instead; nothing about what happened has changed.]';
     }
   }
+
+  // The player's words are theirs alone, whatever the model wrote.
+  if (aiResult.success) aiResult.text = require('../agency').enforcePlayerVoice(aiResult.text, playerInput);
 
   // Store this exchange in history for next turn
   if (aiResult.success) {

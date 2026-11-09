@@ -48,6 +48,7 @@ function makePlayer(level, cls, { gearOffset = 0, region = 'thornwick', potions 
   if (['cleric', 'paladin'].includes(className)) s.spells = [{ ...G('constants').STARTING_SPELLS.divine_bolt }];
   s.maxHp = 0; s.maxMana = 0; s.maxStamina = 0; ch.recalculateResources(s);
   s.hp = s.maxHp; s.mana = s.maxMana; s.stamina = s.maxStamina;
+  s.weaponDrawn = true;                 // the simulated player has drawn their weapon
   s.inventory = [];
   for (let p = 0; p < potions; p++) s.inventory.push({ name: 'healing potion', type: 'potion', heal: 0.4 });
   return s;

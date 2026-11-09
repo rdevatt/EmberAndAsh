@@ -101,6 +101,7 @@ async function main() {
           if (heal && st.hp < st.maxHp * 0.5) input = `I use ${heal.label}`;
           else if (strike) input = `I use ${strike.label}`;
         }
+        if (!st.weaponDrawn && st.gear && st.gear.weapon && /^I /.test(input)) input = `I draw my ${String(st.gear.weapon.name).split(' ').pop()} and ${input.slice(2)}`;
         const r = await act(input); last = r.output || ''; rounds++;
       }
       return rounds;

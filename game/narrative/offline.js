@@ -81,6 +81,16 @@ function combatProse(state, input, r, seed) {
     lines.push(r.playerHit
       ? pick(state, 'sphit', [`Power gathers in your hands and ${r.spellCast} tears into ${foe}.`, `The words come out right, and ${r.spellCast} strikes home.`], seed)
       : pick(state, 'spmiss', [`${r.spellCast} flares — and ${foe} is no longer where it was aimed.`, `The spell goes wide, scorching empty ground.`], seed));
+  } else if (r.unarmed) {
+    // No weapon in hand: the body is the weapon.
+    const v = prefsOf(state).violence;
+    lines.push(r.playerHit
+      ? (r.playerCrit
+        ? pick(state, 'ucrit', [`You put your whole weight behind a fist to ${foe}'s ${r.bodyPart}, and something gives.`, `Your knee comes up into the ${r.bodyPart} with everything you have.`], seed)
+        : v === 'mature'
+          ? pick(state, 'uhit2', [`Your knuckles split on ${foe}'s ${r.bodyPart}; blood, yours and its, smears your hand.`, `You drive an elbow into the ${r.bodyPart} and feel it crunch.`], seed)
+          : pick(state, 'uhit', [`Your fist connects with ${foe}'s ${r.bodyPart}.`, `You get a kick in at the ${r.bodyPart}.`, `You slam a shoulder into ${foe} and it staggers.`, `An elbow to the ${r.bodyPart}, short and hard.`], seed))
+      : pick(state, 'umiss', [`Your fist finds only air.`, `${cap(foe)} slips your swing.`, `You grab for it and come away with nothing.`], seed));
   } else if (r.playerHit) {
     const v = prefsOf(state).violence;
     if (v === 'off') {
@@ -123,6 +133,26 @@ function combatProse(state, input, r, seed) {
       : pick(state, 'kill', ['Then it is over, and the only sound is your own breathing.', 'It falls, and does not rise.', 'Silence rushes back in where the fight was.'], seed));
   }
   return lines.join(' ');
+}
+
+// Narrates the player's stated action back in the second person ("You walk
+// to the bar, asking for a drink.") with their speech: quoted words exactly
+// as written, described speech voiced as one short line, otherwise none.
+// Commands ("map", "talk to Maren") are not actions to narrate.
+function playerVoice(playerInput, h) {
+  const input = String(playerInput || '').trim();
+  if (!input || h.includes('[OPENING SCENE') || h.includes('CREATION')) return '';
+  const agency = require('../agency');
+  const line = agency.playerLine(input);
+  const isAction = /^(?:i|i'm|i'll)\b/i.test(input) || /^["“]/.test(input);
+  if (h.includes('[COMBAT NARRATIVE')) {
+    // In a fight the prose already shows the blow; only the words are added.
+    return line ? line.lines.map(q => `"${q}"`).join(' ') : '';
+  }
+  if (!isAction) return line && line.exact ? line.lines.map(q => `"${q}"`).join(' ') : '';
+  const echo = agency.toSecondPerson(input);
+  if (!line || line.exact) return echo;             // quoted words are already in the echo, verbatim
+  return `${echo} "${line.lines[0]}"`;
 }
 
 function buildOfflineNarrative(state, playerInput, hint) {
@@ -213,6 +243,9 @@ function buildOfflineNarrative(state, playerInput, hint) {
       region && region.settlement ? `Smoke rises from ${region.settlement.name}. Someone there is cooking, and the smell carries.` : 'No one else is in sight.'
     ], seed));
   }
+  // The player's own action and words come first, exactly as given.
+  const voice = playerVoice(playerInput, h);
+  if (voice) lines.unshift(voice);
   // Horror off: no creeping dread in the scenery.
   const air = prefsOf(state).horror === 'off' ? '' : ambient(state, seed + 7);
   if (air && !(h.includes('[COMBAT NARRATIVE'))) lines.push(air);

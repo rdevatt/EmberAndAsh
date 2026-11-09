@@ -500,7 +500,7 @@ function applyCombatRound(state, input) {
 
   const stats        = getEffectiveStats(state);
   if (state.combatClass === 'paladin') Object.defineProperty(stats, '__paladin', { value: true, enumerable: false });
-  const weapon       = getActiveWeapon(state);
+  let weapon         = getActiveWeapon(state);
   const armor        = getActiveArmor(state);
   const bp           = BODY_PARTS[bodyPartKey] || BODY_PARTS.torso;
   const qualityMod   = { crude: -0.2, basic: -0.1, decent: 0, skilled: 0.1, masterful: 0.2 }[score.quality] || 0;
@@ -539,6 +539,13 @@ function applyCombatRound(state, input) {
     }
     if (action === 'attack' && T.detectDefend(input)) action = 'defend';
   }
+  // The player's words decide what is in their hand. A weapon stays sheathed
+  // until they draw or name it (or use a weapon technique by name); until
+  // then they fight with their body. Their class does not decide this.
+  const inHand = require('./agency').updateWeaponInHand(state, input, ability);
+  if (!inHand) weapon = null;
+  result.unarmed = !weapon;
+  result.weaponUsed = weapon ? weapon.name : null;
 
   // ---------- resolve the player's action ----------
   const staminaPct  = state.maxStamina > 0 ? state.stamina / state.maxStamina : 1;
@@ -749,7 +756,7 @@ function applyCombatRound(state, input) {
   }
 
   // Gear wears: weapons when they land blows, armour when it takes them.
-  for (const l of D.wearGear(state, { struck: result.playerHit && (action === 'attack' || (ability && ability.kind === 'weapon')), wasHit: result.enemyHit })) result.enemyLines.push(l);
+  for (const l of D.wearGear(state, { struck: !!weapon && result.playerHit && (action === 'attack' || (ability && ability.kind === 'weapon')), wasHit: result.enemyHit })) result.enemyLines.push(l);
 
   // Casters recover a little mana each round they fight.
   if (T.getKnownAbilities(state).some(a => a.cost && a.cost.mana) || (state.spells || []).length) {

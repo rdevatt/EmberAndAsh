@@ -372,10 +372,14 @@ function updateCombatActions(data) {
   if (!box) return;
   const inCombat = data && data.rightPanel && data.rightPanel.inCombat;
   if (!inCombat) { box.innerHTML = ''; return; }
-  const buttons = [
-    { label: 'Attack', cmd: 'I attack it with a careful, precise strike' },
-    { label: 'Defend', cmd: 'I raise my guard and defend' }
-  ];
+  // The buttons say exactly what the character does; nothing is drawn or
+  // used unless the player chooses it.
+  const w = data.weapon;
+  const buttons = w && !w.drawn
+    ? [{ label: `Draw ${w.name}`, cmd: `I draw my ${w.name}` }, { label: 'Fight barehanded', cmd: 'I punch it' }]
+    : w ? [{ label: 'Attack', cmd: `I strike at it with my ${w.name}` }]
+    : [{ label: 'Punch', cmd: 'I punch it' }];
+  buttons.push({ label: 'Defend', cmd: 'I raise my guard and defend' });
   for (const a of (data.abilities || [])) {
     if (a.id === 'power_attack' && (data.abilities || []).length > 3) continue;
     buttons.push({ label: a.label, cmd: `I use ${a.label}`, disabled: !a.ready, title: a.desc });

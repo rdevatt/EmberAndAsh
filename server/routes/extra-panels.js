@@ -44,7 +44,9 @@ function extraPanels(state, inCreation) {
     world:     worldPanel(state),
     portrait:  safePortrait(state),
     potions:   (state.inventory || []).filter(i => /healing potion/.test(typeof i === 'string' ? i : i.name)).length,
-    manaPotions: (state.inventory || []).filter(i => /mana potion/.test(typeof i === 'string' ? i : i.name)).length
+    manaPotions: (state.inventory || []).filter(i => /mana potion/.test(typeof i === 'string' ? i : i.name)).length,
+    // What is in the character's hand: the player draws it, the class does not.
+    weapon:    state.gear && state.gear.weapon ? { name: String(state.gear.weapon.name).replace(/\s*\(.*\)$/, ''), drawn: !!state.weaponDrawn } : null
   };
 }
 
