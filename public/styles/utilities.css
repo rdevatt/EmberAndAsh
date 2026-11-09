@@ -470,10 +470,16 @@ button.retry-btn:not(.story-btn):hover {
 @keyframes ea-fall { from { translate: 0 -200px; } to { translate: 0 200px; } }
 @keyframes ea-drift { from { translate: -10px 0; } to { translate: 10px 0; } }
 @keyframes ea-pulse { 0%,100% { opacity: 0.6; } 50% { opacity: 1; } }
+.ea-rock { animation: ea-rock 0.9s ease-in-out infinite; }
+.ea-bob { animation: ea-bob 0.9s ease-in-out infinite; }
+.ea-flee { animation: ea-flee 1.6s ease-in forwards; }
+@keyframes ea-rock { 0%,100% { translate: 0 0; } 50% { translate: 4px 0; } }
+@keyframes ea-bob { 0%,100% { translate: 0 0; } 50% { translate: 0 4px; } }
+@keyframes ea-flee { from { translate: 0 0; } to { translate: 60px 0; opacity: 0.4; } }
 .ea-flap { animation: ea-flap 0.9s ease-in-out infinite alternate; transform-box: fill-box; transform-origin: center bottom; }
 @keyframes ea-flap { from { scale: 1 1; } to { scale: 1 0.8; } }
 @media (prefers-reduced-motion: reduce) {
-  .ea-actor, .ea-float, .ea-fall, .ea-drift, .ea-flap, .ea-pulse, .ea-glow, .ea-flicker, .ea-projectile, .ea-slide, .ea-shake, .ea-lunge { animation: none !important; transition: none !important; }
+  .ea-actor, .ea-float, .ea-fall, .ea-drift, .ea-flap, .ea-rock, .ea-bob, .ea-flee, .ea-pulse, .ea-glow, .ea-flicker, .ea-projectile, .ea-slide, .ea-shake, .ea-lunge { animation: none !important; transition: none !important; }
 }
 @media (max-width: 768px) {
   #scene-holder { max-height: 170px; }

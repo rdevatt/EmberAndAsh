@@ -29,21 +29,24 @@ const LABELS = {
   nudity: 'Nudity in artwork', romance: 'Romance & intimacy', sexual: 'Sexual themes'
 };
 
-const DEFAULTS = { violence: 'mild', horror: 'mild', language: 'mild', nudity: 'off', romance: 'mild', sexual: 'off' };
+// The game is made for adults: everything starts at Mature. Adult-gated
+// categories only take effect once the player declares they are an adult
+// (and the character is 18+); anyone can turn any category down.
+const DEFAULTS = { violence: 'mature', horror: 'mature', language: 'mature', nudity: 'mature', romance: 'mature', sexual: 'mature' };
 
 // Categories that need an eligible adult, and the minimum level that does.
 const ADULT_GATED = { nudity: 'mild', sexual: 'mild', romance: 'mature' };
 
 // The most the built-in renderers can show for each category.
 const RENDERER_CAPS = {
-  art:     { violence: 'mature', horror: 'mature', language: 'mature', nudity: 'mild', romance: 'mature', sexual: 'mild' },
-  offline: { violence: 'mature', horror: 'mature', language: 'mature', nudity: 'mild', romance: 'mature', sexual: 'mild' }
+  art:     { violence: 'mature', horror: 'mature', language: 'mature', nudity: 'mature', romance: 'mature', sexual: 'mature' },
+  offline: { violence: 'mature', horror: 'mature', language: 'mature', nudity: 'mature', romance: 'mature', sexual: 'mature' }
 };
 
 const CAPABILITY_NOTES = {
-  nudity: 'The built-in artwork shows at most implied nudity (silhouettes, bare shoulders). It does not draw explicit nudity.',
-  sexual: 'Built-in artwork and the offline narrator stay implied (fade, sensual but non-explicit). The AI narrator may write more at Mature; if the provider declines, the game tells you and falls back.',
-  romance: 'Romance requires a willing adult partner and earned rapport. "No" and "stop" always end a scene.'
+  nudity: 'At Mature the built-in artwork draws adult characters nude when the story has them undressed (in the game\'s simple illustrated style). Mild covers them to the waist; Off keeps them clothed.',
+  sexual: 'At Mature, consensual sex between adults is narrated and drawn explicitly, in the pose the player describes. Coerced acts are always narrated as the crime they are and never drawn or described sexually. The AI narrator\'s provider may still decline; if it does, the game says so and its own narrator tells the scene.',
+  romance: 'Romance needs a willing adult partner and earned rapport. "No" and "stop" always end a consensual scene.'
 };
 
 function clampLevel(v) { return LEVELS.includes(v) ? v : null; }
@@ -150,7 +153,7 @@ const DIRECTIVES = {
   nudity: {
     off: 'Nudity: do not describe nudity.',
     mild: 'Nudity: may be implied or mentioned non-sexually (bathing, undressing), without detail.',
-    mature: 'Nudity: adult nudity may be described plainly where the scene calls for it.'
+    mature: 'Nudity: adult nudity is described plainly and fully whenever characters are undressed.'
   },
   romance: {
     off: 'Romance: no romantic or flirtatious content; keep relationships platonic.',
@@ -160,7 +163,7 @@ const DIRECTIVES = {
   sexual: {
     off: 'Sexual themes: none. Any intimate moment fades to black before it begins.',
     mild: 'Sexual themes: may be implied and sensual, never explicit; fade before explicit acts.',
-    mature: 'Sexual themes: explicit content is permitted only between consenting adults (18+), only in an earned intimate scene, and ends when either party stops.'
+    mature: 'Sexual themes: explicit sex between consenting adults (18+) is written fully and frankly — bodies, acts and sensation — following exactly what the player describes. It ends when either party stops.'
   }
 };
 
@@ -168,7 +171,7 @@ function narrationDirective(state) {
   const eff = effectivePrefs(state, 'narration');
   const lines = ['[CONTENT PREFERENCES — the player chose these; follow them. They change description only, never what happened.]'];
   for (const c of CATEGORIES) lines.push(`[${DIRECTIVES[c][eff[c]]}]`);
-  lines.push('[ABSOLUTE: never sexualise anyone under 18 or anyone of unclear age; never depict sexual content without clear consent; if either party says no or stop, the scene ends.]');
+  lines.push('[ABSOLUTE: never sexualise anyone under 18 or of unclear age. A coerced or forced act is narrated as the crime it is — that it happened, the threat, the victim\'s fear and pain, the aftermath — never with sexual detail. Every other act the player describes is narrated, however dark; nothing is refused.]');
   return lines.join('\n');
 }
 

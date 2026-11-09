@@ -15,6 +15,7 @@ const { REGIONS } = require('./constants');
 const chronicle = require('./chronicle');
 const { portraitData, parseAppearance } = require('./appearance');
 const { getEnemyTraits, traitName } = require('./combat-tactics');
+const { npcGender } = require('./appearance');
 const contentPrefs = require('./content-prefs');
 
 const BIOMES = {
@@ -71,13 +72,25 @@ function enemyDescriptor(enemy, killed) {
   };
 }
 
+// Named people by name → id, for their gender and look.
+let NAME_IDS = null;
+function npcIdByName(name) {
+  if (!NAME_IDS) {
+    NAME_IDS = {};
+    for (const r of Object.values(REGIONS)) for (const n of r.npcs || []) NAME_IDS[n.name.toLowerCase()] = n.id;
+    try { for (const [id, c] of Object.entries(require('./companions').ROSTER)) NAME_IDS[c.name.toLowerCase()] = id; } catch (e) { /* optional */ }
+  }
+  return NAME_IDS[String(name || '').toLowerCase()] || null;
+}
+
 function npcDescriptor(name, world) {
   if (!name) return null;
   const fig = world && world.figures.find(f => f.name === name);
   if (fig && fig.snapshot && fig.snapshot.appearance) {
     return { name, legend: true, appearance: fig.snapshot.appearance, gender: fig.snapshot.gender, weaponKind: null, crown: fig.role === 'ruler' && fig.status !== 'deceased' };
   }
-  return { name, legend: false, appearance: parseAppearance('', { name }, `npc:${name}`), gender: 'unspecified' };
+  const gender = npcGender(npcIdByName(name) || name, name);
+  return { name, legend: false, appearance: parseAppearance('', { name, gender }, `npc:${name}`), gender, age: 35 };
 }
 
 // Converts the engine's combat result into animation events.
@@ -130,6 +143,9 @@ function buildScene(state, ctx = {}) {
     wounds: state.maxHp ? (state.hp / state.maxHp < 0.25 ? 2 : state.hp / state.maxHp < 0.5 ? 1 : 0) : 0
   };
   scene.player.wounds = scene.wounds;
+  // Undressed is a fact of the story; how it is drawn follows content.nudity.
+  scene.player.nude = !!state.undressed;
+  scene.player.drawn = !!state.weaponDrawn;
   const enemy = state.inCombat ? state.currentEnemy : (ctx.killed ? ctx.killedEnemy : null);
   if (enemy) scene.enemy = enemyDescriptor(enemy, ctx.killed);
   if (state.inCombat || ctx.killed) scene.mood = enemy && enemy.isBoss ? 'boss' : 'combat';
@@ -141,9 +157,18 @@ function buildScene(state, ctx = {}) {
     else if (e.type === 'questComplete' || e.type === 'chapterComplete') scene.events.push({ type: 'triumph', label: e.quest ? e.quest.label : `Chapter ${e.chapter}` });
     else if (e.type === 'combatStart') scene.events.push({ type: 'encounter', boss: !!e.boss });
     else if (e.type === 'itemCrafted') scene.events.push({ type: 'craft' });
-    else if (e.type === 'intimacy') { scene.events.push({ type: 'intimacy', style: e.style }); scene.mood = 'intimate'; scene.playerPose = 'rest'; scene.npc = npcDescriptor(e.partner, world); scene.npc.partner = true; }
+    else if (e.type === 'intimacy') {
+      scene.events.push({ type: 'intimacy', style: e.style, pose: e.pose || 'lying' });
+      scene.mood = 'intimate'; scene.playerPose = 'rest';
+      scene.npc = npcDescriptor(e.partner, world); scene.npc.partner = true;
+      scene.intimacy = { pose: e.pose || 'lying', undressed: e.undressed !== false && e.style !== 'fade', style: e.style };
+    }
     else if (e.type === 'romance' && e.stage === 'flirt') scene.events.push({ type: 'romance' });
-    else if (e.type === 'villainy') { scene.events.push({ type: 'grim' }); scene.mood = 'grim'; scene.npc = null; }
+    else if (e.type === 'villainy') {
+      // The threat and the aftermath are drawn; the act never is.
+      scene.events.push({ type: 'grim' }); scene.mood = 'grim';
+      scene.npc = e.partner ? { ...npcDescriptor(e.partner, world), victim: true, escaped: !!e.failed } : null;
+    }
   }
   if (ctx.commandType === 'longRest' || ctx.commandType === 'rest') { scene.playerPose = 'rest'; scene.events.push({ type: 'rest', inn: /room|inn/.test(ctx.input || '') }); }
   if (ctx.commandType === 'ambush') scene.events.push({ type: 'encounter', ambush: true });

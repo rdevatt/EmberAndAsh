@@ -283,7 +283,7 @@ module.exports = function createWorldCommands(h) {
       if (!love.success) return sendCommand(req, res, love.message, 'romance', { persist: false });
       req.session.undoLocked = true;
       addTime(req, love.hours || 0);
-      sys(events, love.message);
+      if (love.message) sys(events, love.message);
       if (love.event) events.push(love.event);
       if (love.hint) appendHint(state, love.hint);
       if (love.event && love.event.partner) req.sceneNpc = love.event.type === 'villainy' ? null : love.event.partner;

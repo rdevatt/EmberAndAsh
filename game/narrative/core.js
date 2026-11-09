@@ -242,6 +242,8 @@ function buildCombatContext(state) {
 
 function buildSceneContext(state) {
   const lines = [];
+  if (state.undressed) lines.push('[The player character is naked.]');
+  if (state.intimate) lines.push(`[In an intimate scene with ${state.intimate.name}${state.intimate.undressed ? ', both undressed' : ''}.]`);
 
   if (state.currentLocation) {
     lines.push(`[Current location: ${state.currentLocation}]`);

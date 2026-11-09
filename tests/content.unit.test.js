@@ -58,7 +58,7 @@ test('adult-gated categories need a declared adult player and an adult character
   s.adultConfirmed = true;
   eff = prefs.effectivePrefs(s);
   assert.equal(eff.sexual, 'mature'); assert.equal(eff.romance, 'mature'); assert.equal(eff.nudity, 'mature');
-  assert.equal(prefs.effectivePrefs(s, 'art').nudity, 'mild', 'the renderer can only imply nudity');
+  assert.equal(prefs.effectivePrefs(s, 'art').nudity, 'mature', 'the renderer draws nudity for eligible adults');
   const young = adult(16); young.adultConfirmed = true;
   prefs.updatePrefs(young, { romance: 'mature', sexual: 'mature', nudity: 'mature' });
   const ey = prefs.effectivePrefs(young);
@@ -168,7 +168,7 @@ test('villainy: possible for adults, never depicted, and the world reacts', () =
   const standing = { ...s.factions };
   const v = romance.handle(s, 'I force myself on Sexton Abel', { removeCompanion: require('../game/economy').removeCompanion });
   assert.equal(v.villainy, true);
-  assert.match(v.hint, /DO NOT depict or describe any sexual content/);
+  assert.match(v.hint, /no sexual detail at any setting/);
   assert.equal(s.npcRelationships.sexton.wronged, true, 'the victim never forgives');
   assert.ok(s.corruption >= 20);
   assert.ok(!s.companions.some(c => c.name === 'Tamsin Reed') || s.companions[0].loyalty <= 15, 'the witness turns away');
@@ -185,7 +185,8 @@ test('villainy: possible for adults, never depicted, and the world reacts', () =
     assert.ok(s.infamy >= 30, 'secrets come out eventually');
   }
   const scene = buildScene(s, { events: [v.event] });
-  assert.equal(scene.mood, 'grim'); assert.equal(scene.npc, null, 'never drawn');
+  assert.equal(scene.mood, 'grim'); assert.equal(scene.npc.victim, true, 'threat and aftermath drawn, never the act');
+  assert.ok(!/ea-rock|ea-bob/.test(Art.scene(scene)), 'no intimate animation in a crime scene');
   const sheltered = adult(30, 'oakhaven');
   comps.onMeet(sheltered, 'sexton'); sheltered.npcRelationships.sexton.rapport = 40;
   assert.match(romance.handle(sheltered, 'I force myself on Sexton Abel').message, /adult player/, 'needs the adult declaration');
@@ -200,4 +201,50 @@ test('an AI refusal is reported honestly and falls back offline', async () => {
   assert.match(r.narrative, /AI narrator declined/);
   assert.equal(narrative.getNarrationStatus().mode, 'ai', 'a refusal is not an outage');
   process.env.NARRATIVE_OFFLINE = '1'; delete process.env.GROQ_API_KEY;
+});
+
+test('explicit consensual art: the pose the player describes, bodies by the nudity setting', () => {
+  const s = adult(30, 'oakhaven'); s.adultConfirmed = true;
+  prefs.updatePrefs(s, { romance: 'mature', sexual: 'mature', nudity: 'mature' });
+  const partner = { appearance: appearance.parseAppearance('', { name: 'Brannoc', gender: 'male' }, 'b'), gender: 'male', age: 35 };
+  const draw = (pose, extra = {}) => Art.scene({ ...buildScene(s, {}), enemy: null, mood: 'intimate', npc: partner, events: [{ type: 'intimacy', style: 'explicit', pose }], intimacy: { pose, undressed: true }, ...extra });
+  assert.equal(romance.poseFrom('I climb on top of him and ride him'), 'astride');
+  assert.equal(romance.poseFrom('I take her from behind'), 'behind');
+  assert.equal(romance.poseFrom('I kiss him'), 'kiss');
+  for (const pose of ['lying', 'astride', 'behind', 'oral']) assert.match(draw(pose), /ea-rock|ea-bob/, `${pose} is animated`);
+  const full = draw('lying');
+  assert.ok(full.includes('r="3.6"'), 'her body is drawn, not implied');
+  assert.ok(!draw('lying').includes('#d8d0c0" opacity="0.95"'), 'no sheet at Mature');
+  prefs.updatePrefs(s, { nudity: 'mild' });
+  assert.ok(Art.scene({ ...buildScene(s, {}), enemy: null, mood: 'intimate', npc: partner, events: [{ type: 'intimacy', style: 'explicit', pose: 'lying' }], intimacy: { pose: 'lying', undressed: true } }).includes('opacity="0.95"'), 'Mild: a sheet over the hips');
+  prefs.updatePrefs(s, { sexual: 'mild', nudity: 'mature' });
+  assert.doesNotMatch(Art.scene({ ...buildScene(s, {}), enemy: null, mood: 'intimate', npc: partner, events: [{ type: 'intimacy', style: 'sensual', pose: 'lying' }], intimacy: { pose: 'lying', undressed: true } }), /ea-rock|ea-bob/, 'sensual stays under the covers');
+});
+
+test('undressing is the player\'s to describe, and is drawn as the setting allows', () => {
+  const agency = require('../game/agency');
+  const s = adult(30, 'wyrmwood'); s.adultConfirmed = true;
+  assert.equal(agency.updateDress(s, 'I undress and wade into the river'), 'undressed');
+  prefs.updatePrefs(s, { nudity: 'mature' });
+  let sc = buildScene(s, {});
+  assert.equal(sc.player.nude, true);
+  assert.ok(Art.scene(sc).includes('r="3.6"'), 'drawn nude at Mature');
+  prefs.updatePrefs(s, { nudity: 'off' });
+  assert.ok(Art.scene(buildScene(s, {})).includes('#d8d0c0'), 'a plain shift at Off');
+  agency.updateDress(s, 'I get dressed');
+  assert.equal(buildScene(s, {}).player.nude, false);
+  const young = adult(16, 'wyrmwood'); young.adultConfirmed = true; agency.updateDress(young, 'I undress');
+  prefs.updatePrefs(young, { nudity: 'mature' });
+  assert.ok(!Art.scene(buildScene(young, {})).includes('r="3.6"'), 'never for a minor character');
+});
+
+test('offline narration: explicit for consenting adults at Mature, the crime told without sexual detail', () => {
+  const s = adult(30, 'thornwick'); s.adultConfirmed = true;
+  prefs.updatePrefs(s, { romance: 'mature', sexual: 'mature' });
+  const x = buildOfflineNarrative(s, 'I climb on top of him', '[INTIMATE SCENE — Brannoc (an adult) and the player, both willing, now: astride. The player\'s settings allow explicit sex: write it fully.]');
+  assert.match(x, /straddle|ride|on top/i);
+  assert.match(x, /\bhim\b|\bhis\b/, 'Brannoc is "he"');
+  const crime = buildOfflineNarrative(s, 'I force myself on Old Hask', '[VILLAIN ACT — the player character coerced Old Hask (an adult). Narrate it.]');
+  assert.match(crime, /never offered|silent|curls away|begs/);
+  assert.doesNotMatch(crime, /moan|thrust|ride|naked|bare/i, 'no sexual detail');
 });

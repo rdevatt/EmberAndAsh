@@ -573,7 +573,11 @@ module.exports = function registerGameplayRoutes(app, deps) {
       for (const msg of comps.tickContracts(state)) events.push({ type: 'system', message: msg });
 
       // Drawing or sheathing a weapon is the player's call, in their own words.
-      if (!state.inCombat && /^i\b/i.test(cleanInput)) require('../../../game/agency').updateWeaponInHand(state, cleanInput, null);
+      if (!state.inCombat && /^i\b/i.test(cleanInput)) {
+        const agency = require('../../../game/agency');
+        agency.updateWeaponInHand(state, cleanInput, null);
+        agency.updateDress(state, cleanInput);
+      }
 
       // Story, factions, companions, exploration, gathering, crafting.
       const worldResponse = await worldCommands.handle(req, res, cleanInput, cmd, events);

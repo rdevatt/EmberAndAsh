@@ -136,4 +136,25 @@ function portraitData(state, extras = {}) {
   };
 }
 
-module.exports = { parseAppearance, ensureAppearance, addScar, portraitData, weaponKind, armorKind, HAIR_COLORS, SKIN_TONES };
+// Named people of the world, by id. Used for art and narration; a holder's
+// heir may differ (successors get their own record).
+const NPC_GENDER = {
+  maren: 'female', hask: 'male', brannoc: 'male', sarn: 'male', ilsa: 'female', crane: 'male', vesna: 'female', halloran: 'male',
+  old_wenna: 'female', tamsin: 'female', elder_fen: 'male', marta: 'female', sexton: 'male', nell: 'female', lighthouse_keeper: 'male',
+  foreman_dagny: 'female', grisk: 'male', mother_ysolde: 'female', punter_jory: 'male', seraphine: 'female', tower_warden: 'male',
+  salter_ruk: 'male', brisa: 'female', thrane: 'male', calloway: 'male', pick: 'male', wildheart: 'female', castellan: 'male',
+  sergeant_bree: 'female', heron: 'female', magistrate: 'male', jarl_eydis: 'female', lantern_ama: 'female', lieutenant_aske: 'male', aske: 'male',
+  magister_ilo: 'male', ashwife: 'female', seraphine_court: 'female', archivist: 'male', pilgrim_ora: 'female', warden_tove: 'female',
+  forgemaster_ulla: 'female', steward: 'male', drowned_knight: 'male', brother_lucan: 'male', lucan: 'male', bone_reader: 'male',
+  siege_marshal: 'male', ghost_general: 'female', anchor_monk: 'male', watcher_mira: 'female', ember_keeper: 'female', last_warden: 'male'
+};
+function npcGender(idOrName, fallbackSeed) {
+  const k = String(idOrName || '').toLowerCase();
+  if (NPC_GENDER[k]) return NPC_GENDER[k];
+  for (const [id, g] of Object.entries(NPC_GENDER)) if (k.includes(id.replace(/_/g, ' ')) || k.split(/\s+/).includes(id)) return g;
+  const name = String(fallbackSeed || idOrName || '');
+  let h = 0; for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return h % 2 ? 'female' : 'male';
+}
+
+module.exports = { parseAppearance, ensureAppearance, addScar, portraitData, weaponKind, armorKind, HAIR_COLORS, SKIN_TONES, NPC_GENDER, npcGender };

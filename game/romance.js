@@ -71,8 +71,54 @@ function checkEligible(state, partner, input, { villainy = false } = {}) {
  * Handles romance commands. Returns null if not one, otherwise
  * { success, message, hours?, event?, hint? }.
  */
+// The pose the player describes, for the artwork and the narrator. Only
+// what the player says decides it.
+const POSES = [
+  ['oral', /\b(go(?:es)? down on|lick(?:s|ing)?|mouth (?:on|around)|oral|taste (?:him|her|them))\b/i],
+  ['astride', /\b(on top|ride|rides|riding|straddle|straddles|straddling|astride|climb(?:s)? (?:onto|on top))\b/i],
+  ['behind', /\b(from behind|behind (?:him|her|them)|bend(?:s)? (?:him|her|them) over|spoon(?:s|ing)?)\b/i],
+  ['lying', /\b(make love|making love|fuck|fucks|fucking|have sex|having sex|inside (?:him|her|them)|lie (?:with|back|down)|lay (?:him|her|them) down|thrust|push(?:es)? into)\b/i],
+  ['undress', /\b(undress(?:es|ing)?|strip(?:s|ping)?|take off (?:his|her|their|my) clothes|unlace|unbutton|disrobe)\b/i],
+  ['embrace', /\b(hold(?:s)?|embrace(?:s)?|hug(?:s)?|cuddle(?:s)?|caress(?:es)?|touch(?:es)?|stroke(?:s)?|pull (?:him|her|them) close)\b/i],
+  ['kiss', /\b(kiss(?:es|ing)?)\b/i]
+];
+function poseFrom(text, fallback = 'lying') {
+  for (const [pose, re] of POSES) if (re.test(String(text || ''))) return pose;
+  return fallback;
+}
+const INTIMATE_ACT = /\b(kiss|undress|strip|caress|touch|stroke|lick|ride|riding|straddle|on top|from behind|make love|fuck|have sex|thrust|go down on|moan|hold (?:him|her|them)|pull (?:him|her|them) close|embrace|cuddle|bite (?:his|her|their) (?:lip|neck)|whisper)\b/i;
+
+function intimateHint(state, partner, style, pose) {
+  return style === 'explicit'
+    ? `[INTIMATE SCENE — ${partner} (an adult) and the player, both willing, now: ${pose}. The player's settings allow explicit sex: write it fully and frankly, following exactly what the player described and nothing they did not. Their words, if any, are theirs alone. If either says stop, it stops.]`
+    : style === 'sensual'
+      ? `[INTIMATE SCENE — ${partner} (an adult) and the player, both willing. Sensual, warm, not explicit.]`
+      : `[INTIMATE SCENE — ${partner} and the player. Fade to black: a closed door, morning light.]`;
+}
+
+function styleFor(state) {
+  const eff = prefs.effectivePrefs(state, 'narration');
+  return eff.sexual === 'mature' ? 'explicit' : eff.sexual === 'mild' || eff.romance === 'mature' ? 'sensual' : 'fade';
+}
+
 function handle(state, input, helpers = {}) {
   const text = String(input || '').trim();
+  // An intimate scene under way continues with whatever the player does next,
+  // until either of them stops or the player turns to something else.
+  if (state.intimate && !state.inCombat) {
+    if (prefs.isStop(text)) {
+      const who = state.intimate.name; state.intimate = null;
+      return { success: true, message: `You stop. ${who} draws a breath, and the moment ends.`, event: { type: 'romance', stage: 'stopped', partner: who } };
+    }
+    if (INTIMATE_ACT.test(text) && !infamy.detectForce(text)) {
+      const pose = poseFrom(text, state.intimate.pose || 'lying');
+      if (pose !== 'kiss' && pose !== 'embrace') state.intimate.undressed = true;
+      state.intimate.pose = pose;
+      const style = styleFor(state);
+      return { success: true, continued: true, message: '', event: { type: 'intimacy', partner: state.intimate.name, style, pose, undressed: !!state.intimate.undressed, continued: true }, hint: intimateHint(state, state.intimate.name, style, pose) };
+    }
+    state.intimate = null;                            // anything else: the scene is over
+  }
   // Villainy: coercion or force. A crime with consequences, never shown.
   const forced = infamy.detectForce(text);
   const coerciveRomance = !forced && prefs.isCoercive(text) && (FLIRT.test(text) || NIGHT.test(text));
@@ -139,19 +185,16 @@ function handle(state, input, helpers = {}) {
   if (first && world) chronicle.addEvent(world, { type: 'bond', title: `${state.character.name} and ${partner.name} are bound to each other`, actor: chronicle.actorOf(state), region: state.character.region }, `bond:${state.characterId}:${partner.id}`);
   // A night of rest, in safety.
   state.hp = state.maxHp; state.stamina = state.maxStamina; state.mana = state.maxMana;
-  const eff = prefs.effectivePrefs(state, 'narration');
-  const style = eff.sexual === 'mature' ? 'explicit' : eff.sexual === 'mild' || eff.romance === 'mature' ? 'sensual' : 'fade';
-  const hint = style === 'explicit'
-    ? `[INTIMATE SCENE — ${partner.name} (an adult) and the player, both willing. Explicit adult content is permitted by the player's settings. Keep it consensual, end it naturally, return to the story. If the player says stop, it stops.]`
-    : style === 'sensual'
-      ? `[INTIMATE SCENE — ${partner.name} (an adult) and the player, both willing. Sensual and warm but not explicit; fade before explicit acts.]`
-      : `[INTIMATE SCENE — ${partner.name} and the player. Fade to black: a closed door, morning light. No sexual description.]`;
+  const style = styleFor(state);
+  const pose = poseFrom(text, 'lying');
+  // The scene stays open: what happens next is the player's to describe.
+  state.intimate = { id: partner.id, name: partner.name, pose, undressed: style !== 'fade' };
   return {
     success: true, hours: 10,
-    message: `${partner.name} takes your hand.${first ? ' Something between you changes, and stays changed.' : ''} The night passes; you wake rested.`,
-    event: { type: 'intimacy', partner: partner.name, style, first },
-    hint
+    message: `${partner.name} takes your hand.${first ? ' Something between you changes, and stays changed.' : ''} The night is yours; by morning you are rested.`,
+    event: { type: 'intimacy', partner: partner.name, style, first, pose, undressed: style !== 'fade' },
+    hint: intimateHint(state, partner.name, style, pose)
   };
 }
 
-module.exports = { handle, findPartner, checkEligible };
+module.exports = { handle, findPartner, checkEligible, poseFrom };

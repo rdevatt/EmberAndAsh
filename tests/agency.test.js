@@ -76,7 +76,7 @@ test('weapons stay sheathed until the player draws or names one', () => {
   const s = fighter();
   combat.applyCombatRound(s, 'I fight back');
   assert.equal(s.pendingCombatResult.unarmed, true, '"I fight back" is fists, not the sword');
-  assert.match(buildOfflineNarrative(s, 'I fight back', '[COMBAT NARRATIVE INSTRUCTIONS]'), /fist|kick|elbow|shoulder|knee|swing|grab/i);
+  assert.match(buildOfflineNarrative(s, 'I fight back', '[COMBAT NARRATIVE INSTRUCTIONS]'), /fist|knuckle|kick|elbow|shoulder|knee|swing|grab/i);
   combat.applyCombatRound(s, 'I draw my sword and attack');
   assert.equal(s.pendingCombatResult.unarmed, false);
   assert.equal(s.pendingCombatResult.weaponUsed, 'steel sword');

@@ -48,6 +48,18 @@ function pick(state, key, list, seed) {
 
 function cap(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
 
+function pronouns(name) {
+  let g = 'unspecified';
+  try {
+    const ap = require('../appearance');
+    const { REGIONS: R } = require('../constants');
+    let id = null;
+    for (const r of Object.values(R)) for (const n of r.npcs || []) if (n.name === name) id = n.id;
+    g = ap.npcGender(id || name, name);
+  } catch (e) { /* default */ }
+  return g === 'female' ? { he: 'she', him: 'her', his: 'her' } : g === 'male' ? { he: 'he', him: 'him', his: 'his' } : { he: 'they', him: 'them', his: 'their' };
+}
+
 function weaponName(state) {
   const w = state.gear && state.gear.weapon;
   return w && w.name ? w.name.replace(/\s*\(.*\)$/, '') : 'your fists';
@@ -192,14 +204,34 @@ function buildOfflineNarrative(state, playerInput, hint) {
   } else if (h.includes('BOSS DEFEATED')) {
     lines.push(pick(state, 'bossdown', ['It is done. For a long moment you simply stand there, shaking, alive.', 'The great enemy falls, and the world feels — briefly, impossibly — lighter.'], seed));
   } else if (h.includes('VILLAIN ACT')) {
-    // Never depicted. The aftermath only.
-    lines.push(pick(state, 'villain', ['Afterwards the room is very quiet. Whatever you thought you would feel, it is not this.', 'It is done, and it cannot be undone. Somewhere, someone is already telling the story — or soon will be.'], seed));
+    // Narrated as the crime it is: that it happened, the threat and the
+    // victim's fear, the aftermath — never with sexual detail.
+    const who = (h.match(/(?:coerce|coerced|attempted to coerce) ([^(.]+?) \(/) || [])[1] || 'them';
+    const g = pronouns(who);
+    lines.push(/attempted/.test(h)
+      ? pick(state, 'villainF', [`${who} fights you — nails, teeth, a knee — tears free and runs, screaming for help.`, `${cap(g.he)} twists out of your grip and bolts for the door, and ${g.his} scream follows ${g.him} into the street.`], seed)
+      : pick(state, 'villain', [`${who} begs, then stops begging. You take what was never offered. Afterwards ${g.he} will not look at you, and the room is very quiet.`, `${cap(g.he)} goes rigid and silent under your hands, eyes fixed on the wall. When it is over ${g.he} curls away from you, and something in ${g.him} does not come back.`], seed));
   } else if (h.includes('INTIMATE SCENE')) {
     const p = prefsOf(state);
-    lines.push(p.romance === 'off' ? 'You share a quiet night. In the morning, the road is waiting.'
-      : (p.sexual === 'mild' || p.romance === 'mature')
-        ? pick(state, 'night2', ['Lamplight on bare shoulders; hands slow and certain; a warmth that asks nothing and gives everything. The rest belongs to the two of you. Morning comes gently.', 'Clothes on the floor, a whispered name, the long unhurried hours of the night. You wake tangled together, unwilling to move.'], seed)
-        : pick(state, 'night1', ['The door closes. Later there is only lamplight, the slow sound of breathing, and morning.', 'A kiss, then another, and the candle gutters out. Morning finds you both still smiling.'], seed));
+    const who = (h.match(/INTIMATE SCENE — (.+?) (?:\(an adult\) )?and the player/) || [])[1] || 'they';
+    const g = pronouns(who);
+    const pose = (h.match(/now: (\w+)/) || [])[1] || 'lying';
+    if (p.romance === 'off' || /Fade to black/.test(h)) {
+      lines.push(pick(state, 'night1', ['The door closes. Later there is only lamplight, the slow sound of breathing, and morning.', 'A kiss, then another, and the candle gutters out. Morning finds you both still smiling.'], seed));
+    } else if (p.sexual === 'mature' && /explicit sex/.test(h)) {
+      const X = {
+        kiss: [`${who} kisses you back, slow and then hungry, ${g.his} hands in your hair, ${g.his} body pressed hard against yours.`, `${cap(g.his)} mouth is hot on yours; ${g.he} bites your lip and laughs against it.`],
+        embrace: [`${who} melts into your arms, warm skin against warm skin, ${g.his} heart pounding against yours.`, `${cap(g.he)} shivers under your hands as they move over ${g.his} bare back and lower.`],
+        undress: [`Clothes fall away until there is nothing between you. In the candlelight ${who} is all bare skin and want, and ${g.he} does not look away.`, `${who} lets you look, then pulls you close, naked and unashamed.`],
+        lying: [`${who} pulls you down onto the bed and you move together, bare and slick with sweat, ${g.his} hips rising to meet yours again and again until ${g.he} cries out and clings to you.`, `You make love slowly, then not slowly at all, the bed creaking, ${who} gasping your name into your shoulder.`],
+        astride: [`You straddle ${who} and sink down onto ${g.him}; ${g.he} groans, gripping your hips as you ride ${g.him}, slow and then hard.`, `On top of ${g.him}, you set the rhythm, and ${who} arches under you, helpless and loud.`],
+        behind: [`You take ${who} from behind, one hand on the small of ${g.his} back; ${g.he} pushes back against every thrust, moaning into the sheets.`, `${cap(g.he)} braces on the bed as you move behind ${g.him}, and ${g.his} breath breaks into cries.`],
+        oral: [`You go down on ${who}, slow and deliberate, until ${g.his} fingers knot in the sheets and ${g.he} comes apart under your mouth.`, `${cap(g.his)} thighs tremble around you; ${g.he} pulls your hair and does not let go until ${g.he} is spent.`]
+      };
+      lines.push(pick(state, `x_${pose}`, X[pose] || X.lying, seed));
+    } else {
+      lines.push(pick(state, 'night2', [`Lamplight on bare shoulders; ${who}'s hands slow and certain; a warmth that asks nothing and gives everything. Morning comes gently.`, `Clothes on the floor, a whispered name, the long unhurried hours of the night with ${who}. You wake tangled together.`], seed));
+    }
   } else if (h.includes('[ROMANCE')) {
     lines.push(pick(state, 'flirt', ['A held look, a half-smile, something unspoken passing between you.', 'They laugh, and lean closer than they need to.'], seed));
   } else if (h.includes('STORY DECISION')) {

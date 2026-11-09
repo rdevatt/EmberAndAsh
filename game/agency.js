@@ -185,6 +185,16 @@ function enforcePlayerVoice(narrative, input) {
   return text.replace(/[ \t]{2,}/g, ' ').replace(/\s+([.,!?])/g, '$1').replace(/^[\s,.]+/, '').trim();
 }
 
+// Clothing is the player's to change too: "I undress", "I get dressed".
+const UNDRESS = /\b(undress(?:es|ing)?|strip(?:s|ping)?(?: naked| off)?|take off (?:all )?my clothes|get(?:ting)? naked|disrob(?:e|es|ing)|shed my clothes|bathe|bathing|skinny[- ]dip)\b/i;
+const DRESS = /\b(get(?:ting)? dressed|put (?:my )?clothes (?:back )?on|put on my clothes|dress myself|put my (?:armou?r|clothes) (?:back )?on|pull on my|don my)\b/i;
+function updateDress(state, input) {
+  const t = stripQuotes(input);
+  if (DRESS.test(t)) { state.undressed = false; return 'dressed'; }
+  if (UNDRESS.test(t)) { state.undressed = true; return 'undressed'; }
+  return null;
+}
+
 const PROMPT_RULES = `PLAYER AGENCY — ABSOLUTE:
 - The player alone decides what their character does and says. You narrate the world around those choices and never add to them.
 - You MAY narrate the player's stated action, in the second person ("You walk to the bar…").
@@ -196,5 +206,5 @@ const PROMPT_RULES = `PLAYER AGENCY — ABSOLUTE:
 
 module.exports = {
   extractSpeech, voiceDescribed, toSecondPerson, playerLine, quotesIn,
-  weaponIntent, updateWeaponInHand, enforcePlayerVoice, PROMPT_RULES
+  weaponIntent, updateWeaponInHand, enforcePlayerVoice, updateDress, PROMPT_RULES
 };

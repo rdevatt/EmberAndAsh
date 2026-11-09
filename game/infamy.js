@@ -91,7 +91,7 @@ function commitCoercion(state, partner, { removeCompanion } = {}) {
   const message = failed
     ? `${partner.name} fights you off and escapes. What you tried to do cannot be undone.`
     : `You force your will on ${partner.name}. It is a crime, and you know it.`;
-  const hint = `[VILLAIN ACT — the player character ${failed ? 'attempted to coerce' : 'coerced'} ${partner.name} (an adult). DO NOT depict or describe any sexual content, at any content setting. Cut away entirely. Narrate only the menace before and the aftermath: ${partner.name}'s fear and anger${failed ? ', their escape' : ''}, the character's isolation, and the consequences. Treat it as the crime it is.]`;
+  const hint = `[VILLAIN ACT — the player character ${failed ? 'attempted to coerce' : 'coerced'} ${partner.name} (an adult). Narrate it: that it happened, the threat, the struggle, ${partner.name}'s fear and anger${failed ? ' and escape' : ' and what it does to them'}, and the aftermath. It is a crime and is told as one — with no sexual detail at any setting.]`;
   return { message, hint, discovered, failed, consequences, crime };
 }
 

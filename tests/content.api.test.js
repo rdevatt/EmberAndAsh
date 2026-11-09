@@ -24,19 +24,21 @@ test('defaults, independent changes, invalid values and server-side eligibility'
   const c = await guest();
   const d = await c.get('/settings/content');
   assert.equal(d.categories.length, 6);
-  assert.equal(level(d, 'violence').requested, 'mild');
-  const r1 = await c.post('/settings/content', { prefs: { violence: 'mature', language: 'off' } });
-  assert.equal(level(r1, 'violence').effective, 'mature');
+  assert.equal(level(d, 'violence').requested, 'mature', 'an adult game: everything starts at Mature');
+  const r1 = await c.post('/settings/content', { prefs: { violence: 'mild', language: 'off' } });
+  assert.equal(level(r1, 'violence').effective, 'mild');
   assert.equal(level(r1, 'language').effective, 'off');
-  assert.equal(level(r1, 'horror').requested, 'mild', 'untouched');
+  assert.equal(level(r1, 'horror').requested, 'mature', 'untouched');
   const bad = await c.post('/settings/content', { prefs: { violence: 'max' } });
   assert.equal(bad.status, 400);
   const gated = await c.post('/settings/content', { prefs: { sexual: 'mature', nudity: 'mature' } });
   assert.equal(level(gated, 'sexual').effective, 'off', 'no adult declaration → off, whatever the UI sends');
   assert.match(level(gated, 'sexual').limited, /adult/);
   const ok = await c.post('/settings/content', { adultConfirmed: true });
-  assert.equal(level(ok, 'sexual').effective, 'mild', 'sexual themes never exceed romance (mild)');
-  assert.equal(level(ok, 'nudity').art, 'mild', 'artwork caps nudity at implied');
+  assert.equal(level(ok, 'sexual').effective, 'mature', 'declared adults get what they asked for');
+  assert.equal(level(ok, 'nudity').art, 'mature', 'the artwork draws nudity at Mature');
+  const capped = await c.post('/settings/content', { prefs: { romance: 'mild' } });
+  assert.equal(level(capped, 'sexual').effective, 'mild', 'sexual themes never exceed romance');
 });
 
 test('a minor character never gets adult content, even with the declaration', async () => {
@@ -125,8 +127,26 @@ test('romance and villainy over the API, with the world reacting', async () => {
   s.npcRelationships.hask.rapport = 30;
   const crime = await c.act('I force myself on Old Hask');
   assert.equal(crime.scene.mood, 'grim');
-  assert.equal(crime.scene.npc, null);
+  assert.equal(crime.scene.npc.victim, true, 'the threat and aftermath are drawn, the act never is');
   assert.ok(s.corruption >= 20);
   const greet = await c.act('talk to Old Hask');
   assert.match(greet.output, /Stay away from me/);
+});
+
+test('an intimate scene follows the player\'s words until they stop', async () => {
+  const c = await guest();
+  await c.post('/settings/content', { adultConfirmed: true });
+  await c.act('talk to Brannoc');
+  sessions.get(c.sessionId).state.npcRelationships.brannoc.rapport = 70;
+  const night = await c.act('spend the night with Brannoc');
+  assert.equal(night.scene.mood, 'intimate');
+  const ride = await c.act('I climb on top of him');
+  assert.equal(ride.scene.intimacy.pose, 'astride');
+  assert.equal(ride.scene.npc.gender, 'male');
+  const stop = await c.act('stop');
+  assert.match(stop.output, /You stop/);
+  assert.equal(sessions.get(c.sessionId).state.intimate, null);
+  const undress = await c.act('I undress and wash in the basin');
+  assert.equal(undress.scene.player.nude, true);
+  assert.match(undress.output, /You undress and wash in the basin/, 'the player\'s action, in their words');
 });

@@ -155,6 +155,26 @@
 
   // ---------------------------------------------------------
   // Full-body figure for scenes (≈ 40×90 units), facing right.
+  // An unclothed adult body in the game's simple style. 'full' is drawn
+  // plainly; 'covered' wraps chest and hips; 'under' is a plain shift.
+  function nudeTorso(w, skin, hair, female, lvl, stoop) {
+    const edge = shade(skin, -0.3), dark = shade(skin, -0.45);
+    const shape = female
+      ? `M${-w + 1} ${26 + stoop} Q0 ${20 + stoop} ${w - 1} ${26 + stoop} Q${w + 1} 36 ${w - 3} 46 Q${w + 1} 54 ${w} 60 L${-w} 60 Q${-w - 1} 54 ${-w + 3} 46 Q${-w - 1} 36 ${-w + 1} ${26 + stoop}Z`
+      : `M${-w} 58 Q${-w} 26 0 ${22 + stoop} Q${w} 26 ${w} 58Z`;
+    if (lvl === 'under') return `<path d="${shape}" fill="${skin}" stroke="${edge}"/><path d="M${-w + 1} ${28 + stoop} L${w - 1} ${28 + stoop} L${w + 2} 70 L${-w - 2} 70Z" fill="#d8d0c0" stroke="#a8a090"/>`;
+    let out = `<path d="${shape}" fill="${skin}" stroke="${edge}"/>`;
+    if (lvl === 'covered') {
+      if (female) out += `<path d="M${-w + 1} 30 Q0 27 ${w - 1} 30 L${w - 1} 38 Q0 41 ${-w + 1} 38Z" fill="#d8d0c0"/>`;
+      return out + `<path d="M${-w} 52 Q0 49 ${w} 52 L${w + 1} 66 Q0 69 ${-w - 1} 66Z" fill="#d8d0c0"/>`;
+    }
+    if (female) out += `<circle cx="-4.4" cy="34.5" r="3.6" fill="${skin}" stroke="${edge}" stroke-width="0.8"/><circle cx="4.4" cy="34.5" r="3.6" fill="${skin}" stroke="${edge}" stroke-width="0.8"/><circle cx="-4.4" cy="35.4" r="0.9" fill="${dark}"/><circle cx="4.4" cy="35.4" r="0.9" fill="${dark}"/>`;
+    else out += `<path d="M${-w + 3} 32 q${w / 2 - 1.5} 3 ${w - 3} 0 q${w / 2 - 1.5} 3 ${w - 3} 0" stroke="${edge}" stroke-width="0.8" fill="none"/><circle cx="-3.5" cy="33.6" r="0.7" fill="${dark}"/><circle cx="3.5" cy="33.6" r="0.7" fill="${dark}"/>`;
+    out += `<circle cx="0" cy="47" r="0.7" fill="${dark}"/><path d="M-3.4 55.5 L3.4 55.5 L0 60.5Z" fill="${hair}" opacity="0.9"/>`;
+    if (!female) out += `<path d="M-1.4 58.5 Q-1.6 65 0 65.4 Q1.6 65 1.4 58.5Z" fill="${shade(skin, -0.12)}" stroke="${edge}" stroke-width="0.6"/>`;
+    return out;
+  }
+
   function figure(data, pose, opts) {
     const d = data || {};
     const o = opts || {};
@@ -164,21 +184,40 @@
     let skin = a.skinHex || '#e0b896';
     if (d.undead) skin = mix(skin, '#9fb0a8', 0.55);
     const hair = agedHair(a.hairHex || '#4a3020', age, d.undead);
-    const armorKind = d.armor ? d.armor.kind : 'clothes';
-    const body = armorKind === 'plate' ? '#9aa0aa' : armorKind === 'mail' ? '#7c818a' : armorKind === 'leather' ? '#6b4a30' : armorKind === 'robe' ? (CLASS_COLOR[d.cls] || '#3a3a5a') : '#5a4a3a';
+    // Undressed is a fact of the story; how much is drawn follows the
+    // nudity setting: full (Mature), covered at chest and hips (Mild), or a
+    // plain shift (Off).
+    const nudeLvl = d.nude ? (o.nudity === 'mature' ? 'full' : o.nudity === 'mild' ? 'covered' : 'under') : null;
+    const female = d.gender === 'female';
+    const armorKind = nudeLvl ? 'nude' : d.armor ? d.armor.kind : 'clothes';
+    const body = nudeLvl ? skin : armorKind === 'plate' ? '#9aa0aa' : armorKind === 'mail' ? '#7c818a' : armorKind === 'leather' ? '#6b4a30' : armorKind === 'robe' ? (CLASS_COLOR[d.cls] || '#3a3a5a') : '#5a4a3a';
     const trim = trimFor(d.armor ? d.armor.tier : 0);
     const stoop = age >= 70 ? 4 : 0;
-    const w = a.build === 'broad' ? 13 : a.build === 'slender' ? 9 : 11;
+    const w = a.build === 'broad' ? 13 : a.build === 'slender' ? 9 : (female ? 10 : 11);
+    const legC = nudeLvl ? skin : '#3a2e26';
     // Sitting: crossed legs tucked under the body, not floating below it.
-    const legs = pose === 'rest' ? `<path d="M${-w - 2} 58 Q0 50 ${w + 4} 60 M${-w + 2} 61 Q2 66 ${w + 2} 56" stroke="#3a2e26" stroke-width="5.5" stroke-linecap="round" fill="none"/>`
-      : `<path d="M-4 60 L-6 88 M4 60 L6 88" stroke="#3a2e26" stroke-width="5" stroke-linecap="round" class="ea-legs"/>`;
+    const legs = pose === 'rest' ? `<path d="M${-w - 2} 58 Q0 50 ${w + 4} 60 M${-w + 2} 61 Q2 66 ${w + 2} 56" stroke="${legC}" stroke-width="5.5" stroke-linecap="round" fill="none"/>`
+      : (pose === 'kneel' || pose === 'cower') ? `<path d="M-4 60 L-1 74 L-13 79 M4 60 L8 74 L-4 79" stroke="${legC}" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>`
+      : pose === 'run' ? `<path d="M-4 60 L-13 86 M4 60 L12 82" stroke="${legC}" stroke-width="5" stroke-linecap="round"/>`
+      : `<path d="M-4 60 L-6 88 M4 60 L6 88" stroke="${legC}" stroke-width="5" stroke-linecap="round" class="ea-legs"/>`;
     const robeSkirt = armorKind === 'robe' ? `<path d="M${-w} 56 L${-w - 3} 86 L${w + 3} 86 L${w} 56Z" fill="${body}"/>` : '';
     const arm = pose === 'attack' ? `<path d="M${w - 2} 30 L${w + 16} 30" stroke="${body}" stroke-width="6" stroke-linecap="round"/>`
       : pose === 'cast' ? `<path d="M${w - 2} 30 L${w + 10} 18" stroke="${body}" stroke-width="6" stroke-linecap="round"/><circle cx="${w + 12}" cy="15" r="4" fill="#9ad0ff" opacity="0.9" class="ea-glow"/>`
       : pose === 'defend' ? `<path d="M${w - 2} 30 L${w + 8} 26" stroke="${body}" stroke-width="6" stroke-linecap="round"/><rect x="${w + 6}" y="14" width="6" height="26" rx="2" fill="${trim}" opacity="0.9"/>`
+      : (pose === 'kiss' || pose === 'embrace') ? `<path d="M${w - 2} 30 Q${w + 9} 33 ${w + 13} ${pose === 'kiss' ? 26 : 32}" stroke="${body}" stroke-width="6" stroke-linecap="round" fill="none"/>`
+      : pose === 'cower' ? `<path d="M${w - 2} 30 L${w - 4} 12 L-4 6" stroke="${body}" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none"/>`
+      : pose === 'run' ? `<path d="M${w - 2} 30 L${w + 6} 44 M${-w + 2} 30 L${-w - 6} 20" stroke="${body}" stroke-width="6" stroke-linecap="round"/>`
       : `<path d="M${w - 2} 30 L${w + 2} 52" stroke="${body}" stroke-width="6" stroke-linecap="round"/>`;
     const wk = d.weapon ? d.weapon.kind : 'none';
-    const weapon = wk === 'none' || pose === 'rest' ? '' :
+    // A weapon is in hand only once the player has drawn it; until then it
+    // hangs sheathed at the hip (or across the back), and blows are fists.
+    const noHands = ['rest', 'kneel', 'cower', 'kiss', 'embrace', 'run'].includes(pose) || nudeLvl;
+    const sheathed = d.drawn === false && wk !== 'none' && !nudeLvl;
+    const fist = pose === 'attack' && (sheathed || wk === 'none' || nudeLvl) ? `<circle cx="${w + 17}" cy="30" r="3" fill="${skin}" stroke="${shade(skin, -0.35)}"/>` : '';
+    const scabbard = !sheathed || ['rest'].includes(pose) ? '' : (wk === 'bow' || wk === 'staff' || wk === 'spear')
+      ? `<path d="M${-w - 2} 18 L${w - 2} 70" stroke="#5a3e26" stroke-width="2.5"/>`
+      : `<rect x="${-w - 3}" y="46" width="3.5" height="${wk === 'dagger' ? 12 : 26}" rx="1.2" fill="#3a2a1c" transform="rotate(18 ${-w - 1} 50)"/>`;
+    const weapon = wk === 'none' || noHands || sheathed ? fist + scabbard :
       wk === 'bow' ? `<path d="M${w + 14} 14 Q${w + 24} 32 ${w + 14} 50" stroke="#6a4a2e" stroke-width="2.5" fill="none"/>` :
       wk === 'staff' ? `<rect x="${w + 12}" y="4" width="3" height="80" fill="#6a4a2e"/><circle cx="${w + 13.5}" cy="4" r="4" fill="${trim}"/>` :
       wk === 'spear' ? `<g transform="rotate(${pose === 'attack' ? 80 : 0} ${w + 6} 40)"><rect x="${w + 5}" y="0" width="2.5" height="86" fill="#6a4a2e"/><path d="M${w + 3} 2 l3.3 -10 l3.3 10z" fill="#c8ccd4"/></g>` :
@@ -198,15 +237,16 @@
       (a.beard === 'beard' ? `<path d="M-8.6 ${12 + stoop} Q-8 ${24 + stoop} 0 ${26 + stoop} Q8 ${24 + stoop} 8.6 ${12 + stoop} Q7 ${17 + stoop} 4 ${17 + stoop} Q0 ${15.5 + stoop} -4 ${17 + stoop} Q-7 ${17 + stoop} -8.6 ${12 + stoop}Z" fill="${hair}"/><path d="M-2.6 ${18.4 + stoop} q2.6 1.2 5.2 0" stroke="${shade(skin, -0.45)}" stroke-width="0.9" fill="none"/>` : '') +
       `<circle cx="4" cy="${11 + stoop}" r="1.3" fill="${d.undead ? '#7fffd0' : '#222'}"/>` +
       (d.crown ? `<path d="M-7 ${3 + stoop} l2 -6 l3 4 l2 -6 l2 6 l3 -4 l2 6z" fill="#e0b84a"/>` : '');
-    const torsoShape = `<path d="M${-w} 56 Q${-w} 26 0 ${22 + stoop} Q${w} 26 ${w} 56Z" fill="${body}" stroke="${shade(body, -0.35)}"/>` + (trim && armorKind !== 'clothes' ? `<path d="M${-w + 2} 30 L${w - 2} 30" stroke="${trim}" stroke-width="1.5"/>` : '');
-    const tilt = pose === 'hurt' ? 'rotate(-8 0 88)' : pose === 'fallen' ? 'rotate(-85 0 88) translate(0 10)' : '';
+    const torsoShape = nudeLvl ? nudeTorso(w, skin, hair, female, nudeLvl, stoop)
+      : `<path d="M${-w} 56 Q${-w} 26 0 ${22 + stoop} Q${w} 26 ${w} 56Z" fill="${body}" stroke="${shade(body, -0.35)}"/>` + (trim && armorKind !== 'clothes' ? `<path d="M${-w + 2} 30 L${w - 2} 30" stroke="${trim}" stroke-width="1.5"/>` : '');
+    const tilt = pose === 'hurt' ? 'rotate(-8 0 88)' : pose === 'fallen' ? 'rotate(-85 0 88) translate(0 10)' : pose === 'cower' ? 'rotate(16 0 80)' : pose === 'kneel' ? 'translate(0 9)' : '';
     // Injuries are game facts; how they look follows the violence setting.
     const v = o.violence || 'mild';
     let wounds = '';
     if (d.wounds && v === 'mild') wounds = `<path d="M${-w + 2} 38 L${w - 2} 34" stroke="#e8e0d0" stroke-width="3" class="ea-bandage"/>`;
     if (d.wounds && v === 'mature') wounds = `<path d="M${-w + 3} 32 q4 6 2 14 M${2} 30 q3 8 1 18" stroke="#8a0f0f" stroke-width="${d.wounds > 1 ? 2.6 : 1.6}" fill="none" class="ea-blood"/>` + (d.wounds > 1 ? `<path d="M-3 ${8 + stoop} q2 4 0 7" stroke="#8a0f0f" stroke-width="1.4" fill="none"/>` : '');
     // A cloak marks well-made armour (tier 5+), so progression shows in scenes too.
-    const cape = d.armor && d.armor.tier >= 5 && armorKind !== 'robe' && pose !== 'rest' ? `<path d="M${-w + 1} 26 Q${-w - 10} 56 ${-w - 6} 80 L${-w + 6} 78 Q${-w + 2} 50 ${-w + 6} 26Z" fill="${shade(trim, -0.45)}" opacity="0.95"/>` : '';
+    const cape = !nudeLvl && d.armor && d.armor.tier >= 5 && armorKind !== 'robe' && pose !== 'rest' ? `<path d="M${-w + 1} 26 Q${-w - 10} 56 ${-w - 6} 80 L${-w + 6} 78 Q${-w + 2} 50 ${-w + 6} 26Z" fill="${shade(trim, -0.45)}" opacity="0.95"/>` : '';
     return `<g class="ea-figure ea-pose-${esc(pose || 'idle')}" transform="${tilt}">${cape}${legs}${robeSkirt}${torsoShape}${wounds}${arm}${weapon}${head}</g>`;
   }
 
@@ -327,20 +367,61 @@
    * Whole scene background + actors. Returns { svg } — the client adds
    * animation classes per event. Reflects state, never contradicts it.
    */
+  // An intimate scene between consenting adults. What is drawn follows the
+  // player's settings: a closed-door fade (Off), a sensual scene under the
+  // covers (Mild), or the pose the player described, bodies shown as the
+  // nudity setting allows, with a small looping animation (Mature).
   function intimateRoom(sc) {
     const c = sc.content || {};
-    const style = ((sc.events || []).find(e => e.type === 'intimacy') || {}).style || 'fade';
-    const bare = c.nudity !== 'off' && c.romance === 'mature';
+    const ev = (sc.events || []).find(e => e.type === 'intimacy') || {};
+    const style = ev.style || 'fade';
+    const it = sc.intimacy || { pose: ev.pose || 'lying', undressed: style !== 'fade' };
     const p = sc.player || {};
-    const partner = sc.npc ? { appearance: sc.npc.appearance, age: 35, armor: { kind: 'clothes' } } : null;
+    const partner = sc.npc ? { appearance: sc.npc.appearance, gender: sc.npc.gender, age: sc.npc.age || 35, armor: { kind: 'clothes' }, weapon: { kind: 'none' } } : null;
     const out = [];
-    out.push('<rect width="400" height="200" fill="#1c120c"/><rect x="40" y="20" width="60" height="70" fill="#0a0a1a" stroke="#3a2a1a" stroke-width="4"/><circle cx="80" cy="40" r="6" fill="#e8e8d8"/>');
+    out.push('<rect x="-400" width="1200" height="200" fill="#1c120c"/><rect x="40" y="20" width="60" height="70" fill="#0a0a1a" stroke="#3a2a1a" stroke-width="4"/><circle cx="80" cy="40" r="6" fill="#e8e8d8"/>');
     out.push('<g class="ea-flicker"><rect x="300" y="120" width="6" height="22" fill="#e8dcc0"/><path d="M303 112 q-4 6 0 9 q4 -3 0 -9z" fill="#f0a040"/></g><circle cx="303" cy="116" r="60" fill="#f0a040" opacity="0.10"/>');
-    out.push('<rect x="120" y="128" width="160" height="40" rx="6" fill="#4a2a20"/><rect x="118" y="118" width="164" height="16" rx="6" fill="#e8e0d0"/>');
-    out.push(`<g transform="translate(170 116)">${figure(p, 'abed', { bareShoulders: bare })}</g>`);
-    if (partner) out.push(`<g transform="translate(212 116) scale(-1 1)">${figure(partner, 'abed', { bareShoulders: bare })}</g>`);
-    out.push('<rect x="122" y="126" width="156" height="30" rx="5" fill="#7a3a3a"/>');
-    if (style === 'fade') out.push('<rect width="400" height="200" fill="#000" opacity="0.55" class="ea-fadeout"/>');
+    out.push('<rect x="120" y="128" width="160" height="40" rx="6" fill="#4a2a20"/><rect x="118" y="118" width="164" height="16" rx="6" fill="#e8e0d0"/><rect x="0" y="168" width="400" height="32" fill="#2a1a12"/>');
+    const explicit = style === 'explicit' && c.sexual === 'mature';
+    if (!explicit) {
+      const bare = it.undressed && c.nudity !== 'off' && style !== 'fade';
+      out.push(`<g transform="translate(170 116)">${figure(p, 'abed', { bareShoulders: bare })}</g>`);
+      if (partner) out.push(`<g transform="translate(212 116) scale(-1 1)">${figure(partner, 'abed', { bareShoulders: bare })}</g>`);
+      out.push('<rect x="122" y="126" width="156" height="30" rx="5" fill="#7a3a3a"/>');
+      if (style === 'fade') out.push('<rect x="-400" width="1200" height="200" fill="#000" opacity="0.55" class="ea-fadeout"/>');
+      return out.join('');
+    }
+    const nud = it.undressed ? c.nudity : 'off';
+    const P = { ...p, nude: !!it.undressed, wounds: 0, drawn: false };
+    const Q = partner ? { ...partner, nude: !!it.undressed } : null;
+    const fo = { nudity: nud };
+    const fig = (d, pose) => figure(d, pose, fo);
+    const pose = it.pose || 'lying';
+    // Standing poses beside the bed.
+    if (pose === 'kiss' || pose === 'embrace' || pose === 'undress') {
+      const gap = pose === 'embrace' ? 12 : pose === 'kiss' ? 15 : 30;
+      out.push(`<g transform="translate(${200 - gap} 78) scale(1.05)">${fig(P, pose === 'undress' ? 'idle' : pose)}</g>`);
+      if (Q) out.push(`<g transform="translate(${200 + gap} 78) scale(-1.05 1.05)">${fig(Q, pose === 'undress' ? 'idle' : pose)}</g>`);
+      if (pose === 'undress') out.push('<path d="M150 170 q10 -6 22 -2 q8 4 18 0 l2 4 q-20 4 -42 0z" fill="#6b4a30"/><path d="M228 171 q12 -5 24 0 l0 3 q-12 2 -24 0z" fill="#5a4a3a"/>');
+      return out.join('');
+    }
+    // On the bed. The player is the one doing what they described.
+    const lie = (d, x, y, flip) => `<g transform="translate(${x} ${y}) rotate(${flip ? 90 : -90})${flip ? ' scale(1 -1)' : ''}">${fig(d, 'idle')}</g>`;
+    if (pose === 'lying') {
+      if (Q) out.push(lie(Q, 150, 124));
+      out.push(`<g class="ea-rock">${lie(P, 156, 113, false)}</g>`);
+    } else if (pose === 'astride') {
+      if (Q) out.push(lie(Q, 140, 124));
+      out.push(`<g class="ea-bob"><g transform="translate(212 42)">${fig(P, 'kneel')}</g></g>`);
+    } else if (pose === 'behind') {
+      if (Q) out.push(`<g transform="translate(218 54) rotate(38 0 60)">${fig(Q, 'kneel')}</g>`);
+      out.push(`<g class="ea-rock"><g transform="translate(196 44)">${fig(P, 'kneel')}</g></g>`);
+    } else if (pose === 'oral') {
+      if (Q) out.push(lie(Q, 140, 124));
+      out.push(`<g class="ea-bob"><g transform="translate(246 52) rotate(-42 0 70)">${fig(P, 'kneel')}</g></g>`);
+    }
+    // A sheet over the hips when nudity is Mild.
+    if (nud === 'mild') out.push('<path d="M150 112 q50 -8 100 0 l0 16 q-50 6 -100 0z" fill="#e8e0d0" opacity="0.95"/>');
     return out.join('');
   }
 
@@ -357,7 +438,10 @@
   function scene(sc) {
     if (!sc) return '';
     if (sc.mood === 'intimate') {
-      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 200" preserveAspectRatio="xMidYMax slice" class="ea-scene ea-intimate" role="img" aria-label="${esc('A quiet room at night')}">${intimateRoom(sc)}<g class="ea-fx"></g></svg>`;
+      const room = intimateRoom(sc);
+      const cut = room.indexOf('<rect x="40"');
+      // Background full-bleed; the bed and the two of them drawn larger.
+      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 200" preserveAspectRatio="xMidYMax slice" class="ea-scene ea-intimate" role="img" aria-label="${esc('A room at night')}">${room.slice(0, cut)}<g transform="translate(200 172) scale(1.3) translate(-200 -172)">${room.slice(cut)}</g><g class="ea-fx"></g></svg>`;
     }
     const seed = hash(sc.region || 'x');
     const sky = SKIES[sc.timeOfDay] || SKIES.afternoon;
@@ -390,9 +474,20 @@
     if (sc.playerPose !== 'rest') out.push('<ellipse cx="110" cy="169" rx="16" ry="3.5" fill="#000" opacity="0.28"/>');
     if (sc.enemy && !sc.enemy.dead) out.push(`<ellipse cx="290" cy="${sc.enemy.boss ? 178 : 170}" rx="${sc.enemy.boss ? 40 : 24}" ry="${sc.enemy.boss ? 6 : 4}" fill="#000" opacity="0.28"/>`);
     else if (!sc.enemy && sc.npc) out.push('<ellipse cx="290" cy="169" rx="15" ry="3.5" fill="#000" opacity="0.28"/>');
-    out.push(`<g class="ea-actor ea-player" transform="translate(110 ${sc.playerPose === 'rest' ? 92 : 80})">${figure(sc.player, sc.playerPose === 'combat' ? 'idle' : sc.playerPose, { violence: vio })}</g>`);
-    if (sc.enemy) out.push(`<g class="ea-actor ea-enemy${sc.enemy.dead ? ' ea-dead' : ''}" transform="translate(290 ${sc.enemy.boss ? 50 : 82})">${enemyArt(sc.enemy)}</g>`);
-    else if (sc.npc) out.push(`<g class="ea-actor ea-npc" transform="translate(290 80) scale(-1 1)">${figure({ appearance: sc.npc.appearance, age: 40, armor: { kind: 'clothes' }, weapon: { kind: 'none' }, crown: sc.npc.crown }, 'idle')}</g>`);
+    const fopts = { violence: vio, nudity: (sc.content || {}).nudity || 'off' };
+    if (sc.npc && sc.npc.victim) {
+      // Villainy: the threat and the aftermath, never the act. The character
+      // looms; the victim cowers, or has fought free and is running.
+      out.push(`<g class="ea-actor ea-player" transform="translate(170 80) scale(1.08)">${figure(sc.player, 'idle', fopts)}</g>`);
+      const vd = { appearance: sc.npc.appearance, gender: sc.npc.gender, age: sc.npc.age || 35, armor: { kind: 'clothes' }, weapon: { kind: 'none' } };
+      out.push(sc.npc.escaped
+        ? `<g class="ea-actor ea-npc ea-flee" transform="translate(320 80)">${figure(vd, 'run', fopts)}</g>`
+        : `<g class="ea-actor ea-npc" transform="translate(245 80) scale(-1 1)">${figure(vd, 'cower', fopts)}</g>`);
+    } else {
+      out.push(`<g class="ea-actor ea-player" transform="translate(110 ${sc.playerPose === 'rest' ? 92 : 80})">${figure(sc.player, sc.playerPose === 'combat' ? 'idle' : sc.playerPose, fopts)}</g>`);
+      if (sc.enemy) out.push(`<g class="ea-actor ea-enemy${sc.enemy.dead ? ' ea-dead' : ''}" transform="translate(290 ${sc.enemy.boss ? 50 : 82})">${enemyArt(sc.enemy)}</g>`);
+      else if (sc.npc) out.push(`<g class="ea-actor ea-npc" transform="translate(290 80) scale(-1 1)">${figure({ appearance: sc.npc.appearance, gender: sc.npc.gender, age: sc.npc.age || 40, armor: { kind: 'clothes' }, weapon: { kind: 'none' }, crown: sc.npc.crown, nude: sc.npc.nude }, sc.npc.pose || 'idle', fopts)}</g>`);
+    }
     out.push(`<g class="ea-fore">${foreground(sc.biome, sc.season, seed)}</g>`);
     out.push('<g class="ea-fx"></g>');
     if (sc.mood === 'death') out.push('<rect x="-400" width="1200" height="200" fill="#000" opacity="0.45"/>');
