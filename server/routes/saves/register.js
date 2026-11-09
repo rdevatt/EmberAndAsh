@@ -151,6 +151,7 @@ module.exports = function registerSaveRoutes(app, deps) {
     }
     const freshState = newCreationState();
     if (req.session.state && req.session.state.nsfwEnabled === false) freshState.nsfwEnabled = false;
+    require('../../../game/content-prefs').inherit(req.session.state, freshState);
 
     req.session.state    = freshState;
     req.session.saveSlot = req.session.playerId ? (req.session.saveSlot || 1) : null;

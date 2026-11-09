@@ -131,6 +131,7 @@ module.exports = function registerAuthRoutes(app, deps) {
       saveId:   resolved.saveId || null
     });
     resolved.state.nsfwEnabled = !!player.nsfw_enabled && ((resolved.state.character && resolved.state.character.age) || 0) >= 18;
+    syncContentPrefs(player, resolved.state);
     await persistSession(newSessionId);
 
     let rememberToken = null;
@@ -156,6 +157,7 @@ module.exports = function registerAuthRoutes(app, deps) {
     if (!player) return res.status(401).json({ error: 'Token expired or invalid.' });
 
     const resolved     = resolveLoginState(player.id, null);
+    syncContentPrefs(db.getPlayerById(player.id), resolved.state);
     const newSessionId = uuidv4();
     setSession(newSessionId, {
       state:    resolved.state,
@@ -174,6 +176,20 @@ module.exports = function registerAuthRoutes(app, deps) {
       nsfwEnabled:  !!player.nsfw_enabled
     }));
   });
+
+  // Content preferences belong to the player: the account's choices apply to
+  // whichever character is loaded; a guest's choices are kept on first login.
+  function syncContentPrefs(player, state) {
+    const cp = require('../../../game/content-prefs');
+    let settings = {};
+    try { settings = JSON.parse((player && player.settings) || '{}'); } catch (e) { settings = {}; }
+    if (settings.contentPrefs) cp.applyAccountSettings(state, settings);
+    else if (state.contentPrefs && player) {
+      settings.contentPrefs = { ...state.contentPrefs };
+      settings.adultConfirmed = !!state.adultConfirmed;
+      db.updatePlayerSettings(player.id, settings);
+    }
+  }
 
   app.post('/api/auth/logout', (req, res) => {
     const { rememberToken } = req.body || {};

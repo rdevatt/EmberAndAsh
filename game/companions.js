@@ -117,6 +117,8 @@ function checkRequirements(state, id) {
   if (req.chapterReached && (camp.chapter || 1) < req.chapterReached && !(camp.completed || []).includes(req.chapterReached)) reasons.push(`${c.name} has no reason to join you yet (reach Chapter ${req.chapterReached}).`);
   if (id === 'maren' && camp.flags && camp.flags.marenDied) reasons.push('Maren Holt is dead.');
   if (c.region && state.character.region !== c.region) reasons.push(`${c.name} is in ${REGIONS[c.region].label}.`);
+  if ((state.infamy || 0) >= 40 && c.faction !== 'choir') reasons.push(`${c.name} has heard what kind of person you are, and will not travel with you.`);
+  if (state.npcRelationships && state.npcRelationships[id] && state.npcRelationships[id].wronged) reasons.push(`${c.name} will never forgive you.`);
   return reasons;
 }
 

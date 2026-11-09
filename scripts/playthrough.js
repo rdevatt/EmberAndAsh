@@ -29,11 +29,23 @@ const POSTGAME = parseInt(arg('--postgame', '0'), 10);      // actions to play t
 const GENERATION = parseInt(arg('--generation', '0'), 10);  // actions to play a new character in the same world
 h.seedRandom(SEED);
 
+const MAGE_BG = 'I was an apprentice to a hedge mage, studying scrolls';
+const TEMPLE_BG = 'I was an acolyte at a temple, raised in prayer';
 const STYLES = {
-  fighter: { attack: 'I feint left and slash at its torso with a quick, precise strike of my sword', points: ['str', 'str', 'vit', 'dex'], craft: 'I work the metal at the forge, hammering the iron on the anvil', recipe: 'forge a sword', weapon: 'sword', bg: '1' },
-  wizard:  { attack: 'I cast a spell, tracing an arcane rune and invoking a bolt of magic', points: ['int', 'int', 'vit', 'wis'], craft: 'I study the old scroll and research its lore', recipe: 'make a spell tome', weapon: 'staff', bg: 'I was an apprentice to a hedge mage, studying scrolls' },
-  ranger:  { attack: 'I aim and shoot an arrow from my bow at its torso, tracking its movement', points: ['dex', 'dex', 'vit', 'wis'], craft: 'I hunt and track game through the wilderness, skinning the trail', recipe: 'make a longbow', weapon: 'bow', bg: '1' }
+  fighter:   { attack: 'I feint left and slash at its torso with a quick, precise strike of my sword', points: ['str', 'str', 'vit', 'dex'], craft: 'I work the metal at the forge, hammering the iron on the anvil', recipe: 'forge a sword', weapon: 'sword', bg: '1' },
+  barbarian: { attack: 'I roar with fury and smash it with a brutal, savage swing', points: ['str', 'vit', 'str', 'dex'], craft: 'I work the metal at the forge, hammering the iron on the anvil', recipe: 'forge a sword', weapon: 'sword', bg: '1' },
+  rogue:     { attack: 'I sneak into the shadows and backstab it with my dagger in a silent ambush', points: ['dex', 'dex', 'vit', 'str'], craft: 'I scout ahead and track the trail', recipe: 'make leather armor', weapon: 'dagger', bg: '1' },
+  ranger:    { attack: 'I aim and shoot an arrow from my bow at its torso, tracking its movement', points: ['dex', 'dex', 'vit', 'wis'], craft: 'I hunt and track game through the wilderness, skinning the trail', recipe: 'make a longbow', weapon: 'bow', bg: '1' },
+  monk:      { attack: 'I focus my breath and strike with a disciplined palm strike and a spinning kick', points: ['dex', 'wis', 'vit', 'dex'], craft: 'I hunt and track game through the wilderness', recipe: 'make leather armor', weapon: 'staff', bg: '1' },
+  paladin:   { attack: 'I swear my oath and strike with righteous holy justice, protecting the weak', points: ['str', 'wis', 'vit', 'str'], craft: 'I work the metal at the forge, hammering the iron on the anvil', recipe: 'forge a sword', weapon: 'sword', bg: TEMPLE_BG },
+  cleric:    { attack: 'I pray, bless my faith, and let healing light cure and ward me as I strike', points: ['wis', 'vit', 'wis', 'int'], craft: 'I brew a remedy from herbs and mix a compound', recipe: 'brew 2 healing potions', weapon: 'staff', bg: TEMPLE_BG },
+  druid:     { attack: 'I call on nature and the wild earth, roots and growth rising from the grove', points: ['wis', 'vit', 'wis', 'dex'], craft: 'I brew a remedy from herbs and mix a compound', recipe: 'brew 2 healing potions', weapon: 'staff', bg: '1' },
+  wizard:    { attack: 'I cast a spell, tracing an arcane rune and invoking a bolt of magic', points: ['int', 'int', 'vit', 'wis'], craft: 'I study the old scroll and research its lore', recipe: 'make a spell tome', weapon: 'staff', bg: MAGE_BG },
+  sorcerer:  { attack: 'I unleash raw power, letting wild magic surge and overflow from within', points: ['cha', 'int', 'vit', 'cha'], craft: 'I study the old scroll and research its lore', recipe: 'make a spell tome', weapon: 'staff', bg: MAGE_BG },
+  warlock:   { attack: 'I invoke my dark pact and the eldritch power of my patron to drain and consume it', points: ['cha', 'int', 'vit', 'cha'], craft: 'I study the old scroll and research its lore', recipe: 'make a spell tome', weapon: 'staff', bg: MAGE_BG },
+  bard:      { attack: 'I sing a song of mockery and perform, my music inspiring and charming my allies', points: ['cha', 'cha', 'vit', 'dex'], craft: 'I sell and trade my goods at the market, haggling a deal', recipe: 'make leather armor', weapon: 'dagger', bg: '1' }
 };
+const CASTER = ['wizard', 'sorcerer', 'warlock', 'cleric', 'druid', 'bard', 'paladin'].includes(STYLE);
 const style = STYLES[STYLE] || STYLES.fighter;
 
 // Option index (1-based) per chapter for each story path.
@@ -91,7 +103,7 @@ async function fightToEnd() {
     const abilities = (last.abilities || []).filter(a => a.ready);
     if (/defend to blunt/.test(lastOut)) input = 'I raise my guard and defend';
     else if (hpPct() < 0.35 && inv().some(i => /healing potion/.test(typeof i === 'string' ? i : i.name))) input = 'drink healing potion';
-    else if (STYLE === 'wizard' && last.character.mana < 12 && inv().some(i => /mana potion/.test(typeof i === 'string' ? i : i.name))) input = 'drink mana potion';
+    else if (CASTER && last.character.mana < 12 && inv().some(i => /mana potion/.test(typeof i === 'string' ? i : i.name))) input = 'drink mana potion';
     else {
       const heal = abilities.find(a => /heal|second wind|lay on|inner peace|regrowth/i.test(a.label));
       const ward = abilities.find(a => /ward|sanctuary|divine shield/i.test(a.label));
@@ -111,7 +123,8 @@ async function fightToEnd() {
 }
 
 async function recover() {
-  if (hpPct() < 0.6 && !inCombat()) {
+  const lowMana = CASTER && last.character && last.character.maxMana && last.character.mana < last.character.maxMana * 0.35;
+  if ((hpPct() < 0.6 || lowMana) && !inCombat()) {
     const r = REGIONS[region()];
     await act(r.settlement && (last.character.coin || 0) > 40 * r.tier ? 'rent a room at the inn' : 'make camp');
     if (inCombat()) await fightToEnd();
@@ -136,7 +149,7 @@ async function shop() {
   const t = tierFor(level());
   const price = 150 * (t + 1) * (t + 1);
   if (t > boughtTier && coin() > price * 1.9 + 200) {
-    const w = await act(`buy ${style.weapon === 'staff' ? 'oak staff' : style.weapon === 'bow' ? 'longbow' : 'sword'}`);
+    const w = await act(`buy ${style.weapon === 'staff' ? 'oak staff' : style.weapon === 'bow' ? 'longbow' : style.weapon === 'dagger' ? 'dagger' : 'sword'}`);
     const a = await act('buy leather armor');
     const wn = (w.output || '').match(/Bought (.+?) for/); const an = (a.output || '').match(/Bought (.+?) for/);
     let e1, e2;
@@ -150,7 +163,7 @@ async function shop() {
   if ((w && w.durability < 60) || (a && a.durability < 60)) await act('repair gear');
   const potions = count('healing potion');
   if (potions < 5 && coin() > 30 * r.tier * 6) await act(`buy ${5 - potions} healing potions`);
-  if (STYLE === 'wizard' && count('mana potion') < 3 && coin() > 40 * r.tier * 6) await act(`buy ${3 - count('mana potion')} mana potions`);
+  if (CASTER && count('mana potion') < 3 && coin() > 40 * r.tier * 6) await act(`buy ${3 - count('mana potion')} mana potions`);
 }
 
 // ---------- travel ----------

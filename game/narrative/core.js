@@ -281,6 +281,7 @@ function buildFullPrompt(state, playerInput) {
     buildCharacterContext(state),
     buildCombatContext(state),
     buildSceneContext(state),
+    state.character && state.character.region ? require('../content-prefs').narrationDirective(state) : '',
     buildPendingHint(state)
   ].filter(s => s && s.trim().length > 0);
 
@@ -360,6 +361,11 @@ async function callGroq(prompt, systemOverride = null, history = []) {
     const raw = response && response.choices && response.choices[0] && response.choices[0].message && response.choices[0].message.content;
     const text = typeof raw === 'string' ? sanitizeNarrative(raw) : '';
     if (text.length < 2) throw Object.assign(new Error('Malformed or empty AI response'), { status: 'malformed' });
+    // The provider declining a scene is not an outage: say so, and fall back.
+    if (isRefusal(text)) {
+      aiHealth.lastSuccessAt = Date.now();
+      return { success: false, declined: true, text: '', error: 'declined', tokens: (response.usage && response.usage.total_tokens) || 0 };
+    }
     aiHealth.failures = 0;
     aiHealth.lastSuccessAt = Date.now();
     return { success: true, text, tokens: (response.usage && response.usage.total_tokens) || 0 };
@@ -369,6 +375,13 @@ async function callGroq(prompt, systemOverride = null, history = []) {
     // Callers fall back to offline narration built from engine facts.
     return { success: false, text: '', error: err.message, tokens: 0 };
   }
+}
+
+// Typical shapes of a model declining to write something.
+const REFUSAL = /^\s*(?:I'?m sorry|I am sorry|I can(?:'|no)t|I cannot|I'?m (?:not able|unable)|I am (?:not able|unable)|I won'?t|As an AI|I must decline|I'?m not comfortable)\b/i;
+function isRefusal(text) {
+  const t = String(text || '');
+  return REFUSAL.test(t) || /\b(?:I can'?t (?:help|assist|write|continue) with that|against (?:my|the) (?:content )?(?:guidelines|policy))\b/i.test(t.slice(0, 300));
 }
 
 function __setGroqClientForTests(client) { groq = client; aiHealth.disabledUntil = 0; aiHealth.failures = 0; aiHealth.reason = null; }
@@ -728,6 +741,9 @@ async function processNarrative(state, playerInput, events = []) {
   if (!aiResult.success) {
     // AI unavailable — keep the game playable with engine-driven prose.
     aiResult.text = buildOfflineNarrative(state, playerInput, hintForFallback);
+    if (aiResult.declined) {
+      aiResult.text += '\n\n[The AI narrator declined to write this scene. The game\'s own narrator has told it instead; nothing about what happened has changed.]';
+    }
   }
 
   // Store this exchange in history for next turn
@@ -783,7 +799,8 @@ async function processNarrative(state, playerInput, events = []) {
     fullOutput,
     rightPanel:    buildRightPanelData(state),
     tokens:        aiResult.tokens,
-    aiSuccess:     aiResult.success
+    aiSuccess:     aiResult.success,
+    aiDeclined:    !!aiResult.declined
   };
 }
 
@@ -804,6 +821,7 @@ module.exports = {
   isOfflineMode,
   getNarrationStatus,
   sanitizeNarrative,
+  isRefusal,
   __setGroqClientForTests,
   buildOfflineNarrative,
 

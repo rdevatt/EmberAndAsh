@@ -491,6 +491,68 @@ document.addEventListener('DOMContentLoaded', () => {
   bind('btn-saves', () => setTimeout(loadWorldsList, 50));
 });
 
+// ---------------------------------------------
+// Mature content preferences (server enforces them; this only edits)
+// ---------------------------------------------
+function renderContentPrefs(data) {
+  const box = document.getElementById('content-prefs');
+  const note = document.getElementById('content-prefs-note');
+  const adult = document.getElementById('toggle-adult');
+  if (!box || !data || !data.categories) return;
+  if (adult) adult.checked = !!(data.eligibility && data.eligibility.adultConfirmed);
+  box.innerHTML = '';
+  for (const c of data.categories) {
+    const row = document.createElement('div');
+    row.className = 'content-row';
+    row.dataset.category = c.key;
+    const label = document.createElement('div');
+    label.className = 'content-label small';
+    label.textContent = c.label;
+    const seg = document.createElement('div');
+    seg.className = 'segmented';
+    seg.setAttribute('role', 'radiogroup');
+    seg.setAttribute('aria-label', c.label);
+    for (const lvl of ['off', 'mild', 'mature']) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'seg-btn' + (c.requested === lvl ? ' selected' : '');
+      b.dataset.level = lvl;
+      b.setAttribute('role', 'radio');
+      b.setAttribute('aria-checked', c.requested === lvl ? 'true' : 'false');
+      b.textContent = lvl === 'off' ? 'Off' : lvl === 'mild' ? 'Mild' : 'Mature';
+      b.addEventListener('click', () => saveContentPrefs({ prefs: { [c.key]: lvl } }));
+      seg.appendChild(b);
+    }
+    row.appendChild(label);
+    row.appendChild(seg);
+    if (c.limited || (c.note && c.requested !== 'off')) {
+      const n = document.createElement('div');
+      n.className = 'content-limit dim small';
+      n.textContent = c.limited ? `In effect: ${c.effective} — ${c.limited}.` : c.note;
+      row.appendChild(n);
+    }
+    box.appendChild(row);
+  }
+  if (note) note.textContent = data.eligibility ? data.eligibility.notice : '';
+}
+
+async function loadContentPrefs() {
+  const { ok, data } = await apiCall('GET', '/settings/content');
+  if (ok) renderContentPrefs(data);
+}
+
+async function saveContentPrefs(body) {
+  const { ok, data } = await apiCall('POST', '/settings/content', body);
+  if (!ok) { appendSystemMessage(`[${data.error || 'Could not save that setting.'}]`); if (data.categories) renderContentPrefs(data); return; }
+  renderContentPrefs(data);
+  refreshPanels();
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const adult = document.getElementById('toggle-adult');
+  if (adult) adult.addEventListener('change', () => saveContentPrefs({ adultConfirmed: adult.checked }));
+});
+
 // Submits a command as if the player had typed it.
 function runCommand(text) {
   if (client.inCreation || client.isLoading) return;
@@ -687,6 +749,7 @@ function updateCharCount() {
 
 function openSettings() {
   el.modalSettings.classList.remove('hidden');
+  loadContentPrefs();
   el.authStatus.textContent = client.isLoggedIn
     ? `Logged in as ${client.username}`
     : 'Guest session';
@@ -739,7 +802,7 @@ async function handleLogin() {
   localStorage.setItem('sessionId', data.sessionId);
   if (data.rememberToken) localStorage.setItem('rememberToken', data.rememberToken);
 
-  el.toggleNsfw.checked = !!data.nsfwEnabled;
+  if (el.toggleNsfw) el.toggleNsfw.checked = !!data.nsfwEnabled;
   el.inputPassword.value = '';
   clearAuthErrors();
   updateAuthUI();

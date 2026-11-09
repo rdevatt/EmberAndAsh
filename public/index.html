@@ -452,17 +452,17 @@
     <div class="modal-box">
       <div class="modal-title">SETTINGS</div>
 
-      <div class="modal-row">
-        <span>Adult content (NSFW)</span>
-        <label class="toggle">
-          <input type="checkbox" id="toggle-nsfw" />
-          <span class="toggle-slider"></span>
-        </label>
-      </div>
+      <div class="modal-title" style="font-size:12px">MATURE CONTENT</div>
       <div class="modal-note dim small">
-        When enabled, intimate scenes play out fully when earned through rapport and charisma.
-        When disabled, scenes fade to black.
+        Choose what the story and artwork show. These change how things are described and drawn — never what happens.
       </div>
+      <label class="adult-confirm small">
+        <input type="checkbox" id="toggle-adult" />
+        I am 18 or older. <span class="dim">(A self-declaration — not verified age assurance. Required for nudity, sexual themes and mature romance; your character must also be an adult.)</span>
+      </label>
+      <div id="content-prefs" class="content-prefs" role="group" aria-label="Mature content settings"></div>
+      <div id="content-prefs-note" class="modal-note dim small"></div>
+      <input type="checkbox" id="toggle-nsfw" class="hidden" aria-hidden="true" tabindex="-1" />
 
       <div class="modal-divider"></div>
 

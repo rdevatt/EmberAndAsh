@@ -155,8 +155,10 @@
 
   // ---------------------------------------------------------
   // Full-body figure for scenes (≈ 40×90 units), facing right.
-  function figure(data, pose) {
+  function figure(data, pose, opts) {
     const d = data || {};
+    const o = opts || {};
+    if (pose === 'abed') return figureAbed(d, o);
     const a = d.appearance || {};
     const age = Number(d.age) || 25;
     let skin = a.skinHex || '#e0b896';
@@ -190,7 +192,22 @@
       (d.crown ? `<path d="M-7 ${3 + stoop} l2 -6 l3 4 l2 -6 l2 6 l3 -4 l2 6z" fill="#e0b84a"/>` : '');
     const torsoShape = `<path d="M${-w} 56 Q${-w} 26 0 ${22 + stoop} Q${w} 26 ${w} 56Z" fill="${body}" stroke="${shade(body, -0.35)}"/>` + (trim && armorKind !== 'clothes' ? `<path d="M${-w + 2} 30 L${w - 2} 30" stroke="${trim}" stroke-width="1.5"/>` : '');
     const tilt = pose === 'hurt' ? 'rotate(-8 0 88)' : pose === 'fallen' ? 'rotate(-85 0 88) translate(0 10)' : '';
-    return `<g class="ea-figure ea-pose-${esc(pose || 'idle')}" transform="${tilt}">${legs}${robeSkirt}${torsoShape}${arm}${weapon}${head}</g>`;
+    // Injuries are game facts; how they look follows the violence setting.
+    const v = o.violence || 'mild';
+    let wounds = '';
+    if (d.wounds && v === 'mild') wounds = `<path d="M${-w + 2} 38 L${w - 2} 34" stroke="#e8e0d0" stroke-width="3" class="ea-bandage"/>`;
+    if (d.wounds && v === 'mature') wounds = `<path d="M${-w + 3} 32 q4 6 2 14 M${2} 30 q3 8 1 18" stroke="#8a0f0f" stroke-width="${d.wounds > 1 ? 2.6 : 1.6}" fill="none" class="ea-blood"/>` + (d.wounds > 1 ? `<path d="M-3 ${8 + stoop} q2 4 0 7" stroke="#8a0f0f" stroke-width="1.4" fill="none"/>` : '');
+    return `<g class="ea-figure ea-pose-${esc(pose || 'idle')}" transform="${tilt}">${legs}${robeSkirt}${torsoShape}${wounds}${arm}${weapon}${head}</g>`;
+  }
+
+  // Lying under a blanket. Implied nudity at most: bare shoulders are
+  // drawn only when the nudity setting allows it; nothing more, ever.
+  function figureAbed(d, o) {
+    const a = d.appearance || {};
+    const skin = a.skinHex || '#e0b896';
+    const hair = agedHair(a.hairHex || '#4a3020', Number(d.age) || 25, d.undead);
+    const shoulders = o.bareShoulders ? skin : (d.armor && d.armor.kind === 'robe' ? (CLASS_COLOR[d.cls] || '#3a3a5a') : '#d8d0c0');
+    return `<g class="ea-figure ea-pose-abed"><ellipse cx="0" cy="18" rx="14" ry="7" fill="${shoulders}" stroke="${shade(shoulders, -0.3)}"/><circle cx="0" cy="6" r="9" fill="${skin}" stroke="${shade(skin, -0.35)}"/>${a.hairStyle === 'bald' ? '' : `<path d="M-9 5 Q-9 -6 0 -5 Q9 -6 9 5 Q4 0 -9 5Z" fill="${hair}"/>`}</g>`;
   }
 
   // ---------------------------------------------------------
@@ -269,8 +286,38 @@
    * Whole scene background + actors. Returns { svg } — the client adds
    * animation classes per event. Reflects state, never contradicts it.
    */
+  function intimateRoom(sc) {
+    const c = sc.content || {};
+    const style = ((sc.events || []).find(e => e.type === 'intimacy') || {}).style || 'fade';
+    const bare = c.nudity !== 'off' && c.romance === 'mature';
+    const p = sc.player || {};
+    const partner = sc.npc ? { appearance: sc.npc.appearance, age: 35, armor: { kind: 'clothes' } } : null;
+    const out = [];
+    out.push('<rect width="400" height="200" fill="#1c120c"/><rect x="40" y="20" width="60" height="70" fill="#0a0a1a" stroke="#3a2a1a" stroke-width="4"/><circle cx="80" cy="40" r="6" fill="#e8e8d8"/>');
+    out.push('<g class="ea-flicker"><rect x="300" y="120" width="6" height="22" fill="#e8dcc0"/><path d="M303 112 q-4 6 0 9 q4 -3 0 -9z" fill="#f0a040"/></g><circle cx="303" cy="116" r="60" fill="#f0a040" opacity="0.10"/>');
+    out.push('<rect x="120" y="128" width="160" height="40" rx="6" fill="#4a2a20"/><rect x="118" y="118" width="164" height="16" rx="6" fill="#e8e0d0"/>');
+    out.push(`<g transform="translate(170 116)">${figure(p, 'abed', { bareShoulders: bare })}</g>`);
+    if (partner) out.push(`<g transform="translate(212 116) scale(-1 1)">${figure(partner, 'abed', { bareShoulders: bare })}</g>`);
+    out.push('<rect x="122" y="126" width="156" height="30" rx="5" fill="#7a3a3a"/>');
+    if (style === 'fade') out.push('<rect width="400" height="200" fill="#000" opacity="0.55" class="ea-fadeout"/>');
+    return out.join('');
+  }
+
+  function horrorLayer(sc, seed) {
+    const c = sc.content || {};
+    if (c.horror !== 'mature') return '';
+    let s = '';
+    const dark = sc.timeOfDay === 'night' || ['void', 'throne', 'blight', 'swamp'].includes(sc.biome);
+    if (dark) for (let i = 0; i < 5; i++) { const x = (seed >> (i * 3)) % 380 + 10, y = 100 + ((seed >> (i + 5)) % 40); s += `<g class="ea-eyes"><circle cx="${x}" cy="${y}" r="1.6" fill="#ff3030"/><circle cx="${x + 5}" cy="${y}" r="1.6" fill="#ff3030"/></g>`; }
+    if (['battlefield', 'desert', 'throne', 'void', 'blight'].includes(sc.biome)) for (let i = 0; i < 4; i++) { const x = (seed >> (i * 4)) % 360 + 20; s += `<g transform="translate(${x} 166)"><circle r="4" fill="#d8d0b8"/><circle cx="-1.5" cy="-0.5" r="1" fill="#222"/><circle cx="1.5" cy="-0.5" r="1" fill="#222"/></g>`; }
+    return s;
+  }
+
   function scene(sc) {
     if (!sc) return '';
+    if (sc.mood === 'intimate') {
+      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 200" preserveAspectRatio="xMidYMax slice" class="ea-scene ea-intimate" role="img" aria-label="${esc('A quiet room at night')}">${intimateRoom(sc)}<g class="ea-fx"></g></svg>`;
+    }
     const seed = hash(sc.region || 'x');
     const sky = SKIES[sc.timeOfDay] || SKIES.afternoon;
     const era = sc.era === 'ascend' ? '#5a2a7a' : sc.era === 'rekindle' ? '#e0902a' : null;
@@ -282,15 +329,21 @@
     if (era) out.push(`<rect width="400" height="200" fill="${era}" opacity="0.12"/>`);
     out.push(`<g class="ea-bg">${biomeLayers(sc.biome, sc.season, seed)}</g>`);
     if (sc.settlementStatus === 'ruined') out.push('<path d="M20 150 l10 -30 l8 30 M60 150 l6 -18 l8 18" stroke="#2a2420" stroke-width="3"/><circle cx="40" cy="110" r="10" fill="#555" opacity="0.4" class="ea-drift"/>');
-    out.push(`<g class="ea-weather">${weatherLayer(sc.weather, seed)}</g>`);
+    // Horror off softens the dread in void, blight and throne scenery.
+    out.push(`<g class="ea-weather"${(sc.content || {}).horror === 'off' ? ' opacity="0.35"' : ''}>${weatherLayer(sc.weather, seed)}</g>`);
+    out.push(horrorLayer(sc, seed));
     // campfire / inn for rest
     if (sc.playerPose === 'rest') out.push('<g class="ea-campfire" transform="translate(150 168)"><path d="M-10 6 L10 -2 M-10 -2 L10 6" stroke="#5a3a20" stroke-width="3"/><path d="M-6 0 Q0 -18 6 0Z" fill="#f08a2a" class="ea-flicker"/></g>');
     // actors
-    out.push(`<g class="ea-actor ea-player" transform="translate(110 ${sc.playerPose === 'rest' ? 92 : 80})">${figure(sc.player, sc.playerPose === 'combat' ? 'idle' : sc.playerPose)}</g>`);
+    const vio = (sc.content || {}).violence || 'mild';
+    if (sc.enemy && sc.enemy.dead && vio !== 'off') out.push(`<ellipse cx="290" cy="170" rx="${vio === 'mature' ? 34 : 18}" ry="${vio === 'mature' ? 7 : 4}" fill="${vio === 'mature' ? '#6a0a0a' : '#3a2a26'}" opacity="0.85" class="ea-pool"/>`);
+    if (sc.mood === 'death' && vio === 'mature') out.push('<ellipse cx="110" cy="172" rx="30" ry="6" fill="#6a0a0a" opacity="0.85" class="ea-pool"/>');
+    out.push(`<g class="ea-actor ea-player" transform="translate(110 ${sc.playerPose === 'rest' ? 92 : 80})">${figure(sc.player, sc.playerPose === 'combat' ? 'idle' : sc.playerPose, { violence: vio })}</g>`);
     if (sc.enemy) out.push(`<g class="ea-actor ea-enemy${sc.enemy.dead ? ' ea-dead' : ''}" transform="translate(290 ${sc.enemy.boss ? 50 : 82})">${enemyArt(sc.enemy)}</g>`);
     else if (sc.npc) out.push(`<g class="ea-actor ea-npc" transform="translate(290 80) scale(-1 1)">${figure({ appearance: sc.npc.appearance, age: 40, armor: { kind: 'clothes' }, weapon: { kind: 'none' }, crown: sc.npc.crown }, 'idle')}</g>`);
     out.push('<g class="ea-fx"></g>');
     if (sc.mood === 'death') out.push('<rect width="400" height="200" fill="#000" opacity="0.45"/>');
+    if (sc.mood === 'grim') out.push('<rect width="400" height="200" fill="#202028" opacity="0.55" class="ea-grim"/>');
     out.push('</svg>');
     return out.join('');
   }

@@ -435,6 +435,8 @@ function personalityOf(state) {
   if (f.cantorExecuted) traits.push('unforgiving');
   const s = state.stats || {};
   const top = Object.entries(s).sort((a, b) => b[1] - a[1])[0];
+  if ((state.corruption || 0) >= 40) traits.unshift('cruel');
+  if ((state.infamy || 0) >= 40) traits.unshift('infamous');
   if (top) traits.push({ str: 'formidable', dex: 'quick-witted', vit: 'unbreakable', int: 'brilliant', wis: 'far-seeing', cha: 'magnetic' }[top[0]]);
   return [...new Set(traits.filter(Boolean))].slice(0, 4);
 }

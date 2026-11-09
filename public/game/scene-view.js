@@ -33,6 +33,18 @@
     setTimeout(() => t.remove(), 1400);
   }
 
+  // Hit effects follow the violence setting: off — a white flash; mild — a
+  // red spark; mature — a spray of blood.
+  function impact(svg, x, y, violence) {
+    const fx = svg.querySelector('.ea-fx');
+    if (!fx) return;
+    const parts = [];
+    if (violence === 'mature') for (let i = 0; i < 7; i++) parts.push(svgEl('circle', { cx: x + (i - 3) * 4, cy: y + ((i * 7) % 9) - 4, r: 1.5 + (i % 3), fill: '#9a0a0a', class: 'ea-splatter' }));
+    else parts.push(svgEl('circle', { cx: x, cy: y, r: 6, fill: violence === 'off' ? '#ffffff' : '#ff5040', opacity: '0.8', class: 'ea-spark' }));
+    parts.forEach(p => fx.appendChild(p));
+    setTimeout(() => parts.forEach(p => p.remove()), 700);
+  }
+
   function projectile(svg, element) {
     const fx = svg.querySelector('.ea-fx');
     if (!fx) return;
@@ -52,13 +64,14 @@
   }
 
   // Plays one event against the drawn scene.
-  function playEvent(svg, ev) {
+  function playEvent(svg, ev, content) {
+    const violence = (content && content.violence) || 'mild';
     const player = svg.querySelector('.ea-player');
     const enemy = svg.querySelector('.ea-enemy');
     switch (ev.type) {
       case 'attack':
         pulseClass(player, 'ea-lunge', 500);
-        if (ev.hit) { setTimeout(() => { pulseClass(enemy, 'ea-shake', 400); floatText(svg, 290, 70, ev.crit ? `CRIT ${ev.damage}` : `-${ev.damage}`, ev.crit ? '#ffd040' : '#ff6a5a'); }, 220); }
+        if (ev.hit) { setTimeout(() => { pulseClass(enemy, 'ea-shake', 400); impact(svg, 285, 110, violence); floatText(svg, 290, 70, ev.crit ? `CRIT ${ev.damage}` : `-${ev.damage}`, ev.crit ? '#ffd040' : '#ff6a5a'); }, 220); }
         else setTimeout(() => floatText(svg, 270, 70, 'miss', '#cccccc'), 220);
         break;
       case 'spell':
@@ -72,7 +85,7 @@
       case 'stunned': pulseClass(ev.who === 'enemy' ? enemy : player, 'ea-dazed', 700); floatText(svg, ev.who === 'enemy' ? 290 : 110, 50, 'stunned', '#ffe080'); break;
       case 'enemyAttack': case 'enemySpecial':
         pulseClass(enemy, 'ea-enemy-lunge', 500);
-        setTimeout(() => { if (ev.hit) { pulseClass(player, 'ea-shake', 400); floatText(svg, 110, 70, `-${ev.damage}`, '#ff5050'); } else floatText(svg, 130, 70, ev.blocked ? 'blocked' : 'dodged', '#cccccc'); }, 230);
+        setTimeout(() => { if (ev.hit) { pulseClass(player, 'ea-shake', 400); impact(svg, 112, 110, violence); floatText(svg, 110, 70, `-${ev.damage}`, '#ff5050'); } else floatText(svg, 130, 70, ev.blocked ? 'blocked' : 'dodged', '#cccccc'); }, 230);
         break;
       case 'death':
         if (ev.who === 'enemy' && enemy) enemy.classList.add('ea-dying');
@@ -84,6 +97,9 @@
       case 'encounter': pulseClass(enemy, 'ea-appear', 700); break;
       case 'rest': floatText(svg, 150, 140, 'zzz', '#c0c8ff'); break;
       case 'craft': floatText(svg, 110, 60, '⚒', '#ffd080'); break;
+      case 'romance': floatText(svg, 200, 60, '…', '#ffb0a0'); break;
+      case 'intimacy': { const f = svg.querySelector('.ea-fadeout'); if (f) f.classList.add('ea-fading'); break; }
+      case 'grim': break;
       default: break;
     }
   }
@@ -109,7 +125,7 @@
     holder.dataset.played = '';
     events.forEach((ev, i) => setTimeout(() => {
       if (token !== playToken) return;
-      playEvent(svg, ev);
+      playEvent(svg, ev, scene.content);
       holder.dataset.played = (holder.dataset.played ? holder.dataset.played + ',' : '') + ev.type;
     }, i * STEP_MS));
   }

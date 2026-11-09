@@ -313,6 +313,8 @@ function titlesFor(state, world) {
   if ((state.crisesResolved || 0) >= 3) out.push('Champion of the Realm');
   for (const org of (world && world.organizations || []).filter(o => o.founderId === state.characterId)) out.push(`Founder of ${org.name}`);
   if (state.longevity && state.longevity.immortal) out.push('the Undying');
+  if ((state.corruption || 0) >= 40) out.push('the Cruel');
+  if ((state.infamy || 0) >= 40) out.push('the Reviled');
   return out;
 }
 

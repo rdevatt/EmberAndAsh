@@ -59,7 +59,9 @@ async function desktop(browser) {
   check('desktop: narration mode shown', /narration/.test(await page.locator('#narration-mode').innerText()));
   check('desktop: factions panel visible', await h.visible('#section-factions') && (await page.locator('.faction-row').count()) === 4);
   check('desktop: portrait drawn from the description', (await page.locator('#portrait-holder svg.ea-portrait').count()) === 1);
-  const portraitHtml = await page.locator('#portrait-holder').innerHTML();
+  // Identity (face, hair, skin, marks) must stay stable; gear may legitimately change.
+  const identity = () => page.evaluate(() => JSON.stringify(JSON.parse(document.getElementById('portrait-holder').dataset.key).appearance));
+  const portraitIdentity = await identity();
   check('desktop: illustrated scene shown', await h.visible('#scene-holder svg.ea-scene'));
   check('desktop: date and age shown', /E\.R\./.test(await page.locator('#world-line').innerText()) && /Age \d+/.test(await page.locator('#char-age').innerText()));
 
@@ -88,10 +90,23 @@ async function desktop(browser) {
   check('desktop: scene animated the turn\'s events', /attack|spell|death|enemyAttack/.test(played || ''), played);
   const deadAttr = await page.locator('#scene-holder').getAttribute('data-enemy-dead');
   check('desktop: a slain enemy is drawn dead (or the player fell)', deadAttr === 'true' || deadAttr === 'none', deadAttr);
-  check('desktop: portrait stable across turns', (await page.locator('#portrait-holder').innerHTML()) === portraitHtml);
+  check('desktop: same face across turns', (await identity()) === portraitIdentity);
   check('desktop: action bar clears after combat', (await page.locator('#combat-actions .combat-btn').count()) === 0);
   check('desktop: combat round entry cannot be undone', (await page.locator('.undo-btn').count()) === 0 || !(/◀|▶/.test(await h.lastStory())));
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/desktop.png` });
+
+  // Mature content settings
+  await page.click('#btn-settings');
+  await page.waitForSelector('#content-prefs .content-row');
+  check('desktop: six content categories with three levels each', (await page.locator('#content-prefs .content-row').count()) === 6 && (await page.locator('#content-prefs .seg-btn').count()) === 18);
+  await page.locator('.content-row[data-category="violence"] .seg-btn[data-level="mature"]').click();
+  await page.waitForTimeout(400);
+  check('desktop: choosing Mature violence sticks', (await page.locator('.content-row[data-category="violence"] .seg-btn.selected').getAttribute('data-level')) === 'mature');
+  await page.locator('.content-row[data-category="sexual"] .seg-btn[data-level="mature"]').click();
+  await page.waitForTimeout(400);
+  check('desktop: sexual themes limited without the adult declaration', /adult/.test(await page.locator('.content-row[data-category="sexual"]').innerText()));
+  check('desktop: self-declaration is labelled as not verified', /not verified/i.test(await page.locator('.adult-confirm').innerText()));
+  await page.click('#btn-close-settings');
 
   for (const cmd of ['abilities', 'recipes', 'companions', 'factions', 'story']) {
     await h.send(cmd);
@@ -101,7 +116,7 @@ async function desktop(browser) {
   await page.reload();
   await page.waitForSelector('#input-area:not(.hidden)', { timeout: 8000 }).catch(() => {});
   check('desktop: reload keeps story progress', /Vesna/.test(await page.locator('#story-objective').innerText()));
-  check('desktop: reload keeps the same face', (await page.locator('#portrait-holder').innerHTML()) === portraitHtml);
+  check('desktop: reload keeps the same face', (await identity()) === portraitIdentity);
   await page.click('#btn-saves'); await page.waitForTimeout(600);
   check('desktop: worlds list in saves menu', /Guttering Age|E\.R\.|Only this world/.test(await page.locator('#worlds-list').innerText()));
   await page.click('#btn-close-saves');
@@ -118,6 +133,7 @@ async function reducedMotion(browser) {
   const h = helpers(page);
   await page.goto(URL);
   await createCharacter(page, h, 'Still');
+  await page.evaluate(async () => { await fetch('/api/settings/content', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-session-id': localStorage.getItem('sessionId') }, body: JSON.stringify({ prefs: { violence: 'mature', horror: 'mature' } }) }); });
   await h.send('I attack the nearest creature');
   await h.send('I slash at its torso');
   const played = await page.locator('#scene-holder').getAttribute('data-played');
@@ -155,6 +171,13 @@ async function mobile(browser) {
   await page.click('.mobile-nav-btn[data-panel="left"]');
   check('mobile: character tab shows factions', await h.visible('#section-factions'));
   check('mobile: portrait on character tab', await h.visible('#portrait-holder svg'));
+  await page.click('#btn-settings');
+  await page.waitForSelector('#content-prefs .content-row');
+  const seg = await page.locator('.content-row[data-category="horror"] .seg-btn').first().boundingBox();
+  check('mobile: content settings are touch-sized', seg && seg.height >= 36, seg ? `${Math.round(seg.height)}px` : 'none');
+  const ov = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  check('mobile: settings fit the screen', ov <= 1, `overflow ${ov}px`);
+  await page.click('#btn-close-settings');
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/mobile.png`, fullPage: false });
   check('mobile: no console errors', errors.length === 0, errors.slice(0, 3).join(' | '));
   await page.context().close();

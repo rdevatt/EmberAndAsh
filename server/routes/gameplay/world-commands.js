@@ -16,6 +16,9 @@ const crafting  = require('../../../game/crafting-recipes');
 const durability = require('../../../game/durability');
 const endless   = require('../../../game/endless');
 const legacy    = require('../../../game/legacy');
+const romance   = require('../../../game/romance');
+const infamy    = require('../../../game/infamy');
+const { removeCompanion } = require('../../../game/economy');
 const { REGIONS } = require('../../../game/constants');
 
 const FACTION_CMD   = /^(?:factions?|reputation|standing|standings|faction standing)[.!?]*$/i;
@@ -245,6 +248,19 @@ module.exports = function createWorldCommands(h) {
       }
     }
 
+    // ---------------- romance (and villainy) ----------------
+    const love = romance.handle(state, input, { removeCompanion });
+    if (love) {
+      if (!love.success) return sendCommand(req, res, love.message, 'romance', { persist: false });
+      req.session.undoLocked = true;
+      addTime(req, love.hours || 0);
+      sys(events, love.message);
+      if (love.event) events.push(love.event);
+      if (love.hint) appendHint(state, love.hint);
+      if (love.event && love.event.partner) req.sceneNpc = love.event.type === 'villainy' ? null : love.event.partner;
+      return narrateAndRespond(req, res, input, events);
+    }
+
     // ---------------- talking to named people ----------------
     const talk = world.detectTalkIntent(input);
     if (talk) {
@@ -280,8 +296,13 @@ module.exports = function createWorldCommands(h) {
         const holder = chronicle.currentHolder(W, npc);
         req.sceneNpc = holder.name;
         const rumor = legacy.rumorFor(W, state.character.region, state.actionCount || 0);
-        const line = shunned
+        const wronged = state.npcRelationships && state.npcRelationships[npc.id] && state.npcRelationships[npc.id].wronged;
+        const reaction = infamy.greetingReaction(state);
+        const line = wronged
+          ? `${holder.name} backs away from you, white-faced. "Stay away from me."`
+          : shunned
           ? `${holder.name} turns away. The ${factions.FACTIONS[npc.faction].label} want nothing to do with you.`
+          : reaction ? `${holder.name}, ${npc.role}: ${reaction}`
           : (postgameLine(state, holder) || `${holder.name}, ${npc.role}${holder.age ? ` (${holder.age})` : ''}: "${holder.greet}"`) + (rumor && !story ? `\n${rumor}` : '');
         sys(events, line + (rosterId && !shunned ? `\n${comps.ROSTER[rosterId].personality}` : ''));
         appendHint(state, `[NPC — the player talks with ${npc.name}, ${npc.role} (${factions.FACTIONS[npc.faction] ? factions.FACTIONS[npc.faction].label : 'local'}). ${shunned ? 'They are hostile to the player.' : `They say: "${npc.greet}"`} Keep them consistent with that. Do not grant items, coin or quests.]`);

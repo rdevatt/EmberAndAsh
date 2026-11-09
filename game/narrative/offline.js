@@ -11,6 +11,12 @@
 // =============================================================
 
 const { REGIONS } = require('../constants');
+const contentPrefs = require('../content-prefs');
+
+// Preferences change the words, never the outcome.
+function prefsOf(state) {
+  try { return contentPrefs.effectivePrefs(state, 'offline'); } catch (e) { return contentPrefs.DEFAULTS; }
+}
 
 const TIMES = ['before dawn', 'at first light', 'in the grey morning', 'under a high sun', 'in the long afternoon', 'as the light turns amber', 'at dusk', 'after nightfall', 'in the dead of night'];
 
@@ -76,9 +82,18 @@ function combatProse(state, input, r, seed) {
       ? pick(state, 'sphit', [`Power gathers in your hands and ${r.spellCast} tears into ${foe}.`, `The words come out right, and ${r.spellCast} strikes home.`], seed)
       : pick(state, 'spmiss', [`${r.spellCast} flares — and ${foe} is no longer where it was aimed.`, `The spell goes wide, scorching empty ground.`], seed));
   } else if (r.playerHit) {
-    lines.push(r.playerCrit
-      ? pick(state, 'crit', [`${cap(weaponName(state))} finds the gap you were looking for — a devastating blow to the ${r.bodyPart}.`, `Everything lines up: your ${weaponName(state)} bites deep into ${foe}'s ${r.bodyPart}.`], seed)
-      : pick(state, 'hit', [`Your ${weaponName(state)} connects with ${foe}'s ${r.bodyPart}.`, `Steel meets flesh at the ${r.bodyPart}; ${foe} staggers.`, `You land a solid blow and feel it jar up your arm.`, `${cap(foe)} grunts as your strike catches its ${r.bodyPart}.`], seed));
+    const v = prefsOf(state).violence;
+    if (v === 'off') {
+      lines.push(r.playerCrit ? `A decisive blow to the ${r.bodyPart}.` : pick(state, 'hit0', [`Your strike lands.`, `The blow connects; ${foe} falters.`], seed));
+    } else if (v === 'mature') {
+      lines.push(r.playerCrit
+        ? pick(state, 'crit2', [`Your ${weaponName(state)} splits ${foe}'s ${r.bodyPart} open; blood sheets out and something cracks wetly underneath.`, `You drive the ${weaponName(state)} in to the hilt at the ${r.bodyPart}. Hot blood spills over your hand.`], seed)
+        : pick(state, 'hit2', [`Your ${weaponName(state)} tears into ${foe}'s ${r.bodyPart}; blood spatters the ground.`, `The edge bites deep into the ${r.bodyPart}, and ${foe} howls through red teeth.`, `You open a gash across its ${r.bodyPart} that pours dark blood.`], seed));
+    } else {
+      lines.push(r.playerCrit
+        ? pick(state, 'crit', [`${cap(weaponName(state))} finds the gap you were looking for — a devastating blow to the ${r.bodyPart}.`, `Everything lines up: your ${weaponName(state)} bites deep into ${foe}'s ${r.bodyPart}.`], seed)
+        : pick(state, 'hit', [`Your ${weaponName(state)} connects with ${foe}'s ${r.bodyPart}.`, `Steel meets flesh at the ${r.bodyPart}; ${foe} staggers.`, `You land a solid blow and feel it jar up your arm.`, `${cap(foe)} grunts as your strike catches its ${r.bodyPart}.`], seed));
+    }
   } else {
     lines.push(pick(state, 'miss', [`${cap(foe)} twists away and your ${weaponName(state)} cuts only air.`, `You overreach; the blow goes wide.`, `${cap(foe)} slips your strike by a finger's width.`], seed));
   }
@@ -92,11 +107,21 @@ function combatProse(state, input, r, seed) {
   } else if (/stunned and cannot act/.test(enemyLines)) {
     lines.push(`${cap(foe)} reels, dazed, unable to answer.`);
   } else if (r.enemyHit) {
-    lines.push(pick(state, 'ehit', [`${cap(foe)} answers — a hit that knocks the breath out of you.`, `Pain flares as ${foe} catches you.`, `You take the counterblow on the shoulder and keep your feet.`], seed));
+    const v = prefsOf(state).violence;
+    lines.push(v === 'mature'
+      ? pick(state, 'ehit2', [`${cap(foe)} rakes you open across the ribs; blood runs warm down your side.`, `The counterblow splits your brow — blood in your eye, copper in your mouth.`], seed)
+      : v === 'off' ? `${cap(foe)} lands a hit on you.`
+      : pick(state, 'ehit', [`${cap(foe)} answers — a hit that knocks the breath out of you.`, `Pain flares as ${foe} catches you.`, `You take the counterblow on the shoulder and keep your feet.`], seed));
   } else if (state.currentEnemy) {
     lines.push(pick(state, 'emiss', [`${cap(foe)}'s return strike whistles past.`, `You slip the counterattack.`, `${cap(foe)} lunges and finds nothing.`], seed));
   }
-  if (!state.currentEnemy || !state.inCombat) lines.push(pick(state, 'kill', ['Then it is over, and the only sound is your own breathing.', 'It falls, and does not rise.', 'Silence rushes back in where the fight was.'], seed));
+  if (!state.currentEnemy || !state.inCombat) {
+    const v = prefsOf(state).violence;
+    lines.push(v === 'mature'
+      ? pick(state, 'kill2', ['It dies ugly, in a spreading pool of its own blood.', 'It goes down choking, and then it is just meat on the ground.'], seed)
+      : v === 'off' ? 'It is defeated.'
+      : pick(state, 'kill', ['Then it is over, and the only sound is your own breathing.', 'It falls, and does not rise.', 'Silence rushes back in where the fight was.'], seed));
+  }
   return lines.join(' ');
 }
 
@@ -121,6 +146,11 @@ function buildOfflineNarrative(state, playerInput, hint) {
     lines.push(pick(state, 'bossin', ['Everything you have done has led to this.', 'The air itself seems to hold its breath.', 'There is no more road behind you — only this.'], seed));
   } else if ((h.includes('ENEMY SPAWNED') || h.includes('AMBIENT ENCOUNTER') || h.includes('found you') || h.includes('ROAD ENCOUNTER') || h.includes('AMBUSH') || h.includes('LANDMARK —') || h.includes('QUEST SITE') || h.includes('RIFT')) && enemy) {
     lines.push(pick(state, 'enc', [`A ${enemy.label} closes in. ${enemy.desc}`, `Movement — and a ${enemy.label} is suddenly between you and the way forward. ${enemy.desc}`, `You hear it before you see it: a ${enemy.label}. ${enemy.desc}`], seed));
+    const p = prefsOf(state);
+    if (/thug|bandit|cutthroat|raider|marauder|smuggler|watchman|rebel|deserter|mercenary|insurgent|thief|captain/i.test(enemy.label) && p.language !== 'off') {
+      lines.push(p.language === 'mature' ? pick(state, 'taunt2', ['"You picked the wrong fucking road," it snarls.', '"Hand it over, you sorry bastard."'], seed) : pick(state, 'taunt1', ['"You picked the wrong road," it snarls.', '"Hand it over, damn you."'], seed));
+    }
+    if (p.horror === 'mature' && /undead|skeleton|ghoul|wraith|lich|thrall|revenant|husk|shade|void|unmade|echo/i.test(enemy.label)) lines.push(pick(state, 'dread', ['Its face is wrong in a way your eyes keep trying to correct.', 'It smells of opened graves, and it is smiling.'], seed));
   } else if (h.includes('[COMBAT NARRATIVE') && r) {
     lines.push(combatProse(state, playerInput, r, seed));
   } else if (h.includes('SUCCESSFULLY FLEES')) {
@@ -131,6 +161,17 @@ function buildOfflineNarrative(state, playerInput, hint) {
     lines.push('Nothing you do touches it. Every instinct screams at you to run.');
   } else if (h.includes('BOSS DEFEATED')) {
     lines.push(pick(state, 'bossdown', ['It is done. For a long moment you simply stand there, shaking, alive.', 'The great enemy falls, and the world feels — briefly, impossibly — lighter.'], seed));
+  } else if (h.includes('VILLAIN ACT')) {
+    // Never depicted. The aftermath only.
+    lines.push(pick(state, 'villain', ['Afterwards the room is very quiet. Whatever you thought you would feel, it is not this.', 'It is done, and it cannot be undone. Somewhere, someone is already telling the story — or soon will be.'], seed));
+  } else if (h.includes('INTIMATE SCENE')) {
+    const p = prefsOf(state);
+    lines.push(p.romance === 'off' ? 'You share a quiet night. In the morning, the road is waiting.'
+      : (p.sexual === 'mild' || p.romance === 'mature')
+        ? pick(state, 'night2', ['Lamplight on bare shoulders; hands slow and certain; a warmth that asks nothing and gives everything. The rest belongs to the two of you. Morning comes gently.', 'Clothes on the floor, a whispered name, the long unhurried hours of the night. You wake tangled together, unwilling to move.'], seed)
+        : pick(state, 'night1', ['The door closes. Later there is only lamplight, the slow sound of breathing, and morning.', 'A kiss, then another, and the candle gutters out. Morning finds you both still smiling.'], seed));
+  } else if (h.includes('[ROMANCE')) {
+    lines.push(pick(state, 'flirt', ['A held look, a half-smile, something unspoken passing between you.', 'They laugh, and lean closer than they need to.'], seed));
   } else if (h.includes('STORY DECISION')) {
     lines.push(pick(state, 'decide', ['You make your choice. There will be no unmaking it.', 'It is decided. Somewhere, the world shifts to account for it.'], seed));
   } else if (h.includes('STORY CONVERSATION') || h.includes('[NPC —')) {
@@ -172,7 +213,8 @@ function buildOfflineNarrative(state, playerInput, hint) {
       region && region.settlement ? `Smoke rises from ${region.settlement.name}. Someone there is cooking, and the smell carries.` : 'No one else is in sight.'
     ], seed));
   }
-  const air = ambient(state, seed + 7);
+  // Horror off: no creeping dread in the scenery.
+  const air = prefsOf(state).horror === 'off' ? '' : ambient(state, seed + 7);
   if (air && !(h.includes('[COMBAT NARRATIVE'))) lines.push(air);
   return lines.join(' ');
 }

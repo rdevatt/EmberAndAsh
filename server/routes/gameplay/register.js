@@ -341,7 +341,10 @@ module.exports = function registerGameplayRoutes(app, deps) {
     req.timeHours = 0; req.timeDefault = false;
     if (!hours || !chronicle.worldOf(req.session.state) || !req.session.state.character || !req.session.state.character.region) return [];
     const st = req.session.state;
+    const monthBefore = Math.floor(chronicle.nowDay(chronicle.worldOf(st)) / 30);
     const result = chronicle.advanceTime(st, hours);
+    const monthsPassed = Math.floor(chronicle.nowDay(chronicle.worldOf(st)) / 30) - monthBefore;
+    if (monthsPassed > 0 && (st.secrets || []).length) result.messages.push(...require('../../../game/infamy').secretsSurface(st, monthsPassed));
     const W = chronicle.worldOf(st);
     // Old age claims those who outlive their span.
     if (W && !st.deceased && chronicle.isPastLifespan(st, W)) {
@@ -727,6 +730,8 @@ module.exports = function registerGameplayRoutes(app, deps) {
         if (enabled && (state.character.age || 0) < 18) {
           return sendCommand(req, res, '[Adult content is unavailable for characters under 18.]', 'nsfw', { persist: false });
         }
+        if (enabled) state.adultConfirmed = true;
+        require('../../../game/content-prefs').updatePrefs(state, enabled ? { romance: 'mature', sexual: 'mature' } : { romance: 'mild', sexual: 'off' });
         state.nsfwEnabled = enabled;
         if (req.session.playerId) db.setNSFWSetting(req.session.playerId, enabled);
         return sendCommand(req, res, enabled

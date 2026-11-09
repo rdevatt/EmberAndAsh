@@ -67,6 +67,7 @@ module.exports = function registerWorldRoutes(app, deps) {
     const archivedId = archiveCurrent(req, { asLegend: true });
     const fresh = newCreationState();
     if (st && st.nsfwEnabled === false) fresh.nsfwEnabled = false;
+    require('../../../game/content-prefs').inherit(st, fresh);
 
     let target;
     if (mode === 'same') {

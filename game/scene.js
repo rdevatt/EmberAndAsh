@@ -15,6 +15,7 @@ const { REGIONS } = require('./constants');
 const chronicle = require('./chronicle');
 const { portraitData, parseAppearance } = require('./appearance');
 const { getEnemyTraits } = require('./combat-tactics');
+const contentPrefs = require('./content-prefs');
 
 const BIOMES = {
   thornwick: 'farmland', dustfall: 'plains', ironport: 'city', greymere: 'moor', ashwood_shallow: 'silverwood', oakhaven: 'town', saltenbay: 'coast',
@@ -102,8 +103,13 @@ function buildScene(state, ctx = {}) {
     era: world && world.ending ? world.ending : null,
     player: portraitData(state, { ruler }),
     playerPose: state.inCombat ? 'combat' : 'idle',
-    enemy: null, npc: null, events: [], mood: 'calm'
+    enemy: null, npc: null, events: [], mood: 'calm',
+    // What the artwork may show (server-enforced: eligibility + renderer limits).
+    content: contentPrefs.effectivePrefs(state, 'art'),
+    // Injuries are facts; how they are drawn depends on content.violence.
+    wounds: state.maxHp ? (state.hp / state.maxHp < 0.25 ? 2 : state.hp / state.maxHp < 0.5 ? 1 : 0) : 0
   };
+  scene.player.wounds = scene.wounds;
   const enemy = state.inCombat ? state.currentEnemy : (ctx.killed ? ctx.killedEnemy : null);
   if (enemy) scene.enemy = enemyDescriptor(enemy, ctx.killed);
   if (state.inCombat || ctx.killed) scene.mood = enemy && enemy.isBoss ? 'boss' : 'combat';
@@ -115,10 +121,13 @@ function buildScene(state, ctx = {}) {
     else if (e.type === 'questComplete' || e.type === 'chapterComplete') scene.events.push({ type: 'triumph', label: e.quest ? e.quest.label : `Chapter ${e.chapter}` });
     else if (e.type === 'combatStart') scene.events.push({ type: 'encounter', boss: !!e.boss });
     else if (e.type === 'itemCrafted') scene.events.push({ type: 'craft' });
+    else if (e.type === 'intimacy') { scene.events.push({ type: 'intimacy', style: e.style }); scene.mood = 'intimate'; scene.playerPose = 'rest'; scene.npc = npcDescriptor(e.partner, world); scene.npc.partner = true; }
+    else if (e.type === 'romance' && e.stage === 'flirt') scene.events.push({ type: 'romance' });
+    else if (e.type === 'villainy') { scene.events.push({ type: 'grim' }); scene.mood = 'grim'; scene.npc = null; }
   }
   if (ctx.commandType === 'longRest' || ctx.commandType === 'rest') { scene.playerPose = 'rest'; scene.events.push({ type: 'rest', inn: /room|inn/.test(ctx.input || '') }); }
   if (ctx.commandType === 'ambush') scene.events.push({ type: 'encounter', ambush: true });
-  if (ctx.npcName && !state.inCombat) scene.npc = npcDescriptor(ctx.npcName, world);
+  if (ctx.npcName && !state.inCombat && !scene.npc && scene.mood !== 'grim') scene.npc = npcDescriptor(ctx.npcName, world);
   if (state.deceased) { scene.mood = 'death'; scene.playerPose = 'fallen'; }
   return scene;
 }
