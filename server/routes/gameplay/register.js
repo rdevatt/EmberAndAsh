@@ -444,6 +444,7 @@ module.exports = function registerGameplayRoutes(app, deps) {
     if (!state.inCombat || fell) {
       // The fight is over: fighting slaves grow harder; a revolt ends one way or the other.
       slavery.afterFight(state, !!combatResult.enemyKilled);
+      if (state.buffs) delete state.buffs.next;
       if (enemyBefore && enemyBefore.meta && enemyBefore.meta.rebellion) events.push({ type: 'system', message: slavery.endRebellion(state, !!combatResult.enemyKilled && !fell) });
     }
     if (fell) applyDeath(state, events);

@@ -141,17 +141,24 @@ function scoreAction(text) {
 // AFFINITY DETECTION
 // Tracks which class/profession paths player actions match.
 // =============================================
+// Whole words only: "arrow" is not "row", "dinner" is not "inn".
+const AFFINITY_RE = new Map();
+function affinityRe(a) {
+  if (!AFFINITY_RE.has(a)) AFFINITY_RE.set(a, new RegExp(`\\b${a.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i'));
+  return AFFINITY_RE.get(a);
+}
+
 function detectAffinities(text) {
-  const t     = text.toLowerCase();
+  const t     = String(text || '').toLowerCase();
   const found = {};
 
   for (const [key, cls] of Object.entries(CLASSES)) {
-    const hits = cls.affinities.filter(a => t.includes(a)).length;
+    const hits = cls.affinities.filter(a => affinityRe(a).test(t)).length;
     if (hits > 0) found[`class_${key}`] = hits;
   }
 
   for (const [key, prof] of Object.entries(PROFESSIONS)) {
-    const hits = prof.affinities.filter(a => t.includes(a)).length;
+    const hits = prof.affinities.filter(a => affinityRe(a).test(t)).length;
     if (hits > 0) found[`prof_${key}`] = hits;
   }
 
@@ -806,7 +813,7 @@ function applyCombatRound(state, input) {
     state.inCombat         = false;
     state.currentEnemy     = null;
     T.clearCombatEffects(state);
-    if (state.buffs) { delete state.buffs.sharpened; delete state.buffs.padded; delete state.buffs.studied; }
+    if (state.buffs) { delete state.buffs.sharpened; delete state.buffs.padded; delete state.buffs.studied; delete state.buffs.next; }
     state.stamina          = Math.min(state.maxStamina, state.stamina + 10);
     if (state.reputation && state.character) {
       const region = state.character.region;

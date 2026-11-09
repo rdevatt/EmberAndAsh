@@ -47,13 +47,13 @@ for (const p of profs) {
 const base = rows[0].win;
 for (const r of rows) console.log(`${r.prof.padEnd(11)} ${(r.win * 100).toFixed(1).padStart(5)}%  ${r.prof === '(none)' ? '' : `${((r.win - base) * 100 >= 0 ? '+' : '')}${((r.win - base) * 100).toFixed(1)}`}`);
 
-console.log(`\nINCOME — expected value of an 8-hour shift, rank ${RANK} (coin + materials at sale value; thief includes being caught)`);
+console.log(`\nINCOME — an 8-hour shift, rank ${RANK}: coin + materials at sale value, per region tier. Risky trades show how often they are caught.`);
 const { createFreshState } = G('state');
-const MATERIAL_VALUE = { hide: 6, timber: 5, 'iron ore': 7 };
+const MATERIAL_VALUE = { hide: 6, timber: 5, 'iron ore': 7, herbs: 4 };
 for (const p of Object.keys(PROFESSIONS)) {
   const def = perks.PERKS[p];
   const region = def.work.where === 'wild' ? 'wyrmwood' : 'ironport';
-  let total = 0; const T = 200;
+  let total = 0, pay = 0, caught = 0; const T = 400;
   for (let i = 0; i < T; i++) {
     const s = createFreshState(); s.creation.phase = 5; s.character = { name: 'W', age: 30, region }; s.stats = ch.calculateStats(25, 'farmer', 'average');
     s.totalXP = ch.getXPForLevel(30); s.profession = p; s.professionLevel = RANK; s.coin = 0; s.materials = {};
@@ -62,10 +62,10 @@ for (const p of Object.keys(PROFESSIONS)) {
     if (!r.success) { total = NaN; break; }
     let v = s.coin;
     for (const [m, q] of Object.entries(s.materials)) v += q * (MATERIAL_VALUE[m] || 6) * (REGIONS[region].tier || 1);
-    // A thief caught stands trial: about 70% are fined, by the law's usual measure.
-    if ((s.deeds || []).length) v -= 0.7 * 2 * (15 + 30 * 3);
+    pay += v;
+    if ((s.deeds || []).length) caught++;
     total += v;
   }
   const tier = REGIONS[region].tier || 1;
-  console.log(`${p.padEnd(11)} ${String(Math.round(total / T)).padStart(5)} copper-equivalent  (${region}, tier ${tier}; per tier ${Math.round(total / T / tier)})`);
+  console.log(`${p.padEnd(13)} ${String(Math.round(total / T / tier)).padStart(4)} per tier${def.work.risk ? `  — risky: caught on ${(100 * caught / T).toFixed(1)}% of shifts (${def.work.crime ? def.work.crime.type : 'theft'}, then the law)` : ''}  (${region})`);
 }

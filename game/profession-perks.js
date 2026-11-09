@@ -42,6 +42,39 @@ const PERKS = {
                 work: { where: 'settlement', what: 'take in tailoring' }, skill: 'mend my armour', skillDesc: 'restore armour and pad it: +10% armour for the next fight' }
 };
 
+// The wider trades. Edges are sized to the same measured budget as the
+// first twelve (scripts/profession-sweep.js checks them all). Skills are
+// data: buff (next fight), heal, gather, coin, reveal, and calm (beasts).
+Object.assign(PERKS, {
+  carpenter:   { edge: 'Sturdy and steady: +3% health, 2% less damage taken.', combat: { hp: 0.03, armor: 0.02 }, work: { where: 'settlement', what: 'take carpentry work' }, skill: 'build a barricade', skillDesc: '+8% armour for your next fight', skillSpec: { re: /^(?:i\s+)?build (?:a )?(?:barricade|palisade|cover)/i, kind: 'buff', buff: { armor: 0.08 }, hours: 2, message: 'A rough barricade of timber and nails. (+8% armour for your next fight.)' } },
+  wainwright:  { edge: 'An eye for weight and motion: +3% to hit, +4% dodge, +1% health.', combat: { hit: 0.03, dodge: 0.04, hp: 0.01 }, work: { where: 'settlement', what: 'mend carts and wheels' }, skill: 'mend a cart', skillDesc: 'faster travel for a while', skillSpec: { re: /^(?:i\s+)?(?:mend|fix|repair) (?:a |the |my )?(?:cart|wagon|wheel)/i, kind: 'buff', buff: { hit: 0.05 }, hours: 2, message: 'The wheel runs true again; a carter pays you in coin and gossip. (+5% to hit next fight.)' } },
+  carver:      { edge: 'A sure, small hand: +8% damage, +6% critical chance, 1% less damage taken.', combat: { dmg: 0.08, crit: 0.06, armor: 0.01 }, work: { where: 'any', what: 'carve and sell small work' }, skill: 'carve a charm', skillDesc: 'a bone charm: +6% damage next fight', skillSpec: { re: /^(?:i\s+)?(?:carve|whittle) (?:a |an )?(?:charm|ward|totem|figure)/i, kind: 'buff', buff: { dmg: 0.06 }, hours: 2, message: 'A small charm, warm in the hand. (+6% damage next fight.)' } },
+  bowyer:      { edge: 'True arrows, true aim: +6% damage, +4% to hit, +2% dodge.', combat: { dmg: 0.06, hit: 0.04, dodge: 0.02 }, work: { where: 'settlement', what: 'make bows and arrows for sale' }, skill: 'fletch arrows', skillDesc: '+8% to hit next fight', skillSpec: { re: /^(?:i\s+)?(?:fletch|make) (?:some )?arrows/i, kind: 'buff', buff: { hit: 0.08 }, hours: 2, message: 'A sheaf of straight arrows. (+8% to hit next fight.)' } },
+  armorer:     { edge: 'Armour that fits: 5% less damage taken.', combat: { armor: 0.05 }, work: { where: 'settlement', what: 'fit and mend armour' }, skill: 'fit my armour', skillDesc: '+10% armour next fight, armour mended', skillSpec: { re: /^(?:i\s+)?(?:fit|adjust|refit|rivet) my (?:armou?r|mail|plate)/i, kind: 'buff', buff: { armor: 0.10 }, mend: true, hours: 2, message: 'Every strap and rivet right. (+10% armour next fight; armour mended.)' } },
+  weaponsmith: { edge: 'Your own blades: +12% weapon damage, +4% damage, 2% less damage taken.', combat: { weapon: 0.12, dmg: 0.04, armor: 0.02 }, work: { where: 'settlement', what: 'forge and sell blades' }, skill: 'hone my weapon', skillDesc: '+15% weapon damage next fight', skillSpec: { re: /^(?:i\s+)?(?:hone|balance|rework) my (?:blade|sword|axe|weapon|spear|dagger)/i, kind: 'buff', buff: { weapon: 0.15 }, hours: 1, message: 'Balanced, honed, deadly. (+15% weapon damage next fight.)' } },
+  jeweler:     { edge: 'You see the flaw in anything: weaknesses hit 20% harder, +6% damage, a little less damage taken.', combat: { weakness: 0.20, dmg: 0.06, armor: 0.015 }, work: { where: 'settlement', what: 'set stones and sell rings' }, skill: 'appraise', skillDesc: 'sell loot for more for a day', skillSpec: { re: /^(?:i\s+)?(?:appraise|value) (?:my |the )?(?:loot|goods|gems|treasure)/i, kind: 'coin', coin: 0.6, hours: 2, message: 'You know exactly what it is worth, and sell it for that.' } },
+  mason:       { edge: 'Stone-steady: 4% less damage taken, +1% health.', combat: { armor: 0.04, hp: 0.01 }, work: { where: 'settlement', what: 'cut and lay stone' }, skill: 'shore up a wall', skillDesc: '+8% armour next fight', skillSpec: { re: /^(?:i\s+)?(?:shore up|build) (?:a |the )?(?:wall|cairn|stone cover)/i, kind: 'buff', buff: { armor: 0.08 }, hours: 3, message: 'Stone on stone, solid cover. (+8% armour next fight.)' } },
+  potter:      { edge: 'Good vessels keep remedies strong: potions +30%, +3% damage.', combat: { potion: 0.30, dmg: 0.03 }, work: { where: 'settlement', what: 'throw and fire pots' }, skill: 'fire vials', skillDesc: 'two empty vials (for brewing) and coin', skillSpec: { re: /^(?:i\s+)?(?:fire|make|throw) (?:some )?(?:vials|pots|jars)/i, kind: 'coin', coin: 0.5, hours: 3, message: 'A rack of fired vials, sold before they cool.' } },
+  leatherworker: { edge: 'Boiled leather where it counts: 2.5% less damage taken, +2% dodge.', combat: { armor: 0.025, dodge: 0.02 }, work: { where: 'settlement', what: 'tan hides and stitch leather' }, skill: 'oil my leathers', skillDesc: '+6% dodge next fight', skillSpec: { re: /^(?:i\s+)?(?:oil|stitch|reinforce) my (?:leathers?|boots|jerkin)/i, kind: 'buff', buff: { dodge: 0.06 }, mend: true, hours: 1, message: 'Supple leather, quiet feet. (+6% dodge next fight.)' } },
+  weaver:      { edge: 'Layered cloth turns blows: +4% dodge, 1% less damage taken.', combat: { dodge: 0.04, armor: 0.01 }, work: { where: 'settlement', what: 'weave cloth at the loom' }, skill: 'weave a cloak', skillDesc: '+6% dodge next fight', skillSpec: { re: /^(?:i\s+)?weave (?:a |an )?(?:cloak|scarf|shawl|wrap)/i, kind: 'buff', buff: { dodge: 0.06 }, hours: 3, message: 'A close-woven cloak that moves with you. (+6% dodge next fight.)' } },
+  brewer:      { edge: 'Bold on your own brew: +5% damage, 2% less damage taken.', combat: { dmg: 0.05, armor: 0.02 }, work: { where: 'settlement', what: 'brew for the taverns' }, skill: 'brew ale', skillDesc: '+7% damage next fight', skillSpec: { re: /^(?:i\s+)?brew (?:some )?(?:ale|beer|mead|stout)/i, kind: 'buff', buff: { dmg: 0.07 }, hours: 3, message: 'Strong ale, stronger nerve. (+7% damage next fight.)' } },
+  baker:       { edge: 'Well fed: +5% health, and you recover a little each round.', combat: { hp: 0.05, regen: 0.002 }, work: { where: 'settlement', what: 'bake before dawn' }, skill: 'bake bread', skillDesc: 'heal 25%', skillSpec: { re: /^(?:i\s+)?bake (?:some )?(?:bread|loaves|pies|cakes)/i, kind: 'heal', heal: 0.25, hours: 2, message: 'Warm bread and a full belly.' } },
+  butcher:     { edge: 'You know where to cut: +7% damage, +10% more against beasts, 2% less damage taken.', combat: { dmg: 0.07, armor: 0.02, vs: { beast: 0.10 } }, work: { where: 'settlement', what: 'work the butcher\'s block' }, skill: 'dress the carcass', skillDesc: 'hides from a kill', skillSpec: { re: /^(?:i\s+)?(?:dress|butcher|skin) the (?:carcass|kill|beast|body)/i, kind: 'gather', material: 'hide', qty: 2, hours: 1, message: 'Clean cuts: meat, and hides worth keeping.' } },
+  farmer:      { edge: 'Field-hardened: +5% health, 1% less damage taken.', combat: { hp: 0.05, armor: 0.01 }, work: { where: 'wild', what: 'work the fields', material: 'herbs' }, skill: 'forage the fields', skillDesc: 'herbs', skillSpec: { re: /^(?:i\s+)?(?:forage|glean|gather) (?:the )?(?:fields|crops|grain)/i, kind: 'gather', material: 'herbs', qty: 2, hours: 2, message: 'What the fields will give.' } },
+  fisher:      { edge: 'Patient and quick: +3% to hit, +4% dodge, +2% health.', combat: { hit: 0.03, dodge: 0.04, hp: 0.02 }, work: { where: 'wild', what: 'fish the waters', material: 'hide' }, skill: 'cast a line', skillDesc: 'heal 20% (a good catch, cooked)', skillSpec: { re: /^(?:i\s+)?(?:cast a line|fish|go fishing)/i, kind: 'heal', heal: 0.20, hours: 2, message: 'A good catch, cooked on the bank.' } },
+  herbalist:   { edge: 'Remedies at hand: potions +30%, and you recover a little each round.', combat: { potion: 0.30, regen: 0.002 }, work: { where: 'wild', what: 'gather and sell herbs', material: 'herbs' }, skill: 'make a poultice', skillDesc: 'heal 30%', skillSpec: { re: /^(?:i\s+)?(?:make|apply) (?:a )?(?:poultice|salve|remedy)/i, kind: 'heal', heal: 0.30, hours: 1, message: 'Crushed leaves, a clean cloth, and the pain eases.' } },
+  tamer:       { edge: 'Beasts hesitate before you: +4% damage, +15% against beasts, +2% dodge, 1% less damage taken; and you can calm a beast mid-fight.', combat: { dmg: 0.04, dodge: 0.02, armor: 0.01, vs: { beast: 0.15 } }, work: { where: 'any', what: 'break horses and train hounds' }, skill: 'calm it', skillDesc: 'in a fight with a beast: end it without bloodshed', fightSkill: { re: /\b(calm (?:it|the beast)|soothe (?:it|the beast)|tame it)\b/i, kind: 'calm' } },
+  innkeeper:   { edge: 'Hearty and hale: +4% health, potions +20%.', combat: { hp: 0.04, potion: 0.20 }, work: { where: 'settlement', what: 'keep the inn' }, skill: 'pour a round', skillDesc: 'coin and gossip', skillSpec: { re: /^(?:i\s+)?(?:pour a round|tend bar|serve the house)/i, kind: 'coin', coin: 0.5, hours: 3, message: 'The house drinks, talks and pays.' } },
+  cartographer: { edge: 'You know the ground: +3% to hit, +4% dodge, +2% health.', combat: { hit: 0.03, dodge: 0.04, hp: 0.02 }, work: { where: 'any', what: 'survey and sell maps' }, skill: 'chart the land', skillDesc: 'reveal this region\'s landmarks', skillSpec: { re: /^(?:i\s+)?(?:chart|map|survey) the (?:land|area|region|terrain)/i, kind: 'reveal', hours: 3, message: 'You chart the land.' } },
+  sailor:      { edge: 'Sea legs: +4% dodge, +3% health, 1% less damage taken.', combat: { dodge: 0.04, hp: 0.03, armor: 0.01 }, work: { where: 'any', what: 'crew a boat or work the docks' }, skill: 'tie off', skillDesc: '+6% dodge next fight', skillSpec: { re: /^(?:i\s+)?(?:tie off|rig|secure the lines)/i, kind: 'buff', buff: { dodge: 0.06 }, hours: 1, message: 'Lines secured, feet sure. (+6% dodge next fight.)' } },
+  gambler:     { edge: 'Nerve and luck: +12% critical chance, +4% damage.', combat: { crit: 0.12, dmg: 0.04 }, work: { where: 'settlement', what: 'play the tables', variance: 1.6 }, skill: 'roll the dice', skillDesc: 'win big or lose', skillSpec: { re: /^(?:i\s+)?(?:roll the dice|play cards|gamble|place a bet)/i, kind: 'gamble', hours: 2, message: 'The dice fall.' } },
+  courtesan:   { edge: 'Grace under threat: +4% dodge, +4% damage, 1% less damage taken.', combat: { dodge: 0.04, dmg: 0.04, armor: 0.01 }, work: { where: 'settlement', what: 'entertain wealthy clients' }, skill: 'charm a patron', skillDesc: 'coin, and a little regard here', skillSpec: { re: /^(?:i\s+)?(?:charm|entertain|seduce) a (?:patron|client|noble|merchant)/i, kind: 'coin', coin: 0.6, rep: 2, hours: 3, message: 'A patron, charmed — and generous.' } },
+  bounty_hunter: { edge: 'Hunter of people: +6% damage, +3% to hit, +10% against people, 1% less damage taken.', combat: { dmg: 0.06, hit: 0.03, armor: 0.01, vs: { person: 0.10 } }, work: { where: 'any', what: 'hunt bounties' }, skill: 'read the warrants', skillDesc: 'who is wanted here', skillSpec: { re: /^(?:i\s+)?(?:read|check) the (?:warrants|bounties|wanted posters)/i, kind: 'reveal', hours: 0, message: 'You read the warrants.' } },
+  assassin:    { edge: 'A killer\'s timing: +12% critical chance, +5% damage.', combat: { crit: 0.12, dmg: 0.05 }, work: { where: 'settlement', what: 'take a contract', risk: 0.03, bonus: 1.5, crime: { type: 'murder', heinous: 7 } }, skill: 'prepare poison', skillDesc: '+8% damage next fight', skillSpec: { re: /^(?:i\s+)?(?:prepare|brew|coat my blade with) (?:a )?poison/i, kind: 'buff', buff: { dmg: 0.08 }, hours: 1, message: 'A dark smear on the edge. (+8% damage next fight.)' } },
+  smuggler:    { edge: 'Slippery: +4% dodge, +2% to hit.', combat: { dodge: 0.04, hit: 0.02 }, work: { where: 'settlement', what: 'run contraband', risk: 0.08, bonus: 0.9, crime: { type: 'theft', heinous: 3 } }, skill: 'stash my goods', skillDesc: 'coin from a hidden run', skillSpec: { re: /^(?:i\s+)?(?:stash|hide|move) (?:my |the )?(?:goods|cargo|contraband)/i, kind: 'coin', coin: 0.5, hours: 2, message: 'A quiet run, a quiet profit.' } },
+  gravedigger: { edge: 'The dead do not frighten you: +5% damage, +20% against the undead, 2% less damage taken.', combat: { dmg: 0.05, armor: 0.02, vs: { undead: 0.20 } }, work: { where: 'settlement', what: 'dig graves and tend the dead' }, skill: 'lay it to rest', skillDesc: '+10% damage against the undead next fight', skillSpec: { re: /^(?:i\s+)?(?:lay (?:it|them|the dead) to rest|bless the grave|salt the grave)/i, kind: 'buff', buff: { dmg: 0.10 }, hours: 1, message: 'Salt, iron, a word for the dead. (+10% damage next fight.)' } }
+});
+
 function rankFactor(state) { return 0.6 + 0.1 * Math.max(1, Math.min(5, state.professionLevel || 1)); }
 
 // The combat modifiers this character's trade gives against this enemy.
@@ -53,6 +86,12 @@ function combatMods(state, enemy) {
   const c = p.combat;
   const tags = (enemy && enemy.traits && enemy.traits.tags) || [];
   out.dmg += ((c.dmg || 0) + (c.beast && tags.includes('beast') ? c.beast : 0)) * f;
+  for (const [tag, v] of Object.entries(c.vs || {})) {
+    const hit = tag === 'person' ? (enemy && isPerson(enemy)) : tags.includes(tag);
+    if (hit) out.dmg += v * f;
+  }
+  const nb = state.buffs && state.buffs.next;
+  if (nb) { out.dmg += nb.dmg || 0; out.weapon += nb.weapon || 0; out.armor -= nb.armor || 0; out.hit += nb.hit || 0; out.dodge += nb.dodge || 0; }
   const weaponName = (state.gear && state.gear.weapon && state.gear.weapon.name) || '';
   if (c.axe && /axe|hatchet/i.test(weaponName)) out.dmg += c.axe * f;
   if (state.buffs && state.buffs.sharpened) out.weapon += 0.15;
@@ -88,7 +127,7 @@ function hourlyValue(state) {
   return 3 * tier * (1 + 0.25 * ((state.professionLevel || 1) - 1));
 }
 
-const MATERIAL_VALUE = { hide: 6, timber: 5, 'iron ore': 7 };
+const MATERIAL_VALUE = { hide: 6, timber: 5, 'iron ore': 7, herbs: 4 };
 
 function work(state, hours) {
   const key = state.profession;
@@ -116,8 +155,9 @@ function work(state, hours) {
     const sneak = (state.stats && state.stats.dex) || 10;
     if (Math.random() < p.work.risk * (1.2 - Math.min(0.6, (sneak - 10) / 50))) {
       const crime = require('./crime');
-      const res = crime.resolve(state, { type: 'theft', victim: { name: 'a mark in the crowd' }, text: 'working the crowds' }, { forceSeen: true });
-      lines.push('A shout — someone felt your hand.', ...res.lines);
+      const kind = p.work.crime || { type: 'theft', heinous: 2 };
+      const res = crime.resolve(state, { type: kind.type, victim: { name: kind.type === 'murder' ? 'the mark' : 'a mark in the crowd' }, text: `${p.work.what}` }, { forceSeen: true, heinous: kind.heinous });
+      lines.push(kind.type === 'murder' ? 'The job goes wrong — someone sees your face.' : 'A shout — someone saw.', ...res.lines);
       coin = Math.round(coin / 3);
     }
   } else {
@@ -147,13 +187,19 @@ const SKILLS = [
 
 function detectSkill(state, input) {
   const t = String(input || '').trim();
-  return SKILLS.find(s => s.re.test(t)) || null;
+  const own = state && state.profession && PERKS[state.profession] && PERKS[state.profession].skillSpec;
+  if (own && own.re.test(t)) return { prof: state.profession, spec: own };
+  // Another trade's words are just a story action for everyone else
+  // ("I fix the cart wheel" is not a wainwright's shift unless you are one).
+  const fixed = SKILLS.find(s => s.re.test(t) && s.prof === (state && state.profession));
+  return fixed || null;
 }
 
 function useSkill(state, skill, helpers = {}) {
   if (state.profession !== skill.prof) return { success: false, message: `That takes a ${skill.prof}'s training.` };
   state.buffs = state.buffs || {};
   const f = rankFactor(state);
+  if (skill.spec) return useSpec(state, skill.spec, f);
   if (skill.prof === 'blacksmith') { state.buffs.sharpened = true; return { success: true, hours: 1, message: 'The edge sings when you test it. (+15% weapon damage for your next fight.)' }; }
   if (skill.prof === 'tailor') {
     state.buffs.padded = true;
@@ -180,6 +226,50 @@ function useSkill(state, skill, helpers = {}) {
   return null;
 }
 
+// Data-driven trade skills.
+function useSpec(state, spec, f) {
+  state.buffs = state.buffs || {};
+  const r = REGIONS[state.character.region] || {};
+  if (spec.kind === 'buff') {
+    const nb = state.buffs.next = { ...(state.buffs.next || {}) };
+    for (const [k, v] of Object.entries(spec.buff)) nb[k] = Math.max(nb[k] || 0, v * f / 0.9);
+    if (spec.mend) { const a = state.gear && state.gear.armor; if (a && typeof a.durability === 'number') a.durability = Math.min(100, a.durability + 40); }
+    return { success: true, hours: spec.hours, message: spec.message };
+  }
+  if (spec.kind === 'heal') {
+    const now = state.actionCount || 0;
+    if (now - (state.lastTreatAt || -99) < 4) return { success: false, message: 'Not again so soon.' };
+    state.lastTreatAt = now;
+    const before = state.hp;
+    state.hp = Math.min(state.maxHp, state.hp + Math.round(state.maxHp * spec.heal * f / 0.9));
+    return { success: true, hours: spec.hours, message: `${spec.message} (HP +${state.hp - before}.)` };
+  }
+  if (spec.kind === 'gather') {
+    if (!state.materials || typeof state.materials !== 'object') state.materials = {};
+    const qty = Math.max(1, Math.round(spec.qty * f));
+    state.materials[spec.material] = (state.materials[spec.material] || 0) + qty;
+    return { success: true, hours: spec.hours, message: `${spec.message} (${qty} ${spec.material}.)` };
+  }
+  if (spec.kind === 'coin' || spec.kind === 'gamble') {
+    if (!r.settlement && spec.kind === 'gamble') return { success: false, message: 'There is no one here to play.' };
+    const v = hourlyValue(state) * spec.hours;
+    const coin = spec.kind === 'gamble' ? Math.round(v * (Math.random() < 0.5 ? 0 : 2.1)) : Math.round(v * (spec.coin || 0.5));
+    state.coin = (state.coin || 0) + coin;
+    if (spec.rep && state.reputation) state.reputation[state.character.region] = Math.min(100, (state.reputation[state.character.region] || 0) + spec.rep);
+    return { success: true, hours: spec.hours, message: `${spec.message} (${coin ? `+${coin} copper` : 'you lose your stake'}.)` };
+  }
+  if (spec.kind === 'reveal') {
+    if (state.profession === 'bounty_hunter') {
+      const w = Object.keys(state.warrants || {});
+      return { success: true, hours: 0, message: `Wanted here: outlaws and debtors, the usual. ${w.includes(state.character.region) ? 'One of the faces on the board is yours.' : 'None of them are you.'}` };
+    }
+    if (!state.discoveredLandmarks || typeof state.discoveredLandmarks !== 'object') state.discoveredLandmarks = {};
+    for (const l of r.landmarks || []) state.discoveredLandmarks[l.id || l.name] = state.discoveredLandmarks[l.id || l.name] || { at: state.actionCount || 0, charted: true };
+    return { success: true, hours: spec.hours, message: `You chart the land: ${(r.landmarks || []).map(l => l.name).join(', ') || 'nothing of note'}.` };
+  }
+  return null;
+}
+
 // In-fight trade skills: study (scholar), bribe (merchant), steal (thief).
 const FIGHT_SKILLS = {
   scholar: /\b(study it|study (?:the|its) (?:weak|movements)|look for (?:a|its) weakness)\b/i,
@@ -192,6 +282,8 @@ function isPerson(enemy) {
 }
 
 function detectFightSkill(state, input) {
+  const p = state.profession && PERKS[state.profession];
+  if (p && p.fightSkill && p.fightSkill.re.test(String(input || ''))) return state.profession;
   const re = state.profession && FIGHT_SKILLS[state.profession];
   return re && re.test(String(input || '')) ? state.profession : null;
 }
@@ -206,6 +298,13 @@ function useFightSkill(state, prof) {
     const tr = e.traits || T.getEnemyTraits(e);
     const weak = Object.entries(tr.resist || {}).filter(([, v]) => v < 0).map(([k]) => k);
     return { success: true, message: `You watch how it moves. ${weak.length ? `It fears ${weak.join(' and ')}.` : 'It has no weakness you can name, but you know its rhythm now.'} (+10% damage for this fight.)`, endsFight: false };
+  }
+  if (prof === 'tamer') {
+    const T = require('./combat-tactics');
+    const tags = (e.traits || T.getEnemyTraits(e)).tags;
+    if (!tags.includes('beast') || e.isBoss) return { success: false, message: 'That is no beast you can calm.' };
+    const ok = Math.random() < 0.45 + 0.08 * (state.professionLevel || 1);
+    return ok ? { success: true, message: `You go still, speak low, and ${e.label} backs away into the brush.`, endsFight: true } : { success: true, message: 'It will not be calmed — not yet.', endsFight: false };
   }
   if (!isPerson(e)) return { success: false, message: 'There is no reasoning with that.' };
   if (prof === 'merchant') {

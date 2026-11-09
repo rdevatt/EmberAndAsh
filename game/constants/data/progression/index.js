@@ -60,6 +60,13 @@ const PROFESSION_TASKS = {
   scout:      [ {keywords:['village path','familiar road','nearby trail'],level:1}, {keywords:['forest track','mountain pass','cave entrance'],level:15}, {keywords:['enemy territory','monster lair','hidden path'],level:30}, {keywords:['deep wilderness','ancient ruin','cursed land'],level:50}, {keywords:['legendary location','dragon territory'],level:75} ]
 };
 
+// The wider world of trades.
+{
+  const { PROFESSIONS_EXTRA, TASKS_EXTRA } = require('./trades');
+  Object.assign(PROFESSIONS, PROFESSIONS_EXTRA);
+  Object.assign(PROFESSION_TASKS, TASKS_EXTRA);
+}
+
 const SCENE_CONTEXTS = {
   neutral:   { label:'Neutral',   desc:'Normal exploration and interaction.' },
   combat:    { label:'Combat',    desc:'Active fight. Tension high.' },

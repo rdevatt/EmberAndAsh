@@ -25,22 +25,23 @@ function worker(prof, region = 'ironport', rank = 3) {
   return s;
 }
 
-test('twelve professions, each with an edge, a living and a skill', () => {
-  assert.equal(Object.keys(PROFESSIONS).length, 12);
+test('thirty-nine professions, each with an edge, a living and a skill', () => {
+  assert.equal(Object.keys(PROFESSIONS).length, 39);
+  for (const k of ['carpenter', 'wainwright', 'carver', 'bowyer', 'woodsman']) assert.ok(PROFESSIONS[k], `${k} is its own trade`);
   for (const k of Object.keys(PROFESSIONS)) {
     const p = perks.PERKS[k];
     assert.ok(p && p.edge && p.work && p.skill, `${k} is fully defined`);
     assert.ok(Object.keys(p.combat).length >= 1, `${k} has a combat edge`);
   }
   const kinds = new Set(Object.values(perks.PERKS).map(p => Object.keys(p.combat).sort().join('+')));
-  assert.ok(kinds.size >= 10, 'and the edges differ in kind');
+  assert.ok(kinds.size >= 25, 'and the edges differ in kind');
 });
 
 test('every trade earns the same expected living per hour', () => {
-  const MATERIAL_VALUE = { hide: 6, timber: 5, 'iron ore': 7 };
+  const MATERIAL_VALUE = { hide: 6, timber: 5, 'iron ore': 7, herbs: 4 };
   const per = {};
   for (const k of Object.keys(PROFESSIONS)) {
-    if (k === 'thief') continue;
+    if (perks.PERKS[k].work.risk) continue;           // risky trades are measured below
     seedRandom(9);
     const region = perks.PERKS[k].work.where === 'wild' ? 'wyrmwood' : 'ironport';
     let v = 0;
@@ -85,7 +86,7 @@ test('trade skills: treat, sharpen, shelter, prospect; and in a fight: study, br
   const miner = worker('miner', 'blackstone_foothills');
   perks.useSkill(miner, perks.detectSkill(miner, 'I prospect for ore'));
   assert.ok(miner.materials['iron ore'] >= 1);
-  assert.equal(perks.useSkill(worker('cook'), perks.detectSkill(worker('cook'), 'I sharpen my blade')).success, false, 'only the trade that knows it');
+  assert.equal(perks.detectSkill(worker('cook'), 'I sharpen my blade'), null, 'only the trade that knows it');
 
   const fightWith = (prof, label) => {
     const s = worker(prof, 'thornwick'); s.coin = 1000;
@@ -123,4 +124,28 @@ test('working for a living over the API', async () => {
     const t = await c.act('my trade');
     assert.match(t.output, /COOK/);
   } finally { await stopServer(); }
+});
+
+test('the wider trades: buffs, healing, gathering, coin, charting, and calming beasts', () => {
+  seedRandom(8);
+  const c = worker('carver');
+  const k = perks.detectSkill(c, 'I carve a charm from bone');
+  assert.equal(perks.useSkill(c, k).success, true);
+  assert.ok(perks.combatMods(c, null).dmg > perks.combatMods(worker('carver'), null).dmg, 'a charm for the next fight');
+  const h = worker('herbalist'); h.hp = Math.round(h.maxHp / 3); const h0 = h.hp;
+  perks.useSkill(h, perks.detectSkill(h, 'I make a poultice'));
+  assert.ok(h.hp > h0);
+  const f = worker('farmer', 'wyrmwood');
+  perks.useSkill(f, perks.detectSkill(f, 'I forage the fields'));
+  assert.ok(f.materials.herbs >= 1);
+  const map = worker('cartographer', 'thornwick');
+  assert.match(perks.useSkill(map, perks.detectSkill(map, 'I chart the land')).message, /chart the land/);
+  assert.equal(perks.detectSkill(worker('baker'), 'I carve a charm'), null, 'another trade\'s skill is just a story action');
+  const tamer = worker('tamer', 'thornwick');
+  tamer.inCombat = true; tamer.currentEnemy = combat.spawnEnemy('thornwick', 10); tamer.currentEnemy.label = 'Road Wolf';
+  let calmed = false;
+  for (let i = 0; i < 6 && tamer.inCombat; i++) { const r = combat.applyCombatRound(tamer, 'I calm it'); if (r.bribed) calmed = true; }
+  assert.ok(calmed || !tamer.inCombat, 'a tamer can end a fight with a beast without blood');
+  const g = worker('gravedigger');
+  assert.ok(perks.combatMods(g, { traits: { tags: ['undead'] }, label: 'Ghoul' }).dmg > perks.combatMods(g, { traits: { tags: [] }, label: 'Bandit' }).dmg, 'gravediggers fight the dead better');
 });
