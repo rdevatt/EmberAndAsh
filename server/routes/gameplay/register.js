@@ -490,6 +490,15 @@ module.exports = function registerGameplayRoutes(app, deps) {
         if (result.done) {
           state.pendingContextHint = buildOpeningHint(state);
           state.creationPrompt     = null;
+          // Born into a family line: the canon records it, the narrator knows it.
+          if (state.pendingLineage) {
+            const Wl = chronicle.worldOf(state);
+            state.lineage = state.pendingLineage; delete state.pendingLineage;
+            if (Wl) {
+              require('../../../game/canon').lineage(Wl, state.character.name, state.lineage.parentName);
+              chronicle.addEvent(Wl, { type: 'lineage', importance: 3, title: `${state.character.name}, child of ${state.lineage.parentName}, comes of age`, actor: chronicle.actorOf(state), region: state.character.region });
+            }
+          }
         } else {
           state.creationPrompt = result.prompt;
         }
@@ -526,9 +535,10 @@ module.exports = function registerGameplayRoutes(app, deps) {
       // =========================================
       const { worldRoutes } = deps;
       const lowerCmd = stripTrailingPunctuation(cleanInput.toLowerCase());
-      if (worldRoutes && /^(?:new character in (?:this|the same) world|new character here|begin anew in this world|a new generation)(?:,?\s*(\d+)\s*years? later)?$/.test(lowerCmd)) {
-        const yrs = (lowerCmd.match(/(\d+)\s*years?/) || [])[1];
-        const r = await worldRoutes.startNewCharacter(req, { mode: 'same', years: yrs !== undefined ? parseInt(yrs, 10) : 20 });
+      if (worldRoutes && /^(?:new character in (?:this|the same) world|new character here|begin anew in this world|a new generation)(?:,?\s*as (?:the |a )?(?:child|son|daughter|heir) of ([a-z' ]+?))?(?:,?\s*(\d+)\s*years? later)?$/.test(lowerCmd)) {
+        const mm = lowerCmd.match(/(?:as (?:the |a )?(?:child|son|daughter|heir) of ([a-z' ]+?))?(?:,?\s*(\d+)\s*years? later)?$/);
+        const yrs = mm && mm[2];
+        const r = await worldRoutes.startNewCharacter(req, { mode: 'same', years: yrs !== undefined ? parseInt(yrs, 10) : 20, heirOf: mm && mm[1] ? mm[1].trim() : null });
         if (r.error) return sendCommand(req, res, r.error, 'world', { persist: false });
         return res.json({ ...r.body, isCommand: true, commandType: 'newCharacter' });
       }

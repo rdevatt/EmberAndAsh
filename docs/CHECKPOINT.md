@@ -8,11 +8,11 @@ The completion brief has 15 sections. This file records what is done, what is in
 | --- | --- | --- | --- |
 | 1 | History audit of the database files; purge prepared (not published) | M1/M2 | `docs/SECURITY.md` §1; dry run 15 → 0 database blobs |
 | 2 | HTTP, auth and session hardening; authorisation tests; backups | M1/M2 | `tests/security.test.js` (9 tests); browser 58/58 under strict CSP |
+| 4 | Permanent canon (two-layer memory): people, reigns, wars, territory, foundations, artifacts, oaths, choices, lineage, marriage | M4 | `tests/canon.test.js` (5): 300 years, contradictions, compaction, worlds, restart. Live multi-generation check is pending in the final live pass |
 | 3 | Player agency: four-layer turns, action guard, repetition across replies | M3 | `tests/agency.test.js` (12); live: 7 invented sentences removed in 11 turns, 0 fallbacks |
 
 ## Next, in order
 
-4. Permanent canonical world history (two-layer memory). Test it at 10,000+ turns, over generations, through save/load and with contradictions.
 5. Companion personal storylines (all 8) and NPC depth.
 6. Living world: campaigns, succession, economy, institutions, ruler gameplay, visible consequences.
 7. Procedural adventure variety built from world state.

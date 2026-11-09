@@ -57,15 +57,26 @@ module.exports = function registerWorldRoutes(app, deps) {
    * mode 'same': new character in this world, `years` later (0–200).
    * mode 'new' : a new independent world.
    */
-  async function startNewCharacter(req, { mode, years = 20, worldName = null }) {
+  async function startNewCharacter(req, { mode, years = 20, worldName = null, heirOf = null }) {
     const st = req.session.state;
     const world = chronicle.worldOf(st);
+    // A child of someone who lived in this world: a legend, or the character
+    // being set aside now.
+    let parent = null;
+    if (heirOf && mode === 'same' && world) {
+      const q = String(heirOf).toLowerCase();
+      const fig = world.figures.find(f => f.name.toLowerCase() === q || f.name.toLowerCase().split(' ')[0] === q.split(' ')[0]);
+      if (fig) parent = { parentName: fig.name, parentId: fig.characterId, parentTitle: fig.title };
+      else if (st.character && st.character.name && st.character.name.toLowerCase().startsWith(q.split(' ')[0])) parent = { parentName: st.character.name, parentId: st.characterId, parentTitle: null };
+      if (!parent) return { status: 404, error: `No one called "${heirOf}" is remembered in this world. ("legends" lists them.)` };
+    }
     if (mode === 'same') {
       if (!world) return { status: 400, error: 'There is no world to continue.' };
       if (!world.ending && !st.deceased) return { status: 400, error: 'A new character can join this world once its great story has ended (or its hero has died). Start a new world instead, or finish the tale.' };
     }
     const archivedId = archiveCurrent(req, { asLegend: true });
     const fresh = newCreationState();
+    if (parent) fresh.pendingLineage = parent;
     if (st && st.nsfwEnabled === false) fresh.nsfwEnabled = false;
     require('../../../game/content-prefs').inherit(st, fresh);
 
@@ -147,10 +158,10 @@ module.exports = function registerWorldRoutes(app, deps) {
   });
 
   app.post('/api/world/new-character', requireSession, async (req, res) => {
-    const { mode = 'same', years = 20, worldName = null } = req.body || {};
+    const { mode = 'same', years = 20, worldName = null, heirOf = null } = req.body || {};
     if (!['same', 'new'].includes(mode)) return res.status(400).json({ error: 'mode must be "same" or "new".' });
     try {
-      const r = await startNewCharacter(req, { mode, years, worldName });
+      const r = await startNewCharacter(req, { mode, years, worldName, heirOf: typeof heirOf === 'string' ? heirOf.slice(0, 60) : null });
       if (r.error) return res.status(r.status).json({ error: r.error });
       res.json(r.body);
     } catch (e) {

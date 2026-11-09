@@ -271,6 +271,7 @@ module.exports = function createWorldCommands(h) {
         if (!result.unknown || /^(?:i\s+)?recruit/i.test(cmd)) {
           if (result.success) {
             events.push({ type: 'companionJoined', companion: result.companion });
+            if (W && state.character) require('../../../game/canon').relate(W, state.character.name, result.companion.name, 'companion');
             sys(events, result.message);
             appendHint(state, `[COMPANION JOINED — ${result.companion.name} now travels with the player. ${result.companion.description}]`);
             return narrateAndRespond(req, res, input, events);

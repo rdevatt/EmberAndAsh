@@ -276,10 +276,28 @@ function record(state, { input = '', narrative = '', events = [], notes = [] } =
 
   // Names the narration gave, even when it forgot to note them:
   // "the barkeep, Kael", "a guard named Joss", "Name's Gorm".
-  for (const n of namesInProse(narrative, regionLabel)) mergeRole(state, n, region);
+  for (const n of namesInProse(narrative, regionLabel)) {
+    mergeRole(state, n, region);
+    try { const w = require('../chronicle').worldOf(state); if (w) require('../canon').person(w, n.name, { role: n.role, region }); } catch (e) { /* best-effort */ }
+  }
 
-  // The narrator's own notes (names it gave, promises, secrets).
-  for (const n of notes) note(state, { name: n.name, kind: n.kind, fact: n.fact, importance: 2, region, tags: ['narrated'] });
+  // The narrator's own notes (names it gave, promises, secrets). The world's
+  // canon is authoritative: a note cannot bring the dead back to life.
+  let world = null;
+  try { world = require('../chronicle').worldOf(state); } catch (e) { world = null; }
+  const canon = require('../canon');
+  const year = (() => { try { const C = require('../chronicle'); return world ? C.dateOf(C.nowHour(world)).year : null; } catch (e) { return null; } })();
+  for (const n of notes) {
+    if (world && n.kind === 'person' && canon.isDead(world, n.name) && !/\b(dead|died|grave|tomb|ghost|spirit|corpse|buried|remains|memory|remembered)\b/i.test(n.fact)) continue;
+    note(state, { name: n.name, kind: n.kind, fact: n.fact, importance: 2, region, tags: ['narrated'] });
+    if (!world) continue;
+    // People and places the narrator gave names to become part of the world,
+    // so later generations can meet their families, graves and legacies.
+    if (n.kind === 'person') canon.person(world, n.name, { role: (n.fact.match(ROLE_RE) || [])[1], region, lastSeen: year, knownTo: state.character && state.character.name });
+    if (WEIGHTY.test(n.fact) && /\b(promis|swore|oath|owe|debt|betray|secret|vow)/i.test(n.fact)) {
+      canon.oath(world, { by: n.name, to: state.character && state.character.name, what: n.fact, kind: /owe|debt/i.test(n.fact) ? 'debt' : /betray/i.test(n.fact) ? 'betrayal' : /secret/i.test(n.fact) ? 'secret' : 'promise', year });
+    }
+  }
 
   // Recent turns, compact.
   const gist = String(narrative || '').replace(/\s+/g, ' ').slice(0, 260);
@@ -416,6 +434,17 @@ function recall(state, input = '') {
 function promptBlock(state, input) {
   const r = recall(state, input);
   const parts = ['[STORY NOTES — established facts; stay consistent with them. Do not recite them.]'];
+  // The world's permanent canon, as far as this scene touches it: it outranks
+  // everything else here, and is never contradicted.
+  try {
+    const world = require('../chronicle').worldOf(state);
+    if (world) {
+      const names = [state.currentNPC, ...Object.values(state.partners || {}).map(p => p.name), ...(state.companions || []).map(c => c.name), state.lineage && state.lineage.parentName];
+      const lines = require('../canon').recall(world, { input, region: state.character && state.character.region, names, character: state.character && state.character.name });
+      if (state.lineage) lines.unshift(`The player character is the child of ${state.lineage.parentName}${state.lineage.parentTitle ? `, ${state.lineage.parentTitle}` : ''}.`);
+      if (lines.length) parts.push(`World canon (authoritative):\n${lines.join('\n')}`);
+    }
+  } catch (e) { /* no world */ }
   if (r.chapters.length) parts.push(`Story so far:\n${r.chapters.join('\n')}`);
   if (r.threads.length) parts.push(`Open threads:\n${r.threads.join('\n')}`);
   if (r.entities.length) parts.push(`People, places and things:\n${r.entities.join('\n')}`);

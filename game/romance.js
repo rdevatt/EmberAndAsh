@@ -23,6 +23,7 @@ const { REGIONS } = require('./constants');
 const FLIRT = /^(?:i\s+)?(?:flirt with|compliment|kiss|hold hands with|court|woo|romance)\s+(.+?)[.!?]*$/i;
 const NIGHT = /^(?:i\s+)?(?:spend the night with|share a bed with|make love (?:to|with)|sleep with|go to bed with|take (.+?) to bed)\s*(.*?)[.!?]*$/i;
 const END   = /^(?:i\s+)?(?:end things with|break up with|leave)\s+(.+?)[.!?]*$/i;
+const MARRY = /^(?:i\s+)?(?:marry|wed|propose to|ask (.+?) to marry me|propose marriage to)\s*(.*?)[.!?]*$/i;
 
 function rel(state, id) {
   if (!state.npcRelationships || typeof state.npcRelationships !== 'object') state.npcRelationships = {};
@@ -132,6 +133,24 @@ function handle(state, input, helpers = {}) {
     if (reason) return { success: false, message: reason, refused: true };
     const r = infamy.commitCoercion(state, partner, helpers);
     return { success: true, villainy: true, hours: 2, message: [r.message, ...r.consequences].join('\n'), hint: r.hint, event: { type: 'villainy', partner: partner.name, failed: r.failed, discovered: r.discovered } };
+  }
+  // Marriage: only a lover who trusts you deeply says yes. It enters history.
+  const marry = text.match(MARRY);
+  if (marry) {
+    const target = (marry[1] || marry[2] || '').replace(/^(?:me|to)\s+/i, '');
+    const partner = findPartner(state, target);
+    if (!partner) return null;
+    const reason = checkEligible(state, partner, text);
+    if (reason) return { success: false, message: reason, refused: true };
+    if (!state.partners || !state.partners[partner.id]) return { success: false, refused: true, message: `${partner.name} laughs, not unkindly. "We would have to be lovers first."` };
+    const need = partner.companion ? 85 : 80;
+    const score = regard(state, partner);
+    if (score < need) return { success: false, refused: true, message: `${partner.name} is quiet for a long moment. "Not yet." (${score}/${need})` };
+    if (state.spouse && state.spouse.id !== partner.id) return { success: false, refused: true, message: `You are already married to ${state.spouse.name}.` };
+    const world = chronicle.worldOf(state);
+    state.spouse = { id: partner.id, name: partner.name, since: world ? chronicle.nowHour(world) : 0 };
+    if (world) chronicle.addEvent(world, { type: 'marriage', importance: 4, title: `${state.character.name} marries ${partner.name}`, actor: chronicle.actorOf(state), region: state.character.region }, `marriage:${state.characterId}:${partner.id}`);
+    return { success: true, hours: 4, message: `${partner.name} says yes. Before witnesses and whatever gods are listening, you are wed.`, event: { type: 'romance', stage: 'married', partner: partner.name }, hint: `[MARRIAGE — the player character marries ${partner.name}. Narrate the wedding as the player described it.]` };
   }
   const end = text.match(END);
   if (end && state.partners) {

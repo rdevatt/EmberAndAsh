@@ -166,6 +166,8 @@ function addEvent(world, evt, key = null) {
     importance: evt.importance || 1
   };
   world.history.push(entry);
+  // The display log is capped; the permanent canon keeps what matters forever.
+  try { require('./canon').ingest(world, entry); } catch (e) { /* canon is best-effort, never blocks play */ }
   if (world.history.length > 2000) world.history.splice(0, world.history.length - 2000);
   return entry;
 }
@@ -363,6 +365,7 @@ function ageNpcs(world) {
       const span = 68 + (hashInt(npc.id + rec.generation) % 25);
       if (age >= span) {
         const heir = `${HEIR_NAMES[hashInt(npc.id + rec.generation) % HEIR_NAMES.length]} ${rec.name.split(' ').slice(-1)[0]}`;
+        require('./canon').person(world, rec.name, { role: npc.role, region: regionKey, born: dateOf(rec.born * HOURS_PER_DAY).year });
         const entry = addEvent(world, { type: 'death', title: `${rec.name} dies at ${age}`, text: `${rec.name}, ${npc.role} of ${r.label}, is buried. ${heir} takes up the work.`, region: regionKey });
         if (entry) out.push(entry);
         world.npcs[npc.id] = { born: nowDay(world) - (20 + (hashInt(heir) % 15)) * DAYS_PER_YEAR, generation: rec.generation + 1, name: heir, predecessor: rec.name };
@@ -412,6 +415,7 @@ function applyEnding(world, state, ending, { migrated = false } = {}) {
     since: nowDay(world),
     seat: era.seat
   };
+  try { require('./canon').ensure(world).reigns.push({ realm: world.realm.name, ruler: world.realm.rulerName, from: dateOf(nowHour(world)).year, how: `the fall of the Hollow Sovereign (${era.name})` }); } catch (e) { /* best-effort */ }
   addEvent(world, { type: 'ending', importance: 5, title: `The Hollow Sovereign falls — ${era.name} begins`, text: `${hero} stood before the Shattered Throne. ${era.realm[0].toUpperCase() + era.realm.slice(1)} now holds sway. ${era.threat}`, actor: actorOf(state) }, `ending:${world.id}`);
   if (state.characterId) {
     const fig = recordFigure(world, state, { title: heroRules ? world.realm.title.split(', ').slice(1).join(', ') : era.heroTitle, role: heroRules ? 'ruler' : era.heroRole, seat: era.seat || (state.campaign && state.campaign.startRegion) });
@@ -476,6 +480,7 @@ function recordFigure(world, state, { title, role, seat, status } = {}) {
   fig.snapshot = snap;
   fig.personality = personalityOf(state);
   fig.updatedDay = nowDay(world);
+  try { require('./canon').person(world, fig.name, { titles: fig.title, role: fig.role, region: fig.seat || undefined, legend: true, characterId: fig.characterId }); } catch (e) { /* best-effort */ }
   return fig;
 }
 
