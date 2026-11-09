@@ -14,7 +14,7 @@
 const { REGIONS } = require('./constants');
 const chronicle = require('./chronicle');
 const { portraitData, parseAppearance } = require('./appearance');
-const { getEnemyTraits } = require('./combat-tactics');
+const { getEnemyTraits, traitName } = require('./combat-tactics');
 const contentPrefs = require('./content-prefs');
 
 const BIOMES = {
@@ -33,11 +33,30 @@ function enemyShape(enemy) {
   const tags = (enemy.traits || getEnemyTraits(enemy)).tags;
   if (tags.includes('construct')) return 'construct';
   if (tags.includes('spirit')) return 'spirit';
-  if (tags.includes('beast')) return /wyrm|drake|wyvern|serpent/i.test(enemy.label) ? 'wyrm' : 'beast';
+  const name = traitName(enemy.label);
+  if (/spider|scorpion|crawler|broodmother/i.test(name)) return 'spider';
+  if (tags.includes('beast')) return /wyrm|drake|wyvern|serpent/i.test(name) ? 'wyrm' : 'beast';
   if (tags.includes('plant')) return 'treant';
-  if (tags.includes('undead')) return 'skeleton';
+  if (tags.includes('undead')) return /vampire|zomb|ghoul|mummy|revenant|thrall|husk|corpse/i.test(name) ? 'humanoid' : 'skeleton';
   if (tags.includes('caster')) return 'caster';
+  if (/elemental/i.test(name)) return 'elemental';
+  if (/horror|terror|abomination|aberration|deep one|thing\b/i.test(name)) return 'horror';
+  if (/\bworms?\b/i.test(name)) return 'wyrm';
   return 'humanoid';
+}
+
+// Visual features read from the creature's name, so a Bone Terror, a
+// Corrupted Giant and a Cave Bat don't all share one silhouette.
+const FEATURES = [
+  ['winged', /\bbats?\b|wyvern|drake|dragon|harpy|gargoyle|wing|raven|crow|vulture|griffin|roc\b/i],
+  ['legs8', /spider|scorpion|crawler|broodmother|tick/i],
+  ['giant', /giant|troll|ogre|titan|colossus|leviathan|behemoth|ancient|elder/i],
+  ['horned', /demon|\bhorn|bull|minotaur|warlord|lord|king|archon|tyrant|fiend/i],
+  ['armed', /knight|soldier|guard|warrior|bandit|raider|mercenary|hunter|champion|captain/i]
+];
+function enemyFeatures(label) {
+  const name = traitName(label);
+  return FEATURES.filter(([, re]) => re.test(name)).map(([k]) => k);
 }
 
 function enemyDescriptor(enemy, killed) {
@@ -47,7 +66,8 @@ function enemyDescriptor(enemy, killed) {
     label: enemy.label, level: enemy.level, shape: enemyShape(enemy), boss: !!enemy.isBoss,
     tint: tags.includes('fiery') ? 'fire' : tags.includes('frost') ? 'frost' : tags.includes('void') ? 'void' : tags.includes('undead') ? 'bone' : 'plain',
     hpPct: killed ? 0 : Math.max(0, Math.round(100 * enemy.currentHP / Math.max(1, enemy.maxHP))),
-    dead: !!killed || enemy.currentHP <= 0, seed: hashInt(enemy.label)
+    dead: !!killed || enemy.currentHP <= 0, seed: hashInt(enemy.label),
+    features: enemyFeatures(enemy.label)
   };
 }
 

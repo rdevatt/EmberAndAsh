@@ -626,14 +626,24 @@ function recoverGear(state) {
     };
   }
 
-  // Anything picked up since death goes to the backpack rather than vanishing.
-  if (state.gear && state.gear.weapon && state.savedGear.weapon) addItem(state, state.gear.weapon);
-  if (state.gear && state.gear.armor  && state.savedGear.armor)  addItem(state, state.gear.armor);
-
-  state.gear          = {
-    weapon: state.savedGear.weapon || (state.gear && state.gear.weapon) || null,
-    armor:  state.savedGear.armor  || (state.gear && state.gear.armor)  || null
-  };
+  // Per slot, the better piece is worn and the other goes to the backpack —
+  // a replacement bought since the death is never silently swapped out for
+  // older, weaker kit (that downgraded players without a word).
+  const score = (it, slot) => !it ? -1 : (slot === 'weapon' ? (it.weaponBonus || 0) : (it.armorLevel || 0)) * 100 + (it.tier || 0);
+  const kept = [];
+  const next = {};
+  for (const slot of ['weapon', 'armor']) {
+    const now = state.gear && state.gear[slot];
+    const saved = state.savedGear[slot];
+    if (!saved) { next[slot] = now || null; continue; }
+    if (!now) { next[slot] = saved; continue; }
+    const savedBetter = score(saved, slot) > score(now, slot);
+    next[slot] = savedBetter ? saved : now;
+    const spare = savedBetter ? now : saved;
+    addItem(state, spare);
+    if (!savedBetter) kept.push(spare.name);
+  }
+  state.gear = next;
   recalculateResources(state);
   state.savedGear     = null;
   state.deathLocation = null;
@@ -645,7 +655,7 @@ function recoverGear(state) {
     success: true,
     weapon:  state.gear.weapon,
     armor:   state.gear.armor,
-    message: `Gear recovered — weapon: ${wName} | armor: ${aName}.`
+    message: `Gear recovered — weapon: ${wName} | armor: ${aName}.${kept.length ? ` Your newer gear is better, so the old ${kept.join(' and ')} went into your backpack.` : ''}`
   };
 }
 

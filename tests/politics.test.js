@@ -52,6 +52,23 @@ test('decades of politics: legend-led wars, alliances, truces, casualties, bound
   assert.ok(years.size > 5, 'events are spread across the decades');
 });
 
+test('the world never freezes: alliances lapse and wars recur across eighty years', () => {
+  const { w } = worldWithHero('ascend', { emberTaken: true, soulsBound: true });
+  chronicle.advanceTime(newcomer(w), 80 * 360 * 24);
+  const pol = w.history.filter(e => e.type === 'politics');
+  const yearOf = e => Number(e.date.split(', ')[1].split(' ')[0]);
+  const start = yearOf(pol[0]);
+  assert.ok(pol.some(e => /lapses|turns on/.test(`${e.title} ${e.text}`)), 'alliances end as well as begin');
+  // Measured over 80 random worlds: wars after year 30, and wars in at least
+  // three different decades, held in every one. (A long peace after year 40
+  // is a legitimate outcome in about 7% of worlds, so it is not asserted.)
+  const wars = pol.filter(e => /declares war|turns on/.test(e.title));
+  assert.ok(wars.some(e => yearOf(e) - start >= 30), 'wars still break out decades later');
+  assert.ok(new Set(wars.map(e => Math.floor((yearOf(e) - start) / 10))).size >= 3, 'wars are spread across the decades');
+  const states = new Set(Object.values(w.relations).map(r => r.state));
+  assert.ok(!(states.size === 1 && states.has('alliance')), 'not everyone ends up allied with everyone');
+});
+
 test('a merciful legend makes for a gentler world', () => {
   const harsh = worldWithHero('ascend', { emberTaken: true, soulsBound: true }).w;
   const kind = worldWithHero('rekindle', { shardReturned: true, soulsFreed: true, cantorSpared: true }).w;

@@ -547,10 +547,17 @@ function dominionOf(world, regionKey) {
   return ensureDominion(world)[regionKey] || 'compact';
 }
 
+const DOMINION_CAP = 20;
 function setDominion(world, regionKey, faction, why) {
   const d = ensureDominion(world);
   if (d[regionKey] === faction) return null;
   const from = d[regionKey];
+  // No power grows past twenty regions, by any route (conquest, revolt,
+  // a crisis takeover): land it cannot hold falls into lawlessness instead.
+  if (faction !== 'lawless' && Object.values(d).filter(h => h === faction).length >= DOMINION_CAP) {
+    if (from === 'lawless') return null;
+    faction = 'lawless';
+  }
   d[regionKey] = faction;
   const title = faction === 'lawless' ? `${REGIONS[regionKey].label} falls into lawlessness` : `${FACTION_NAMES[faction] || faction} take${faction === 'lawless' ? '' : 's'} control of ${REGIONS[regionKey].label}`;
   return addEvent(world, { type: 'dominion', importance: 3, title, text: `${from === 'lawless' ? 'The lawless years end.' : `${FACTION_NAMES[from] || from} lose their hold.`} ${why || ''}`.trim(), region: regionKey });

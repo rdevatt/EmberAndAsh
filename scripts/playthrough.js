@@ -97,7 +97,7 @@ const count = name => inv().filter(i => (typeof i === 'string' ? i : i.name) ===
 let genTrace = argv.includes('--trace-fights');
 async function fightToEnd() {
   let lastOut = '';
-  if (genTrace) { const ss = sessionsState(); log(`  fight L${level()} hp ${ss.hp}/${ss.maxHp} weapon=${ss.gear && ss.gear.weapon ? ss.gear.weapon.name + '/' + ss.gear.weapon.tier : 'none'} armor=${ss.gear && ss.gear.armor ? ss.gear.armor.name : 'none'} vs ${ss.currentEnemy && ss.currentEnemy.label} L${ss.currentEnemy && ss.currentEnemy.level} in ${region()}`); }
+  if (genTrace) { const ss = sessionsState(); log(`  fight L${level()} hp ${ss.hp}/${ss.maxHp} weapon=${ss.gear && ss.gear.weapon ? ss.gear.weapon.name + '/' + ss.gear.weapon.tier : 'none'} armor=${ss.gear && ss.gear.armor ? ss.gear.armor.name : 'none'} coin=${ss.coin} vs ${ss.currentEnemy && ss.currentEnemy.label} L${ss.currentEnemy && ss.currentEnemy.level} in ${region()}`); }
   for (let round = 0; round < 120 && inCombat(); round++) {
     let input = style.attack;
     const abilities = (last.abilities || []).filter(a => a.ready);
@@ -139,14 +139,15 @@ async function recover() {
     const r = await act('recover my gear');
     if (!/Gear recovered/.test(r.output || '') && last.economy.deathLocation && last.economy.deathLocation !== region()) {
       // Too far to walk back: buy replacements instead.
-      boughtTier = -1;
+      boughtTier = -1; boughtArmorTier = -1;
     }
   }
   if (last.economy && last.economy.weapon && !last.economy.weapon.equipped) boughtTier = -1;
+  if (last.economy && last.economy.armor && !last.economy.armor.equipped) boughtArmorTier = -1;
 }
 
 // ---------- shopping ----------
-let boughtTier = -1;
+let boughtTier = -1, boughtArmorTier = -1;
 const wardsNeeded = new Set();
 async function shop() {
   const r = REGIONS[region()];
@@ -154,15 +155,21 @@ async function shop() {
   const coin = () => (last.character && last.character.coin) || 0;
   const t = tierFor(level());
   const price = 150 * (t + 1) * (t + 1);
-  if (t > boughtTier && coin() > price * 1.9 + 200) {
+  // Weapon and armour are tracked separately: if the purse only covers one,
+  // the other is bought on a later visit instead of being forgotten.
+  if (t > boughtTier && coin() > price + 100) {
     const w = await act(`buy ${style.weapon === 'staff' ? 'oak staff' : style.weapon === 'bow' ? 'longbow' : style.weapon === 'dagger' ? 'dagger' : 'sword'}`);
+    const wn = (w.output || '').match(/Bought (.+?) for/);
+    const eq = wn ? await act(`equip ${wn[1]}`) : null;
+    if (wn) boughtTier = t;
+    if (argv.includes('--trace')) log(`  shop weapon t${t}: ${(w.output || '').slice(0, 60)} | ${(eq && eq.output || '').slice(0, 90)}`);
+  }
+  if (t > boughtArmorTier && coin() > price + 100) {
     const a = await act('buy leather armor');
-    const wn = (w.output || '').match(/Bought (.+?) for/); const an = (a.output || '').match(/Bought (.+?) for/);
-    let e1, e2;
-    if (wn) e1 = await act(`equip ${wn[1]}`);
-    if (an) e2 = await act(`equip ${an[1]}`);
-    if (argv.includes('--trace')) log(`  shop t${t}: ${(w.output || '').slice(0, 60)} | ${(e1 && e1.output || '').slice(0, 60)} | ${(e2 && e2.output || '').slice(0, 60)}`);
-    boughtTier = t;
+    const an = (a.output || '').match(/Bought (.+?) for/);
+    const eq = an ? await act(`equip ${an[1]}`) : null;
+    if (an) boughtArmorTier = t;
+    if (argv.includes('--trace')) log(`  shop armour t${t}: ${(a.output || '').slice(0, 60)} | ${(eq && eq.output || '').slice(0, 90)}`);
   }
   for (const ward of wardsNeeded) if (!inv().some(i => (i.name || i) === ward) && coin() > 300 * r.tier) await act(`buy ${ward}`);
   const w = last.economy && last.economy.weapon, a = last.economy && last.economy.armor;
@@ -400,7 +407,7 @@ function findNpcName(id) {
     const heroName = last.character.name;
     const r = await c.act('new character in this world, 30 years later');
     gen.started = !!r.inCreation;
-    boughtTier = -1; wardsNeeded.clear();          // a new life buys its own kit
+    boughtTier = -1; boughtArmorTier = -1; wardsNeeded.clear();          // a new life buys its own kit
     await act('My name is Wren, I am 16 years old and female');
     await act('Short and wiry, freckles, red curly hair');
     const b = await act('1'); if (b.creationError) await act('1');

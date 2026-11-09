@@ -86,11 +86,11 @@ const BOSSES = {
     ]
   },
   kharzul: {
-    label: 'Kharzul the Ember-Eater', level: 78, hpMult: 3.8, mods: { str: 11, dex: 4, vit: 10 },
+    label: 'Kharzul the Ember-Eater', level: 78, hpMult: 3.6, mods: { str: 10, dex: 4, vit: 10 },
     behavior: 'predator', desc: 'An ash-wyrm that has been gnawing at the Ember for a hundred years. Its scales are cinders; its breath is the Ash itself.',
     special: { every: 3, name: 'Ashen Breath', telegraph: 'Kharzul\'s throat glows violet as it draws a long breath', mult: 2.5, element: 'fire', status: 'burn' },
     phases: [
-      { at: 0.6, effect: 'enrage', text: 'Kharzul tears free a mouthful of the Ember and swallows it. It burns brighter.' },
+      { at: 0.4, effect: 'enrage', text: 'Kharzul tears free a mouthful of the Ember and swallows it. It burns brighter.' },
       { at: 0.3, effect: 'heal', text: 'The wyrm curls around the World-Forge and feeds.', amount: 0.15 }
     ]
   },

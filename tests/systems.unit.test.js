@@ -388,3 +388,23 @@ test('profession unlocks: gated recipes, combat elixirs and snares, scholar scro
   const snared = combat.applyCombatRound(alch, 'I set a snare');
   assert.match(snared.combatLog, /snare/);
 });
+
+test('enemy traits ignore place names; recovering gear never downgrades what you wear', () => {
+  assert.deepEqual(T.getEnemyTraits({ label: 'Thornwick Brute' }).tags, [], 'a Thornwick man is not a thorn bush');
+  assert.deepEqual(T.getEnemyTraits({ label: 'Veldrath Marauder' }).tags, [], 'nor is a Veldrath raider a rat');
+  assert.ok(T.getEnemyTraits({ label: 'Cave Rat Swarm' }).tags.includes('beast'));
+  assert.ok(T.getEnemyTraits({ label: 'Thorn Dryad' }).tags.includes('plant'));
+  assert.ok(T.getEnemyTraits({ label: 'Vampire Spawn' }).tags.includes('undead'));
+
+  const economy = require('../game/economy');
+  const s = ready('thornwick', 70);
+  s.gear = { weapon: ch.buildGearItem({ name: 'superior oak staff', tier: 6 }, false), armor: ch.buildGearItem({ name: 'superior leather armor', tier: 6 }, true) };
+  economy.saveGearAtDeath(s);
+  s.gear = { weapon: ch.buildGearItem({ name: 'exceptional oak staff', tier: 7 }, false), armor: null };
+  const r = economy.recoverGear(s);
+  assert.equal(r.success, true);
+  assert.equal(s.gear.weapon.tier, 7, 'the newer, better staff stays in hand');
+  assert.equal(s.gear.armor.tier, 6, 'the empty armour slot takes the recovered armour');
+  assert.ok(s.inventory.some(i => /superior oak staff/.test(i.name || i)), 'the old staff goes to the backpack');
+  assert.match(r.message, /newer gear is better/);
+});

@@ -169,7 +169,8 @@
     const trim = trimFor(d.armor ? d.armor.tier : 0);
     const stoop = age >= 70 ? 4 : 0;
     const w = a.build === 'broad' ? 13 : a.build === 'slender' ? 9 : 11;
-    const legs = pose === 'rest' ? `<path d="M-8 78 l18 0 M-6 82 l18 0" stroke="#3a2e26" stroke-width="5" stroke-linecap="round"/>`
+    // Sitting: crossed legs tucked under the body, not floating below it.
+    const legs = pose === 'rest' ? `<path d="M${-w - 2} 58 Q0 50 ${w + 4} 60 M${-w + 2} 61 Q2 66 ${w + 2} 56" stroke="#3a2e26" stroke-width="5.5" stroke-linecap="round" fill="none"/>`
       : `<path d="M-4 60 L-6 88 M4 60 L6 88" stroke="#3a2e26" stroke-width="5" stroke-linecap="round" class="ea-legs"/>`;
     const robeSkirt = armorKind === 'robe' ? `<path d="M${-w} 56 L${-w - 3} 86 L${w + 3} 86 L${w} 56Z" fill="${body}"/>` : '';
     const arm = pose === 'attack' ? `<path d="M${w - 2} 30 L${w + 16} 30" stroke="${body}" stroke-width="6" stroke-linecap="round"/>`
@@ -182,12 +183,19 @@
       wk === 'staff' ? `<rect x="${w + 12}" y="4" width="3" height="80" fill="#6a4a2e"/><circle cx="${w + 13.5}" cy="4" r="4" fill="${trim}"/>` :
       wk === 'spear' ? `<g transform="rotate(${pose === 'attack' ? 80 : 0} ${w + 6} 40)"><rect x="${w + 5}" y="0" width="2.5" height="86" fill="#6a4a2e"/><path d="M${w + 3} 2 l3.3 -10 l3.3 10z" fill="#c8ccd4"/></g>` :
       wk === 'tome' ? `<rect x="${w + 2}" y="40" width="10" height="13" rx="1.5" fill="#5a2a2a" stroke="${trim}"/>` :
+      (wk === 'axe' || wk === 'mace') ? (() => {
+        const headShape = wk === 'axe' ? `<path d="M0 -2 q9 -3 10 6 q-1 9 -10 6z" fill="#c8ccd4" stroke="#6a6e78" stroke-width="0.6"/>` : `<circle cx="1.5" cy="2" r="5" fill="#8a8e98" stroke="#5a5e68"/><path d="M1.5 -4.5 v-2 M7 2 h2 M-4 2 h-2" stroke="#5a5e68" stroke-width="1.5"/>`;
+        return pose === 'attack' ? `<g transform="translate(${w + 14} 29) rotate(90)"><rect x="-1.2" y="-2" width="3" height="26" fill="#6a4a2e"/><g transform="translate(0 -2)">${headShape}</g></g>`
+          : `<g transform="translate(${w + 2} 26) rotate(12)"><rect x="-1.2" y="0" width="3" height="28" fill="#6a4a2e"/>${headShape}</g>`;
+      })() :
       pose === 'attack' ? `<rect x="${w + 14}" y="27" width="${wk === 'dagger' ? 12 : 26}" height="4" fill="#c8ccd4" stroke="#6a6e78" stroke-width="0.6" class="ea-blade"/>` :
       `<rect x="${w + 2}" y="${wk === 'dagger' ? 40 : 22}" width="3.5" height="${wk === 'dagger' ? 12 : 30}" fill="#c8ccd4" stroke="#6a6e78" stroke-width="0.6" transform="rotate(15 ${w + 4} 52)"/>`;
     const head = `<circle cx="0" cy="${12 + stoop}" r="9" fill="${skin}" stroke="${shade(skin, -0.35)}"/>` +
       (a.hairStyle === 'bald' ? '' : `<path d="M-9 ${11 + stoop} Q-9 ${0 + stoop} 0 ${1 + stoop} Q9 ${0 + stoop} 9 ${11 + stoop} Q4 ${6 + stoop} -9 ${11 + stoop}Z" fill="${hair}"/>`) +
       ((a.hairStyle === 'long' || a.hairStyle === 'braided') ? `<path d="M-9 ${11 + stoop} L-10 ${26 + stoop} L-4 ${24 + stoop}Z" fill="${hair}"/>` : '') +
-      (a.beard === 'beard' ? `<path d="M-6 ${16 + stoop} Q0 ${26 + stoop} 6 ${16 + stoop}Z" fill="${hair}"/>` : '') +
+      // A beard follows the jaw from ear to ear and leaves the mouth clear,
+      // so on any skin tone it reads as hair rather than an open mouth.
+      (a.beard === 'beard' ? `<path d="M-8.6 ${12 + stoop} Q-8 ${24 + stoop} 0 ${26 + stoop} Q8 ${24 + stoop} 8.6 ${12 + stoop} Q7 ${17 + stoop} 4 ${17 + stoop} Q0 ${15.5 + stoop} -4 ${17 + stoop} Q-7 ${17 + stoop} -8.6 ${12 + stoop}Z" fill="${hair}"/><path d="M-2.6 ${18.4 + stoop} q2.6 1.2 5.2 0" stroke="${shade(skin, -0.45)}" stroke-width="0.9" fill="none"/>` : '') +
       `<circle cx="4" cy="${11 + stoop}" r="1.3" fill="${d.undead ? '#7fffd0' : '#222'}"/>` +
       (d.crown ? `<path d="M-7 ${3 + stoop} l2 -6 l3 4 l2 -6 l2 6 l3 -4 l2 6z" fill="#e0b84a"/>` : '');
     const torsoShape = `<path d="M${-w} 56 Q${-w} 26 0 ${22 + stoop} Q${w} 26 ${w} 56Z" fill="${body}" stroke="${shade(body, -0.35)}"/>` + (trim && armorKind !== 'clothes' ? `<path d="M${-w + 2} 30 L${w - 2} 30" stroke="${trim}" stroke-width="1.5"/>` : '');
@@ -197,7 +205,9 @@
     let wounds = '';
     if (d.wounds && v === 'mild') wounds = `<path d="M${-w + 2} 38 L${w - 2} 34" stroke="#e8e0d0" stroke-width="3" class="ea-bandage"/>`;
     if (d.wounds && v === 'mature') wounds = `<path d="M${-w + 3} 32 q4 6 2 14 M${2} 30 q3 8 1 18" stroke="#8a0f0f" stroke-width="${d.wounds > 1 ? 2.6 : 1.6}" fill="none" class="ea-blood"/>` + (d.wounds > 1 ? `<path d="M-3 ${8 + stoop} q2 4 0 7" stroke="#8a0f0f" stroke-width="1.4" fill="none"/>` : '');
-    return `<g class="ea-figure ea-pose-${esc(pose || 'idle')}" transform="${tilt}">${legs}${robeSkirt}${torsoShape}${wounds}${arm}${weapon}${head}</g>`;
+    // A cloak marks well-made armour (tier 5+), so progression shows in scenes too.
+    const cape = d.armor && d.armor.tier >= 5 && armorKind !== 'robe' && pose !== 'rest' ? `<path d="M${-w + 1} 26 Q${-w - 10} 56 ${-w - 6} 80 L${-w + 6} 78 Q${-w + 2} 50 ${-w + 6} 26Z" fill="${shade(trim, -0.45)}" opacity="0.95"/>` : '';
+    return `<g class="ea-figure ea-pose-${esc(pose || 'idle')}" transform="${tilt}">${cape}${legs}${robeSkirt}${torsoShape}${wounds}${arm}${weapon}${head}</g>`;
   }
 
   // Lying under a blanket. Implied nudity at most: bare shoulders are
@@ -214,7 +224,8 @@
   const ENEMY_TINT = { fire: '#c8542a', frost: '#7ab8d8', void: '#6a3a9a', bone: '#d8d0b8', plain: '#5a5048' };
   function enemyArt(e) {
     if (!e) return '';
-    const c = ENEMY_TINT[e.tint] || ENEMY_TINT.plain;
+    const JIT = ['#7a5a3a', '#4a5a3a', '#5a4a6a', '#6a3a2a', '#3a4a5a', '#8a7a5a'];
+    const c = mix(ENEMY_TINT[e.tint] || ENEMY_TINT.plain, JIT[(e.seed || 0) % JIT.length], e.tint === 'plain' ? 0.35 : 0.12);
     const dk = shade(c, -0.4);
     const eye = e.tint === 'void' ? '#e0a0ff' : e.tint === 'frost' ? '#e0ffff' : '#ff5a3a';
     let body;
@@ -222,14 +233,25 @@
       case 'beast': body = `<path d="M-30 60 Q-34 34 -8 32 L18 30 Q32 22 36 34 Q40 44 30 46 L22 48 L20 70 M-24 60 L-24 72 M-10 60 L-10 72 M10 58 L10 72" fill="${c}" stroke="${dk}" stroke-width="5" stroke-linecap="round"/><circle cx="30" cy="35" r="2.5" fill="${eye}"/>`; break;
       case 'wyrm': body = `<path d="M-40 70 Q-20 40 0 50 Q20 60 30 30 Q36 18 46 24 Q50 34 38 38" fill="none" stroke="${c}" stroke-width="12" stroke-linecap="round"/><path d="M-6 44 l-10 -26 l18 16z" fill="${dk}"/><circle cx="42" cy="27" r="2.5" fill="${eye}"/>`; break;
       case 'skeleton': body = `<circle cx="0" cy="14" r="9" fill="${c}" stroke="${dk}"/><circle cx="-3" cy="13" r="2" fill="${eye}"/><circle cx="3" cy="13" r="2" fill="${eye}"/><path d="M0 23 L0 58 M-12 30 L12 30 M-10 37 L10 37 M-8 44 L8 44 M0 58 L-7 86 M0 58 L7 86 M-12 30 L-16 54 M12 30 L22 44" stroke="${c}" stroke-width="3.5" stroke-linecap="round"/>`; break;
+      case 'spider': body = `<path d="M-8 52 L-34 34 L-44 66 M-6 56 L-36 52 L-42 80 M6 56 L36 52 L42 80 M8 52 L34 34 L44 66 M-6 60 L-24 70 L-28 86 M6 60 L24 70 L28 86" stroke="${dk}" stroke-width="3" fill="none" stroke-linecap="round"/><ellipse cx="0" cy="56" rx="16" ry="12" fill="${c}" stroke="${dk}" stroke-width="2"/><ellipse cx="-14" cy="50" rx="9" ry="7" fill="${shade(c, -0.15)}"/><circle cx="-18" cy="48" r="1.6" fill="${eye}"/><circle cx="-14" cy="46" r="1.6" fill="${eye}"/><circle cx="-11" cy="49" r="1.2" fill="${eye}"/>`; break;
+      case 'elemental': body = `<path d="M0 88 Q-22 70 -14 50 Q-26 34 -10 20 Q-4 2 6 10 Q22 4 18 26 Q30 42 14 56 Q22 74 0 88Z" fill="${c}" stroke="${dk}" stroke-width="2" opacity="0.92" class="ea-pulse"/><path d="M-8 60 Q0 40 10 52 M-6 36 Q4 24 10 34" stroke="${shade(c, 0.35)}" stroke-width="2" fill="none"/><circle cx="-4" cy="26" r="2.4" fill="${eye}"/><circle cx="5" cy="26" r="2.4" fill="${eye}"/>`; break;
+      case 'horror': body = `<path d="M-24 86 Q-30 60 -22 44 Q-28 20 -6 14 Q8 4 20 18 Q34 30 24 50 Q32 70 24 86Z" fill="${c}" stroke="${dk}" stroke-width="2"/><path d="M-20 70 q-14 4 -18 16 M-10 80 q-6 6 -4 10 M14 80 q8 4 8 10 M22 64 q14 2 18 14 M-22 46 q-16 -6 -22 4" stroke="${dk}" stroke-width="4" fill="none" stroke-linecap="round"/><circle cx="-8" cy="30" r="3" fill="${eye}"/><circle cx="4" cy="26" r="2" fill="${eye}"/><circle cx="12" cy="34" r="2.6" fill="${eye}"/><path d="M-10 46 q10 8 20 0" stroke="#1a0a0a" stroke-width="2.5" fill="none"/>`; break;
       case 'construct': body = `<rect x="-22" y="20" width="44" height="40" rx="3" fill="${c}" stroke="${dk}" stroke-width="2"/><rect x="-14" y="2" width="28" height="20" fill="${shade(c, -0.15)}" stroke="${dk}" stroke-width="2"/><rect x="-8" y="9" width="16" height="4" fill="${eye}"/><rect x="-18" y="60" width="12" height="28" fill="${c}" stroke="${dk}"/><rect x="6" y="60" width="12" height="28" fill="${c}" stroke="${dk}"/>`; break;
       case 'spirit': body = `<path d="M-16 20 Q0 -8 16 20 Q22 50 10 80 Q4 70 0 84 Q-4 70 -10 82 Q-22 50 -16 20Z" fill="${c}" opacity="0.7"/><circle cx="-5" cy="22" r="2.5" fill="${eye}"/><circle cx="5" cy="22" r="2.5" fill="${eye}"/>`; break;
       case 'treant': body = `<path d="M-14 88 L-10 20 Q0 -6 10 20 L14 88Z" fill="#5a4030" stroke="#3a2818" stroke-width="2"/><circle cx="0" cy="8" r="22" fill="${e.tint === 'plain' ? '#4f6a3a' : c}" opacity="0.9"/><circle cx="-4" cy="30" r="2.5" fill="${eye}"/><circle cx="4" cy="30" r="2.5" fill="${eye}"/>`; break;
       case 'caster': body = `<path d="M-14 86 L-10 26 Q0 16 10 26 L14 86Z" fill="${shade(c, -0.1)}" stroke="${dk}" stroke-width="2"/><path d="M-11 22 Q0 -6 11 22Z" fill="${dk}"/><circle cx="-3" cy="17" r="1.8" fill="${eye}"/><circle cx="3" cy="17" r="1.8" fill="${eye}"/><circle cx="-20" cy="34" r="5" fill="${eye}" opacity="0.6" class="ea-glow"/>`; break;
       default: body = `<circle cx="0" cy="12" r="10" fill="${shade(c, 0.2)}" stroke="${dk}"/><circle cx="-4" cy="11" r="2" fill="${eye}"/><path d="M-13 58 Q-13 26 0 22 Q13 26 13 58Z" fill="${c}" stroke="${dk}"/><path d="M-4 58 L-6 88 M4 58 L6 88" stroke="${dk}" stroke-width="5" stroke-linecap="round"/><path d="M-12 30 L-26 22" stroke="${c}" stroke-width="5" stroke-linecap="round"/><rect x="-36" y="10" width="4" height="22" fill="#9a9ea8" transform="rotate(-30 -28 22)"/>`;
     }
-    const scale = e.boss ? 1.45 : 1;
-    return `<g class="ea-enemy-body" transform="scale(${-scale} ${scale})">${body}</g>`;
+    // Per-creature variation from the name: size, a touch of tint, and
+    // features (wings, horns, a weapon, eight legs) layered on the shape.
+    const f = e.features || [];
+    const sd = e.seed || 0;
+    let extra = '';
+    if (f.includes('winged') && e.shape !== 'spider') extra += `<path d="M-6 30 Q-40 -6 -58 18 Q-44 20 -40 32 Q-26 26 -6 40Z M6 30 Q36 -10 50 10 Q38 14 34 26 Q22 24 6 40Z" fill="${dk}" opacity="0.85" class="ea-flap"/>`;
+    if (f.includes('horned')) { const hy = e.shape === 'beast' ? 28 : e.shape === 'construct' ? 2 : e.shape === 'wyrm' ? 22 : 6; const hx = e.shape === 'beast' ? 30 : e.shape === 'wyrm' ? 42 : 0; extra += `<path d="M${hx - 6} ${hy} q-6 -10 -2 -16 q0 8 5 12z M${hx + 6} ${hy} q6 -10 2 -16 q0 8 -5 12z" fill="#e8e0c8" stroke="${dk}" stroke-width="0.6"/>`; }
+    if (f.includes('armed') && ['humanoid', 'skeleton'].includes(e.shape)) extra += `<rect x="-24" y="34" width="12" height="18" rx="3" fill="${shade(c, -0.25)}" stroke="#9a9ea8" stroke-width="1.2"/>`;
+    const scale = (e.boss ? 1.45 : 1) * (f.includes('giant') ? 1.25 : 1) * (0.92 + (sd % 17) / 100);
+    return `<g class="ea-enemy-body" transform="scale(${-scale.toFixed(3)} ${scale.toFixed(3)})">${extra.includes('ea-flap') ? extra + body : body + extra}</g>`;
   }
 
   // ---------------------------------------------------------
@@ -267,6 +289,25 @@
     if (b === 'battlefield') for (let i = 0; i < 9; i++) { const x = (i * 47 + R(i)) % 400; s += `<path d="M${x} 152 l2 -18 M${x - 5} 140 l10 0" stroke="#3a2a20" stroke-width="2"/>`; }
     if (b === 'moor') s += `<rect x="0" y="120" width="400" height="40" fill="#c8c8c0" opacity="0.18"/>`;
     s += `<rect x="0" y="150" width="400" height="50" fill="${season === 'winter' && !['desert', 'volcanic', 'void', 'throne', 'city', 'whitecity', 'saltflat'].includes(b) ? '#e8eef4' : mid}"/>`;
+    return s;
+  }
+
+  // Foreground details along the bottom edge: grass, reeds, stones, cobbles,
+  // embers or crystals depending on the land. Cheap shapes, seeded by region.
+  function foreground(b, season, seed) {
+    const g = GROUND[b] || '#5a5a3a';
+    const snow = season === 'winter' && !['desert', 'volcanic', 'void', 'throne', 'city', 'whitecity', 'saltflat'].includes(b);
+    const at = (i) => (((seed >> (i % 16)) + i * 61) % 400);
+    let s = `<rect x="0" y="186" width="400" height="14" fill="${shade(snow ? '#e8eef4' : g, -0.28)}" opacity="0.9"/>`;
+    for (let i = 0; i < 9; i++) {
+      const x = at(i);
+      if (['city', 'town', 'whitecity', 'castle'].includes(b)) s += `<rect x="${x}" y="${188 + (i % 3) * 3}" width="12" height="4" rx="1" fill="${shade(g, 0.12)}" opacity="0.7"/>`;
+      else if (['desert', 'saltflat', 'ashland', 'ruins', 'mountain', 'battlefield'].includes(b)) s += `<path d="M${x} 192 q4 -7 9 -1 q3 4 -1 5z" fill="${shade(g, -0.4)}"/>`;
+      else if (b === 'volcanic') s += `<circle cx="${x}" cy="${190 + (i % 4) * 2}" r="1.4" fill="#f08a3a" class="ea-flicker" style="animation-delay:${(i % 5) * 0.3}s"/>`;
+      else if (['void', 'throne', 'blight'].includes(b)) s += `<path d="M${x} 194 l3 -10 l3 10z" fill="${b === 'blight' ? '#8a5aa8' : '#6a4a9a'}" opacity="0.8"/>`;
+      else if (b === 'swamp' || b === 'coast') s += `<path d="M${x} 196 q-1 -10 -3 -14 M${x + 3} 196 q1 -12 3 -16" stroke="${shade(g, -0.1)}" stroke-width="1.5" fill="none"/>`;
+      else s += `<path d="M${x} 194 l-3 -8 M${x + 2} 194 l0 -10 M${x + 4} 194 l3 -8" stroke="${snow ? '#c8d0d8' : season === 'autumn' ? '#9a7a3a' : shade(g, 0.1)}" stroke-width="1.4"/>`;
+    }
     return s;
   }
 
@@ -323,27 +364,39 @@
     const era = sc.era === 'ascend' ? '#5a2a7a' : sc.era === 'rekindle' ? '#e0902a' : null;
     const out = [`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 200" preserveAspectRatio="xMidYMax slice" class="ea-scene" role="img" aria-label="${esc(`${sc.regionLabel || ''}, ${sc.timeOfDay || ''}, ${sc.season || ''}`)}">`];
     out.push(`<defs><linearGradient id="sky${seed}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${sky[0]}"/><stop offset="1" stop-color="${sky[1]}"/></linearGradient></defs>`);
+    out.push('<g class="ea-backdrop">');
     out.push(`<rect width="400" height="200" fill="url(#sky${seed})"/>`);
     if (sc.timeOfDay === 'night') { for (let i = 0; i < 26; i++) out.push(`<circle cx="${(seed >> (i % 20)) % 400}" cy="${(i * 37) % 110}" r="0.8" fill="#fff" opacity="0.8"/>`); out.push('<circle cx="330" cy="30" r="12" fill="#e8e8d8"/>'); }
     else out.push(`<circle cx="${sc.timeOfDay === 'dawn' ? 40 : sc.timeOfDay === 'dusk' ? 360 : 300}" cy="${sc.timeOfDay === 'dawn' || sc.timeOfDay === 'dusk' ? 120 : 34}" r="14" fill="${sc.timeOfDay === 'dusk' || sc.timeOfDay === 'dawn' ? '#f0a060' : '#fff4c0'}" opacity="0.9"/>`);
+    if (sc.timeOfDay !== 'night' && !['void', 'throne'].includes(sc.biome)) {
+      // A few clouds, placed by region so each place keeps its own sky.
+      const cloud = sc.timeOfDay === 'dusk' || sc.timeOfDay === 'dawn' ? '#f0c8b0' : '#ffffff';
+      for (let i = 0; i < 3; i++) { const cx = (seed >> (i * 5)) % 360 + 20, cy = 18 + ((seed >> (i * 3 + 2)) % 40), w = 26 + ((seed >> i) % 22); out.push(`<g opacity="${sc.weather === 'fog' ? 0.25 : 0.55}" class="ea-drift" style="animation-duration:${14 + i * 5}s"><ellipse cx="${cx}" cy="${cy}" rx="${w}" ry="${w * 0.28}" fill="${cloud}"/><ellipse cx="${cx + w * 0.35}" cy="${cy - 5}" rx="${w * 0.5}" ry="${w * 0.3}" fill="${cloud}"/></g>`); }
+    }
     if (era) out.push(`<rect width="400" height="200" fill="${era}" opacity="0.12"/>`);
     out.push(`<g class="ea-bg">${biomeLayers(sc.biome, sc.season, seed)}</g>`);
     if (sc.settlementStatus === 'ruined') out.push('<path d="M20 150 l10 -30 l8 30 M60 150 l6 -18 l8 18" stroke="#2a2420" stroke-width="3"/><circle cx="40" cy="110" r="10" fill="#555" opacity="0.4" class="ea-drift"/>');
     // Horror off softens the dread in void, blight and throne scenery.
     out.push(`<g class="ea-weather"${(sc.content || {}).horror === 'off' ? ' opacity="0.35"' : ''}>${weatherLayer(sc.weather, seed)}</g>`);
     out.push(horrorLayer(sc, seed));
+    out.push('</g>');
     // campfire / inn for rest
     if (sc.playerPose === 'rest') out.push('<g class="ea-campfire" transform="translate(150 168)"><path d="M-10 6 L10 -2 M-10 -2 L10 6" stroke="#5a3a20" stroke-width="3"/><path d="M-6 0 Q0 -18 6 0Z" fill="#f08a2a" class="ea-flicker"/></g>');
     // actors
     const vio = (sc.content || {}).violence || 'mild';
     if (sc.enemy && sc.enemy.dead && vio !== 'off') out.push(`<ellipse cx="290" cy="170" rx="${vio === 'mature' ? 34 : 18}" ry="${vio === 'mature' ? 7 : 4}" fill="${vio === 'mature' ? '#6a0a0a' : '#3a2a26'}" opacity="0.85" class="ea-pool"/>`);
     if (sc.mood === 'death' && vio === 'mature') out.push('<ellipse cx="110" cy="172" rx="30" ry="6" fill="#6a0a0a" opacity="0.85" class="ea-pool"/>');
+    // Shadows ground the actors on the land.
+    if (sc.playerPose !== 'rest') out.push('<ellipse cx="110" cy="169" rx="16" ry="3.5" fill="#000" opacity="0.28"/>');
+    if (sc.enemy && !sc.enemy.dead) out.push(`<ellipse cx="290" cy="${sc.enemy.boss ? 178 : 170}" rx="${sc.enemy.boss ? 40 : 24}" ry="${sc.enemy.boss ? 6 : 4}" fill="#000" opacity="0.28"/>`);
+    else if (!sc.enemy && sc.npc) out.push('<ellipse cx="290" cy="169" rx="15" ry="3.5" fill="#000" opacity="0.28"/>');
     out.push(`<g class="ea-actor ea-player" transform="translate(110 ${sc.playerPose === 'rest' ? 92 : 80})">${figure(sc.player, sc.playerPose === 'combat' ? 'idle' : sc.playerPose, { violence: vio })}</g>`);
     if (sc.enemy) out.push(`<g class="ea-actor ea-enemy${sc.enemy.dead ? ' ea-dead' : ''}" transform="translate(290 ${sc.enemy.boss ? 50 : 82})">${enemyArt(sc.enemy)}</g>`);
     else if (sc.npc) out.push(`<g class="ea-actor ea-npc" transform="translate(290 80) scale(-1 1)">${figure({ appearance: sc.npc.appearance, age: 40, armor: { kind: 'clothes' }, weapon: { kind: 'none' }, crown: sc.npc.crown }, 'idle')}</g>`);
+    out.push(`<g class="ea-fore">${foreground(sc.biome, sc.season, seed)}</g>`);
     out.push('<g class="ea-fx"></g>');
-    if (sc.mood === 'death') out.push('<rect width="400" height="200" fill="#000" opacity="0.45"/>');
-    if (sc.mood === 'grim') out.push('<rect width="400" height="200" fill="#202028" opacity="0.55" class="ea-grim"/>');
+    if (sc.mood === 'death') out.push('<rect x="-400" width="1200" height="200" fill="#000" opacity="0.45"/>');
+    if (sc.mood === 'grim') out.push('<rect x="-400" width="1200" height="200" fill="#202028" opacity="0.55" class="ea-grim"/>');
     out.push('</svg>');
     return out.join('');
   }

@@ -17,8 +17,14 @@ const { GEAR_QUALITIES } = require('./constants');
 // ---------------------------------------------
 // Enemy traits from their names
 // ---------------------------------------------
+// Region names are proper nouns, not descriptions: "Thornwick Brute" is a
+// man, not a thorn bush, and "Veldrath Marauder" is not a rat. They are
+// removed before the name is read for traits.
+const PLACE_NAMES = /\b(thornwick|dustfall|ironport|greymere|ashwood|oakhaven|salten|blackstone|sunken ?fen|wyrmwood|ruinwatch|coldsnap|veldrath|veldrathi|frozen ?north|deepmark)\b/gi;
+function traitName(label) { return String(label || '').replace(PLACE_NAMES, ' ').replace(/\s+/g, ' ').trim(); }
+
 const TRAIT_RULES = [
-  { tag: 'undead',    re: /skeleton|zombie|ghoul|wraith|lich|shade|spectre|specter|revenant|barrow|bone|dead|grave|tomb|drowned|husk|mummy|ghost|haunt|thrall|deathless|undying|corpse|seneschal|cantor/i,
+  { tag: 'undead',    re: /skeleton|zomb|vampire|ghoul|wraith|lich|shade|spectre|specter|revenant|barrow|bone|dead|grave|tomb|drowned|husk|mummy|ghost|haunt|thrall|deathless|undying|corpse|seneschal|cantor/i,
     resist: { holy: -0.5, fire: -0.2, shadow: 0.5 }, immune: ['bleed', 'poison'] },
   { tag: 'spirit',    re: /wraith|shade|spectre|specter|ghost|phantom|wisp|spirit|sprite|banshee/i,
     resist: { physical: 0.35, holy: -0.3, arcane: -0.2 }, immune: ['bleed'] },
@@ -30,16 +36,16 @@ const TRAIT_RULES = [
     resist: { frost: 0.6, fire: -0.4 } },
   { tag: 'void',      re: /void|rift|null|unmade|breach|aberr|sovereign|hollow/i,
     resist: { arcane: 0.3, void: 0.5, holy: -0.25 } },
-  { tag: 'plant',     re: /dryad|treant|thorn|vine|root|fung|bloom|ashwood|sprout/i,
+  { tag: 'plant',     re: /dryad|treant|thorn|vine|root|fung|bloom|sprout/i,
     resist: { fire: -0.5, nature: 0.5 } },
-  { tag: 'beast',     re: /wolf|boar|bear|hound|hyena|rat|scorpion|spider|serpent|drake|wyvern|wyrm|basilisk|cat|deer|bat|crab|eel|beast|stag|lion/i,
+  { tag: 'beast',     re: /wolf|boar|bear|hound|hyena|\brats?\b|scorpion|spider|serpent|drake|wyvern|wyrm|basilisk|\bcats?\b|deer|\bbats?\b|crab|\beels?\b|beast|stag|lion/i,
     resist: { poison: -0.25 } },
-  { tag: 'caster',    re: /shaman|cultist|lich|witch|mage|sorcer|druid|priest|cantor|seer|imp|sprite|necromancer|warlock|hierophant|choir/i,
+  { tag: 'caster',    re: /shaman|cultist|lich|witch|mage|sorcer|druid|priest|cantor|seer|\bimps?\b|sprite|necromancer|warlock|hierophant|choir/i,
     resist: {} }
 ];
 
 function getEnemyTraits(enemy) {
-  const label = String(enemy.label || '');
+  const label = traitName(enemy.label);
   const tags = [];
   const resist = {};
   const immune = new Set();
@@ -484,6 +490,7 @@ function describeAbility(a) {
 module.exports = {
   ABILITIES,
   getEnemyTraits,
+  traitName,
   resistMultiplier,
   describeTraits,
   getKnownAbilities,

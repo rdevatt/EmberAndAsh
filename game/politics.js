@@ -21,6 +21,8 @@ const { getPlayerLevel } = require('./character');
 const POWERS = ['wardens', 'compact', 'remnant', 'choir'];
 const NAMES = { wardens: 'the Ember Wardens', compact: 'the Free Compact', remnant: 'the Veldrathi Remnant', choir: 'the Ashen Choir' };
 const COUNCILS = { wardens: 'the High Warden\'s council', compact: 'the Council of Free Towns', remnant: 'the Sunspire court', choir: 'the Choir\'s cantors' };
+// Councils rule when no legend does. The Remnant's Sunspire court still dreams of empire.
+const COUNCIL_TRAITS = { wardens: ['dutiful'], compact: ['merciful'], remnant: ['ambitious'], choir: ['ruthless'] };
 const ENDING_FACTION = { rekindle: 'wardens', imperium: 'remnant', ascend: 'choir', shatter: 'compact' };
 
 function hashInt(s) { let h = 2166136261; for (const ch of String(s)) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); } return h >>> 0; }
@@ -56,7 +58,7 @@ function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
 function leaderOf(world, faction) {
   const legend = (world.figures || []).find(f => f.status !== 'deceased' && (f.faction === faction || (world.realm && world.realm.rulerId === f.characterId && ENDING_FACTION[world.ending] === faction)));
   if (legend) return { name: legend.name, title: legend.title, traits: legend.personality || [], legend, level: (legend.snapshot && legend.snapshot.level) || 1 };
-  return { name: COUNCILS[faction], traits: faction === 'choir' ? ['ruthless'] : faction === 'compact' ? ['merciful'] : ['dutiful'], legend: null, level: 0 };
+  return { name: COUNCILS[faction], traits: COUNCIL_TRAITS[faction] || ['dutiful'], legend: null, level: 0 };
 }
 
 function territory(world, faction) { return Object.values(chronicle.ensureDominion(world)).filter(h => h === faction).length; }
@@ -162,6 +164,28 @@ function yearlyTurn(world) {
     }
     // Truces settle into peace with time.
     for (const p of POWERS) if (p !== f) { const r = relation(world, f, p); if (r.state === 'truce' && chronicle.nowDay(world) - r.since > 3 * chronicle.DAYS_PER_YEAR) events.push(setRelation(world, f, p, 'peace', 'The truce has held long enough to be called peace.')); }
+  }
+
+  // 3) Alliances are not forever. Without the threat that made them they
+  // cool back to peace; and a ruthless ruler may turn on a much weaker ally.
+  // Without this, sixty-year simulations ended with every power allied to
+  // every other and nothing left to happen.
+  for (let i = 0; i < POWERS.length; i++) for (let j = i + 1; j < POWERS.length; j++) {
+    const a = POWERS[i], b = POWERS[j];
+    const r = relation(world, a, b);
+    if (r.state !== 'alliance' || chronicle.nowDay(world) - r.since < 4 * chronicle.DAYS_PER_YEAR) continue;
+    const roll = hashInt(`${world.id}${a}${b}${year}ally`) % 12;
+    for (const [f, other] of [[a, b], [b, a]]) {
+      const leader = leaderOf(world, f);
+      if ((leader.traits.includes('ruthless') || leader.traits.includes('cruel')) && roll === 0 && strength(world, other) < strength(world, f) * 0.6 && fronts(world, f, other).length) {
+        events.push(setRelation(world, f, other, 'war', `${leader.name} turns on an ally grown weak.`, leader.legend ? { id: leader.legend.characterId, name: leader.name } : null));
+        break;
+      }
+    }
+    if (relation(world, a, b).state !== 'alliance') continue;
+    const sab = Math.max(strength(world, a), strength(world, b));
+    const threat = POWERS.some(p => p !== a && p !== b && strength(world, p) > sab * 1.3);
+    if (!threat && roll < 3) events.push(setRelation(world, a, b, 'peace', 'With no common enemy left to fear, the alliance quietly lapses.'));
   }
   return events.filter(Boolean);
 }

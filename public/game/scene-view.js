@@ -117,6 +117,7 @@
     holder.dataset.enemyDead = scene.enemy ? String(!!scene.enemy.dead) : 'none';
     if (caption) caption.textContent = `${scene.regionLabel || ''} · ${scene.season || ''} ${scene.timeOfDay || ''}${scene.year ? ` · ${scene.year} E.R.` : ''}`;
     const svg = holder.querySelector('svg');
+    frame(holder, svg);
     const events = scene.events || [];
     if (still || !svg) {
       holder.dataset.played = events.map(e => e.type).join(',');
@@ -129,6 +130,50 @@
       holder.dataset.played = (holder.dataset.played ? holder.dataset.played + ',' : '') + ev.type;
     }, i * STEP_MS));
   }
+
+  // Wide panels (desktop) would otherwise crop the 2:1 picture hard (which
+  // cut heads off) or zoom in on it. Instead the view keeps at least 130 of
+  // the 200 units of height — enough for the actors and the ground — and
+  // widens: the backdrop and foreground are mirrored at both edges, which
+  // joins seamlessly. Narrow screens (phones) keep the plain picture and
+  // pay nothing for this.
+  let frameId = 0;
+  function frame(holder, svg) {
+    if (!holder || !svg) return;
+    const w = holder.clientWidth, h = holder.clientHeight;
+    if (!w || !h) return;
+    const aspect = w / h;
+    const height = Math.max(130, Math.min(200, 400 / aspect));
+    const width = height * aspect;
+    svg.querySelectorAll('.ea-mirror').forEach(n => n.remove());
+    if (width <= 401) {
+      svg.setAttribute('viewBox', `0 ${(200 - height).toFixed(1)} 400 ${height.toFixed(1)}`);
+      svg.setAttribute('preserveAspectRatio', 'xMidYMax slice');
+      return;
+    }
+    const x0 = -(width - 400) / 2;
+    svg.setAttribute('viewBox', `${x0.toFixed(1)} ${(200 - height).toFixed(1)} ${width.toFixed(1)} ${height.toFixed(1)}`);
+    svg.setAttribute('preserveAspectRatio', 'xMidYMax slice');
+    const NS = 'http://www.w3.org/2000/svg';
+    for (const cls of ['ea-backdrop', 'ea-fore']) {
+      const g = svg.querySelector('.' + cls);
+      if (!g) continue;
+      if (!g.id) g.id = `ea-${cls}-${++frameId}`;
+      for (const t of ['translate(0 0) scale(-1 1)', 'translate(800 0) scale(-1 1)']) {
+        const u = document.createElementNS(NS, 'use');
+        u.setAttribute('href', '#' + g.id);
+        u.setAttribute('transform', t);
+        u.setAttribute('class', 'ea-mirror');
+        u.setAttribute('aria-hidden', 'true');
+        g.parentNode.insertBefore(u, g);
+      }
+    }
+  }
+  let resizeTimer = null;
+  window.addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => { const holder = document.getElementById('scene-holder'); if (holder) frame(holder, holder.querySelector('svg')); }, 150);
+  });
 
   function renderPortrait(holder, portrait) {
     if (!holder || !portrait || !window.EmberArt) return;

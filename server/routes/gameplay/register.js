@@ -160,8 +160,7 @@ module.exports = function registerGameplayRoutes(app, deps) {
   // ---------------------------------------------
 
   // Applies death: level loss, gear left at the death site, revive.
-  // Lose 1 level per death, rising to 3 for repeated deaths in a short span
-  // (based on recent deaths — a lifetime count made long runs unrecoverable).
+  // recentDeaths is still tracked (other systems read it).
   const RECENT_DEATH_WINDOW = 50; // actions
   function applyDeath(state, events) {
     const playerLevel = getPlayerLevel(state.totalXP || 0);
@@ -169,15 +168,20 @@ module.exports = function registerGameplayRoutes(app, deps) {
     state.deathCount  = (state.deathCount || 0) + 1;
     state.recentDeaths = (state.recentDeaths || []).filter(a => now - a < RECENT_DEATH_WINDOW);
     state.recentDeaths.push(now);
-    // Below level 100 a death costs 1–3 levels (the original rule). Beyond
-    // that a single level can be worth a whole campaign, so legends instead
-    // lose a quarter of their progress toward the next level — painful,
-    // never ruinous, and never a spiral.
+    // Below level 100 a death costs one level and the progress toward the
+    // next. It used to stack to three for deaths in quick succession, which
+    // in campaign playtests turned one bad stretch into a spiral (a bard fell
+    // from 80 to 69 at the Crucible, out of its level range, and took 2,400
+    // actions to climb back). It also never takes you below the level the
+    // current story chapter requires, so the road ahead stays open. Beyond
+    // 100 a single level can be worth a whole campaign, so legends instead
+    // lose a quarter of their progress toward the next level.
     let levelsLost = 0, newLevel = playerLevel, xpLost = null;
     if (playerLevel < 100) {
-      // Newcomers (below level 10) lose a single level, never a stack.
-      levelsLost = playerLevel < 10 ? 1 : Math.min(3, state.recentDeaths.length);
-      newLevel   = Math.max(1, playerLevel - levelsLost);
+      let floor = 1;
+      try { const cur = campaign.getCurrentStep(state); if (cur && cur.chapter && cur.chapter.minLevel) floor = Math.min(playerLevel, cur.chapter.minLevel); } catch (e) { /* no campaign */ }
+      newLevel   = Math.max(1, floor, playerLevel - 1);
+      levelsLost = playerLevel - newLevel;
       state.totalXP = getXPForLevel(newLevel);
     } else {
       const XPm = require('../../../game/character/xp');
