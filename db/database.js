@@ -235,13 +235,15 @@ function updatePlayerSettings(playerId, settings) {
 // =============================================
 
 // Store a remember-me token for persistent login
-function storeRememberToken(playerId, token) {
+// tokenHash: the SHA-256 of the token (the raw token is never stored).
+// Up to five devices stay signed in; the oldest is dropped beyond that.
+function storeRememberToken(playerId, tokenHash) {
+  const token = tokenHash;
   try {
-    // Delete any existing tokens for this player (one active token per player)
-    const deleteStmt = db.prepare(`
-      DELETE FROM remember_tokens WHERE player_id = ?
-    `);
-    deleteStmt.run(playerId);
+    db.prepare(`
+      DELETE FROM remember_tokens WHERE player_id = ? AND id NOT IN (
+        SELECT id FROM remember_tokens WHERE player_id = ? ORDER BY expires_at DESC LIMIT 4)
+    `).run(playerId, playerId);
 
     // Insert new token with 30-day expiry
     const stmt = db.prepare(`
@@ -257,22 +259,40 @@ function storeRememberToken(playerId, token) {
 }
 
 // Get player by remember token (for auto-login)
-function getPlayerByRememberToken(token) {
+// Looks a token up by its hash. Tokens issued before hashing was introduced
+// are accepted once more and upgraded to their hash on the spot.
+function getPlayerByRememberToken(tokenHash, rawLegacy = null) {
   const stmt = db.prepare(`
     SELECT p.id, p.username, p.email, p.nsfw_enabled, p.settings
     FROM players p
     JOIN remember_tokens rt ON p.id = rt.player_id
     WHERE rt.token = ? AND rt.expires_at > datetime('now')
   `);
-  return stmt.get(token) || null;
+  const found = stmt.get(tokenHash);
+  if (found || !rawLegacy) return found || null;
+  const legacy = stmt.get(rawLegacy);
+  if (legacy) db.prepare('UPDATE remember_tokens SET token = ? WHERE token = ?').run(tokenHash, rawLegacy);
+  return legacy || null;
 }
 
-// Delete a remember token (for logout)
-function deleteRememberToken(token) {
-  const stmt = db.prepare(`
-    DELETE FROM remember_tokens WHERE token = ?
-  `);
-  stmt.run(token);
+// Delete a remember token (for logout): by hash, or a legacy raw token.
+function deleteRememberToken(tokenHash, rawLegacy = null) {
+  db.prepare('DELETE FROM remember_tokens WHERE token = ? OR token = ?').run(tokenHash, rawLegacy || tokenHash);
+}
+
+// Revoke everything for an account: all remember tokens and sessions.
+function revokeAllForPlayer(playerId, exceptSessionId = null) {
+  db.prepare('DELETE FROM remember_tokens WHERE player_id = ?').run(playerId);
+  if (exceptSessionId) db.prepare('DELETE FROM player_sessions WHERE player_id = ? AND session_id <> ?').run(playerId, exceptSessionId);
+  else db.prepare('DELETE FROM player_sessions WHERE player_id = ?').run(playerId);
+}
+
+function updatePasswordHash(playerId, hash) {
+  db.prepare('UPDATE players SET password_hash = ? WHERE id = ?').run(hash, playerId);
+}
+
+function getPlayerAuthById(playerId) {
+  return db.prepare('SELECT id, username, password_hash FROM players WHERE id = ?').get(playerId) || null;
 }
 
 // Clean up expired remember tokens
@@ -541,7 +561,7 @@ function deleteGuestSession(sessionId) {
 function cleanExpiredGuestSessions() {
   const stmt = db.prepare(`
     DELETE FROM guest_sessions
-    WHERE updated_at < datetime('now', '-24 hours')
+    WHERE updated_at < datetime('now', '-14 days')
   `);
   const result = stmt.run();
   if (result.changes > 0) {
@@ -657,6 +677,7 @@ setInterval(runMaintenance, 6 * 60 * 60 * 1000).unref();
 
 
 module.exports = {
+  revokeAllForPlayer, updatePasswordHash, getPlayerAuthById,
   saveWorld,
   loadWorld,
   listWorlds,

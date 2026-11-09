@@ -9,7 +9,7 @@
 require('dotenv').config();
 
 const express  = require('express');
-const cors     = require('cors');
+const security = require('./security');
 const path     = require('path');
 const { randomUUID: uuidv4 } = require('crypto');
 const bcrypt   = require('bcryptjs');
@@ -52,15 +52,20 @@ const db = require('../db/database');
 const app  = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(cors({
-  origin: '*'
-}));
-app.use((req, res, next) => {
-  res.removeHeader('X-Frame-Options');
-  res.setHeader('Content-Security-Policy', "frame-ancestors *");
-  next();
-});
-app.use(express.json());
+// Behind a proxy (Railway, nginx) set TRUST_PROXY=1 so HTTPS and client
+// IPs are seen correctly (HSTS, rate limits).
+if (process.env.TRUST_PROXY) app.set('trust proxy', /^\d+$/.test(process.env.TRUST_PROXY) ? Number(process.env.TRUST_PROXY) : process.env.TRUST_PROXY);
+app.disable('x-powered-by');
+app.use(security.securityHeaders);
+app.use(security.corsPolicy());
+app.use('/api/', ...security.limits.api);
+app.use('/api/auth/login', ...security.limits.login);
+app.use('/api/auth/register', ...security.limits.register);
+app.use('/api/auth/auto-login', ...security.limits.autoLogin);
+app.use('/api/auth/guest', ...security.limits.guest);
+app.use(['/api/auth/change-password', '/api/auth/logout-all'], ...security.limits.account);
+app.use(['/api/action', '/api/edit-action', '/api/retry-narrative', '/api/undo'], ...security.limits.action);
+app.use(express.json({ limit: '64kb' }));
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
 
@@ -127,6 +132,14 @@ function newCreationState() {
   return state;
 }
 
+// Optional scheduled backups of the real database (EMBER_BACKUP_HOURS=24).
+if (Number(process.env.EMBER_BACKUP_HOURS) > 0 && !process.env.NODE_TEST_CONTEXT) {
+  setInterval(() => {
+    require('../scripts/db-backup').backup(process.env.EMBER_DB_PATH || require('path').join(__dirname, '..', 'data', 'emberandash.db'))
+      .then(r => console.log(`[Backup] ${r.file}`)).catch(e => console.error('[Backup] failed:', e.message));
+  }, Number(process.env.EMBER_BACKUP_HOURS) * 3600 * 1000).unref();
+}
+
 // Clean idle sessions from memory every 30 minutes
 setInterval(() => {
   const cutoff = Date.now() - 30 * 60 * 1000;
@@ -144,8 +157,13 @@ setInterval(() => {
 // Simple bcrypt password hashing.
 // No JWT — session ID in header is sufficient for now.
 // =============================================
+const BCRYPT_ROUNDS = 12;
 async function hashPassword(password) {
-  return bcrypt.hash(password, 10);
+  return bcrypt.hash(password, BCRYPT_ROUNDS);
+}
+// Older accounts were hashed with fewer rounds; they are upgraded on login.
+function needsRehash(hash) {
+  try { return bcrypt.getRounds(hash) < BCRYPT_ROUNDS; } catch (e) { return false; }
 }
 
 async function verifyPassword(password, hash) {
@@ -155,6 +173,7 @@ async function verifyPassword(password, hash) {
 function requireSession(req, res, next) {
   const sessionId = req.headers['x-session-id'];
   if (!sessionId) return res.status(401).json({ error: 'No session ID provided.' });
+  if (!security.validSessionId(sessionId)) return res.status(401).json({ error: 'Session not found or expired.', code: 'SESSION_EXPIRED' });
 
   const session = getSession(sessionId) || restoreSession(sessionId);
   if (!session) return res.status(401).json({ error: 'Session not found or expired.', code: 'SESSION_EXPIRED' });
@@ -179,6 +198,9 @@ registerAuthRoutes(app, {
   uuidv4,
   hashPassword,
   verifyPassword,
+  needsRehash,
+  security,
+  sessions,
   setSession,
   getSession,
   persistSession,
@@ -348,23 +370,20 @@ function buildOpeningPrompt() {
 // =============================================
 // HEALTH CHECK
 // =============================================
+// Public: liveness only. Counts of players and sessions are not published.
 app.get('/api/health', (req, res) => {
-  const stats = db.getStats();
-  res.json({
-    status:  'ok',
-    uptime:  process.uptime(),
-    db:      stats,
-    sessions:sessions.size
-  });
+  res.json({ status: 'ok', uptime: Math.round(process.uptime()) });
 });
 
 
 // =============================================
 // CATCH-ALL — serve frontend
 // =============================================
+app.use('/api', (req, res) => res.status(404).json({ error: 'Not found.' }));
 app.get('/{*path}', (req, res) => {
   res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
 });
+app.use(security.errorHandler);
 
 
 // =============================================

@@ -8,6 +8,9 @@ module.exports = function registerAuthRoutes(app, deps) {
     uuidv4,
     hashPassword,
     verifyPassword,
+    needsRehash,
+    security,
+    sessions,
     setSession,
     getSession,
     persistSession,
@@ -21,6 +24,11 @@ module.exports = function registerAuthRoutes(app, deps) {
     buildRightPanelData,
     buildBoardDisplayData
   } = deps;
+
+  // A real hash to compare against when the account does not exist, so a
+  // wrong username takes as long as a wrong password.
+  let DUMMY = null;
+  async function dummyHash() { if (!DUMMY) DUMMY = await hashPassword('not-a-real-password'); return DUMMY; }
 
   function panels(state) {
     return {
@@ -93,8 +101,10 @@ module.exports = function registerAuthRoutes(app, deps) {
     if (!/^[A-Za-z0-9_.-]+$/.test(username)) {
       return res.status(400).json({ error: 'Username may only contain letters, numbers, and _ . -' });
     }
-    if (password.length < 6) {
-      return res.status(400).json({ error: 'Password must be at least 6 characters.' });
+    const weak = security.passwordProblem(password, username);
+    if (weak) return res.status(400).json({ error: weak });
+    if (email !== undefined && email !== null && (typeof email !== 'string' || email.length > 200 || (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)))) {
+      return res.status(400).json({ error: 'That email address does not look right.' });
     }
 
     const hash   = await hashPassword(password);
@@ -110,17 +120,19 @@ module.exports = function registerAuthRoutes(app, deps) {
   app.post('/api/auth/login', async (req, res) => {
     const { username, password, sessionId, rememberMe } = req.body || {};
 
-    if (!username || !password) {
+    if (!username || !password || typeof username !== 'string' || typeof password !== 'string' || password.length > 200) {
       return res.status(400).json({ error: 'Username and password required.' });
     }
 
     const player = db.getPlayerByUsername(username);
-    if (!player) return res.status(401).json({ error: 'Invalid credentials.' });
-
-    const valid = await verifyPassword(password, player.password_hash);
-    if (!valid) return res.status(401).json({ error: 'Invalid credentials.' });
+    // The same work and the same answer whether or not the account exists.
+    const valid = await verifyPassword(password, player ? player.password_hash : await dummyHash());
+    if (!player || !valid) return res.status(401).json({ error: 'Invalid credentials.' });
 
     db.recordLogin(player.id);
+    // Older, weaker hashes are upgraded transparently.
+    if (needsRehash(player.password_hash)) db.updatePasswordHash(player.id, await hashPassword(password));
+    if (sessionId !== undefined && sessionId !== null && !security.validSessionId(sessionId)) return res.status(400).json({ error: 'Bad session.' });
 
     const resolved     = resolveLoginState(player.id, sessionId);
     const newSessionId = uuidv4();
@@ -136,8 +148,8 @@ module.exports = function registerAuthRoutes(app, deps) {
 
     let rememberToken = null;
     if (rememberMe) {
-      rememberToken = uuidv4();
-      db.storeRememberToken(player.id, rememberToken);
+      rememberToken = security.newToken();
+      db.storeRememberToken(player.id, security.hashToken(rememberToken));
     }
 
     res.json(sessionPayload(newSessionId, resolved.state, {
@@ -151,9 +163,9 @@ module.exports = function registerAuthRoutes(app, deps) {
 
   app.post('/api/auth/auto-login', async (req, res) => {
     const { rememberToken } = req.body || {};
-    if (!rememberToken) return res.status(400).json({ error: 'No token.' });
+    if (!rememberToken || typeof rememberToken !== 'string' || rememberToken.length > 200) return res.status(400).json({ error: 'No token.' });
 
-    const player = db.getPlayerByRememberToken(rememberToken);
+    const player = db.getPlayerByRememberToken(security.hashToken(rememberToken), rememberToken);
     if (!player) return res.status(401).json({ error: 'Token expired or invalid.' });
 
     const resolved     = resolveLoginState(player.id, null);
@@ -191,17 +203,61 @@ module.exports = function registerAuthRoutes(app, deps) {
     }
   }
 
-  app.post('/api/auth/logout', (req, res) => {
+  // Logging out ends this session everywhere it lives: memory and database.
+  app.post('/api/auth/logout', async (req, res) => {
     const { rememberToken } = req.body || {};
     const sessionId = req.headers['x-session-id'];
-    if (rememberToken) db.deleteRememberToken(rememberToken);
-    if (sessionId) db.deletePlayerSession(sessionId);
+    if (rememberToken && typeof rememberToken === 'string') db.deleteRememberToken(security.hashToken(rememberToken), rememberToken);
+    if (sessionId && security.validSessionId(sessionId)) {
+      const live = sessions.get(sessionId);
+      if (live && live.playerId) { await persistSession(sessionId); sessions.delete(sessionId); }
+      db.deletePlayerSession(sessionId);
+    }
+    res.json({ success: true });
+  });
+
+  function currentPlayerSession(req) {
+    const sessionId = req.headers['x-session-id'];
+    if (!security.validSessionId(sessionId)) return null;
+    const live = sessions.get(sessionId) || null;
+    const row = db.getPlayerSession(sessionId);
+    const playerId = (live && live.playerId) || (row && row.player_id);
+    return playerId ? { sessionId, playerId } : null;
+  }
+
+  function dropMemorySessions(playerId, exceptSessionId) {
+    for (const [id, s] of sessions) if (s.playerId === playerId && id !== exceptSessionId) { sessions.delete(id); }
+  }
+
+  // Sign out every other device: all remember-me tokens and other sessions.
+  app.post('/api/auth/logout-all', async (req, res) => {
+    const me = currentPlayerSession(req);
+    if (!me) return res.status(401).json({ error: 'Must be logged in.' });
+    db.revokeAllForPlayer(me.playerId, me.sessionId);
+    dropMemorySessions(me.playerId, me.sessionId);
+    res.json({ success: true });
+  });
+
+  // Change password: needs the current one; signs out every other device.
+  app.post('/api/auth/change-password', async (req, res) => {
+    const me = currentPlayerSession(req);
+    if (!me) return res.status(401).json({ error: 'Must be logged in.' });
+    const { currentPassword, newPassword } = req.body || {};
+    const player = db.getPlayerAuthById(me.playerId);
+    if (!player || typeof currentPassword !== 'string' || !(await verifyPassword(currentPassword, player.password_hash))) {
+      return res.status(401).json({ error: 'Current password is wrong.' });
+    }
+    const weak = security.passwordProblem(newPassword, player.username);
+    if (weak) return res.status(400).json({ error: weak });
+    db.updatePasswordHash(player.id, await hashPassword(newPassword));
+    db.revokeAllForPlayer(player.id, me.sessionId);
+    dropMemorySessions(player.id, me.sessionId);
     res.json({ success: true });
   });
 
   app.post('/api/auth/guest', async (req, res) => {
     const existingId = (req.body || {}).sessionId;
-    if (existingId) {
+    if (existingId && security.validSessionId(existingId)) {
       const live     = getSession(existingId);
       const existing = live && !live.playerId ? { state: live.state } : db.loadGuestSession(existingId);
       if (existing) {

@@ -114,6 +114,7 @@
     const first = (!still && killsEnemy && scene.enemy) ? { ...scene, enemy: { ...scene.enemy, dead: false } } : scene;
     holder.innerHTML = window.EmberArt.scene(first);
     holder.dataset.region = scene.region || '';
+    holder.dataset.mood = scene.mood || '';
     holder.dataset.enemyDead = scene.enemy ? String(!!scene.enemy.dead) : 'none';
     if (caption) caption.textContent = `${scene.regionLabel || ''} · ${scene.season || ''} ${scene.timeOfDay || ''}${scene.year ? ` · ${scene.year} E.R.` : ''}`;
     const svg = holder.querySelector('svg');

@@ -27,9 +27,20 @@ async function newPage(browser, viewport) {
   return { page, errors };
 }
 
+// Polls a condition with page.evaluate (CDP), which the page's strict CSP
+// allows; page.waitForFunction needs eval, which the game forbids.
+async function waitUntil(page, fn, arg, timeout = 30000) {
+  const end = Date.now() + timeout;
+  while (Date.now() < end) {
+    if (await page.evaluate(fn, arg).catch(() => false)) return true;
+    await page.waitForTimeout(100);
+  }
+  throw new Error('waitUntil timed out');
+}
+
 function helpers(page) {
   const visible = sel => page.locator(sel).first().isVisible().catch(() => false);
-  const idle = () => page.waitForFunction(() => document.getElementById('loading-overlay').classList.contains('hidden'));
+  const idle = () => waitUntil(page, () => document.getElementById('loading-overlay').classList.contains('hidden'));
   const send = async text => { await page.fill('#player-input', text); await page.press('#player-input', 'Enter'); await idle(); };
   const lastStory = () => page.locator('#story-content .story-entry').last().innerText();
   return { visible, idle, send, lastStory };
@@ -140,10 +151,12 @@ async function desktop(browser) {
   // Crime: the deed is drawn and remembered; the world reacts.
   await h.send('talk to Old Hask');
   await h.send('I murder Old Hask');
-  check('desktop: a crime is drawn as a crime scene', /ea-grim/.test(await page.locator('#scene-holder').innerHTML()));
+  const crimeMood = await page.locator('#scene-holder').getAttribute('data-mood');
+  check('desktop: a crime is drawn as a crime scene', crimeMood === 'crime' && /ea-grim/.test(await page.locator('#scene-holder').innerHTML()), `mood=${crimeMood}; story: ${(await h.lastStory()).slice(0, 120)}`);
   if (/plead innocent/.test(await page.locator('#story-content').innerText())) await h.send('confess');
   await h.send('deeds');
-  check('desktop: the character remembers what they did', /murder — Old Hask/.test(await h.lastStory()));
+  // The attempt can fail (Old Hask fights back): then it is remembered as an assault.
+  check('desktop: the character remembers what they did', /(murder|assault) — Old Hask/.test(await h.lastStory()), (await h.lastStory()).slice(0, 160));
   check('desktop: the road darkens after a murder', Number(await page.locator('#road-meter').getAttribute('data-value')) < 0, await page.locator('#road-label').innerText());
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/desktop-crime.png` });
   check('desktop: no console errors', errors.length === 0, errors.slice(0, 3).join(' | '));

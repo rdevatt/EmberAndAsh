@@ -11,6 +11,8 @@ const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ember-test-'));
 process.env.EMBER_DB_PATH      = path.join(tmpDir, 'test.db');
 process.env.NARRATIVE_OFFLINE  = '1';
 process.env.EMBER_NO_AUTOSTART = '1';
+// Automated play is far faster than a person; the security tests check the real limits.
+if (!process.env.EMBER_RATE_LIMIT_SCALE) process.env.EMBER_RATE_LIMIT_SCALE = '1000';
 
 // Deterministic randomness so combat/loot-dependent tests are stable.
 function seedRandom(seed = 12345) {
