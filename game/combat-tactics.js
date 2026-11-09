@@ -20,7 +20,7 @@ const { GEAR_QUALITIES } = require('./constants');
 const TRAIT_RULES = [
   { tag: 'undead',    re: /skeleton|zombie|ghoul|wraith|lich|shade|spectre|specter|revenant|barrow|bone|dead|grave|tomb|drowned|husk|mummy|ghost|haunt|thrall|deathless|undying|corpse|seneschal|cantor/i,
     resist: { holy: -0.5, fire: -0.2, shadow: 0.5 }, immune: ['bleed', 'poison'] },
-  { tag: 'spirit',    re: /wraith|shade|spectre|specter|ghost|phantom|wisp|spirit|echo|sprite|banshee/i,
+  { tag: 'spirit',    re: /wraith|shade|spectre|specter|ghost|phantom|wisp|spirit|sprite|banshee/i,
     resist: { physical: 0.35, holy: -0.3, arcane: -0.2 }, immune: ['bleed'] },
   { tag: 'construct', re: /golem|construct|colossus|gate|monument|automaton|sentinel|statue|animated|warden of|maw/i,
     resist: { physical: 0.25, arcane: -0.25, poison: 1 }, immune: ['bleed', 'poison'] },
@@ -99,7 +99,7 @@ const ABILITIES = {
   lay_on_hands:  { cls: 'paladin', lvl: 3, label: 'Lay on Hands', names: ['lay on hands'], kind: 'support', cost: { mana: 15 }, heal: 0.35, cd: 6 },
   divine_shield: { cls: 'paladin', lvl: 5, label: 'Divine Shield', names: ['divine shield'], kind: 'weapon', cost: { mana: 20 }, dmgMult: 1.0, ward: 0.3, cd: 6 },
 
-  sacred_flame:  { cls: 'cleric', lvl: 1, label: 'Sacred Flame', names: ['sacred flame', 'holy fire'], kind: 'spell', cost: { mana: 10 }, power: 1.25, element: 'holy', cd: 0 },
+  sacred_flame:  { cls: 'cleric', lvl: 1, label: 'Sacred Flame', names: ['sacred flame', 'holy fire'], kind: 'spell', cost: { mana: 10 }, power: 1.4, element: 'holy', cd: 0 },
   healing_word:  { cls: 'cleric', lvl: 1, label: 'Healing Word', names: ['healing word', 'heal myself', 'heal'], kind: 'support', cost: { mana: 12 }, heal: 0.3, cd: 3 },
   sanctuary:     { cls: 'cleric', lvl: 3, label: 'Sanctuary', names: ['sanctuary'], kind: 'support', cost: { mana: 15 }, ward: 0.3, cd: 6 },
   turn_undead:   { cls: 'cleric', lvl: 5, label: 'Turn Undead', names: ['turn undead', 'banish'], kind: 'spell', cost: { mana: 20 }, power: 2.0, element: 'holy', cd: 4 },
@@ -113,17 +113,18 @@ const ABILITIES = {
   frost_lance:   { cls: 'wizard', lvl: 3, label: 'Frost Lance', names: ['frost lance', 'ice lance'], kind: 'spell', cost: { mana: 15 }, power: 1.2, element: 'frost', status: { type: 'weaken', remaining: 2 }, cd: 2 },
   arcane_ward:   { cls: 'wizard', lvl: 5, label: 'Arcane Ward', names: ['arcane ward'], kind: 'support', cost: { mana: 18 }, ward: 0.35, cd: 6 },
 
-  chaos_surge:   { cls: 'sorcerer', lvl: 1, label: 'Chaos Surge', names: ['chaos surge', 'surge'], kind: 'spell', cost: { mana: 12 }, power: 1.3, wild: true, element: 'arcane', cd: 1 },
+  chaos_surge:   { cls: 'sorcerer', lvl: 1, label: 'Chaos Surge', names: ['chaos surge', 'surge'], kind: 'spell', cost: { mana: 12 }, power: 1.2, wild: true, element: 'chaos', cd: 0 },
+  wild_ward:     { cls: 'sorcerer', lvl: 3, label: 'Wild Ward', names: ['wild ward'], kind: 'support', cost: { mana: 14 }, ward: 0.3, cd: 5 },
   blood_magic:   { cls: 'sorcerer', lvl: 3, label: 'Blood Magic', names: ['blood magic'], kind: 'support', cost: { hp: 0.12 }, restoreMana: 0.45, cd: 5 },
-  overload:      { cls: 'sorcerer', lvl: 5, label: 'Overload', names: ['overload'], kind: 'spell', cost: { mana: 30 }, power: 2.8, element: 'arcane', cd: 5 },
+  overload:      { cls: 'sorcerer', lvl: 5, label: 'Overload', names: ['overload'], kind: 'spell', cost: { mana: 30 }, power: 2.8, element: 'raw', cd: 5 },
 
-  eldritch_blast:{ cls: 'warlock', lvl: 1, label: 'Eldritch Blast', names: ['eldritch blast'], kind: 'spell', cost: { mana: 10 }, power: 1.25, element: 'shadow', cd: 0 },
-  drain_life:    { cls: 'warlock', lvl: 3, label: 'Drain Life', names: ['drain life', 'drain'], kind: 'spell', cost: { mana: 14 }, power: 1.0, lifesteal: 0.6, element: 'shadow', cd: 2 },
+  eldritch_blast:{ cls: 'warlock', lvl: 1, label: 'Eldritch Blast', names: ['eldritch blast'], kind: 'spell', cost: { mana: 10 }, power: 1.25, element: 'eldritch', cd: 0 },
+  drain_life:    { cls: 'warlock', lvl: 3, label: 'Drain Life', names: ['drain life', 'drain'], kind: 'spell', cost: { mana: 14 }, power: 1.0, lifesteal: 0.9, element: 'eldritch', cd: 1 },
   hex:           { cls: 'warlock', lvl: 5, label: 'Hex', names: ['hex', 'curse'], kind: 'spell', cost: { mana: 16 }, power: 0.6, element: 'shadow', status: { type: 'vulnerable', remaining: 3 }, status2: { type: 'weaken', remaining: 3 }, cd: 5 },
 
-  mockery:       { cls: 'bard', lvl: 1, label: 'Vicious Mockery', names: ['vicious mockery', 'mockery', 'mock'], kind: 'spell', cost: { mana: 8 }, power: 1.1, element: 'arcane', status: { type: 'weaken', remaining: 2 }, cd: 1 },
+  mockery:       { cls: 'bard', lvl: 1, label: 'Vicious Mockery', names: ['vicious mockery', 'mockery', 'mock'], kind: 'spell', cost: { mana: 8 }, power: 1.35, element: 'sonic', status: { type: 'weaken', remaining: 2 }, cd: 1 },
   inspire:       { cls: 'bard', lvl: 3, label: 'Inspire', names: ['inspire', 'rally'], kind: 'support', cost: { mana: 12 }, heal: 0.1, buff: { type: 'inspire', remaining: 4 }, cd: 6 },
-  discord:       { cls: 'bard', lvl: 5, label: 'Discord', names: ['discord', 'dissonance'], kind: 'spell', cost: { mana: 18 }, power: 1.0, element: 'arcane', status: { type: 'stun', remaining: 2 }, cd: 6 }
+  discord:       { cls: 'bard', lvl: 5, label: 'Discord', names: ['discord', 'dissonance'], kind: 'spell', cost: { mana: 18 }, power: 1.0, element: 'sonic', status: { type: 'stun', remaining: 2 }, cd: 6 }
 };
 
 const CAST_STAT = { wizard: 'int', sorcerer: 'cha', warlock: 'cha', cleric: 'wis', druid: 'wis', paladin: 'wis', bard: 'cha' };
@@ -196,6 +197,8 @@ function attackStat(stats, weapon, ability) {
   const p = weaponProfile(weapon);
   // DEX already drives hit, crit and dodge, so it converts to damage at a discount.
   const dexDmg = Math.round(stats.dex * 0.75);
+  // Paladins fight with conviction as much as muscle: STR and WIS together.
+  if (stats.__paladin) return Math.max(stats.str, Math.round((stats.str + stats.wis) * 0.6));
   if (ability && ability.stat === 'dex') return Math.max(stats.str, dexDmg);
   if (p.ranged) return Math.max(Math.round(stats.str * 0.5), Math.round(stats.dex * 0.9));
   if (p.finesse) return Math.max(stats.str, dexDmg);
@@ -205,7 +208,9 @@ function attackStat(stats, weapon, ability) {
 // Spell power keeps casters level with weapon users without needing a blade.
 function spellPower(state, stats, level, weapon, castStatKey) {
   const key  = castStatKey || CAST_STAT[state.combatClass] || (stats.int >= stats.wis ? 'int' : 'wis');
-  const stat = Math.max(stats[key] || 10, key === 'cha' ? Math.round(((stats.cha || 10) + (stats.int || 10)) / 2) : 0);
+  let stat = Math.max(stats[key] || 10, key === 'cha' ? Math.round(((stats.cha || 10) + (stats.int || 10)) / 2) : 0);
+  // Sorcerers' power is innate AND studied: the stronger of INT and CHA, plus a share of the other.
+  if (state.combatClass === 'sorcerer') stat = Math.max(stats.int || 10, stats.cha || 10) + Math.round(Math.min(stats.int || 10, stats.cha || 10) * 0.25);
   const focus = weapon && weaponProfile(weapon).focus ? Math.round((weapon.weaponBonus || 0) * 0.5) : 0;
   return Math.max(3, (stat - 7) + levelGearBonus(level) + Math.floor(level / 2) + focus);
 }
@@ -312,7 +317,7 @@ function absorbWithWard(state, dmg) {
 
 function playerDamageMultiplier(state, enemy) {
   let m = 1;
-  if (hasEffect(state, 'player', 'rage')) m *= 1.4;
+  if (hasEffect(state, 'player', 'rage')) m *= 1.3;
   if (hasEffect(state, 'player', 'inspire')) m *= 1.25;
   if (hasEffect(state, 'player', 'weaken')) m *= 0.7;
   if (hasEffect(state, 'enemy', 'vulnerable')) m *= 1.25;
@@ -323,7 +328,10 @@ function enemyDamageMultiplier(state, enemy) {
   let m = 1;
   if (enemy.enraged) m *= 1.3;
   if (hasEffect(state, 'enemy', 'weaken')) m *= 0.7;
-  if (hasEffect(state, 'player', 'rage')) m *= 1.1;
+  // Rage: the barbarian shrugs off blows (druids' Wild Shape uses it too).
+  if (hasEffect(state, 'player', 'rage')) m *= 0.85;
+  // Paladin's Aura of Protection: conviction turns some of every blow.
+  if (state.combatClass === 'paladin') m *= 0.85;
   return m;
 }
 
@@ -347,9 +355,11 @@ function checkPhases(enemy) {
 }
 
 // Applies player damage through the enemy's ward. Spells break wards twice as fast.
-function damageEnemy(enemy, dmg, element) {
+function damageEnemy(enemy, dmg, element, crit = false) {
   if (dmg <= 0) return { dealt: 0, absorbed: 0 };
   let absorbed = 0;
+  // A weapon crit finds the seam in a ward and shatters it outright.
+  if (crit && enemy.ward > 0 && (!element || element === 'physical')) { enemy.ward = 0; enemy.wardShattered = true; }
   if (enemy.ward > 0) {
     const eff = element && element !== 'physical' ? dmg * 2 : dmg;
     absorbed = Math.min(enemy.ward, eff);

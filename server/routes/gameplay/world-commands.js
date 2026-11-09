@@ -17,6 +17,7 @@ const durability = require('../../../game/durability');
 const endless   = require('../../../game/endless');
 const legacy    = require('../../../game/legacy');
 const romance   = require('../../../game/romance');
+const politics  = require('../../../game/politics');
 const infamy    = require('../../../game/infamy');
 const { removeCompanion } = require('../../../game/economy');
 const { REGIONS } = require('../../../game/constants');
@@ -64,6 +65,7 @@ module.exports = function createWorldCommands(h) {
       return sendCommand(req, res, `${chronicle.formatDate(chronicle.nowHour(W))}\n${W.era.name}${W.realm ? ` — ${W.realm.title} rules` : ''}.\nYou are ${a} (${chronicle.ageBand(chronicle.bodyAge(state, W))}); natural span about ${Number.isFinite(chronicle.lifespan(state)) ? chronicle.lifespan(state) : '∞'} years.`, 'date', { persist: false });
     }
     if (/^(?:crises|crisis|news|world news)[.!?]*$/i.test(cmd)) return sendCommand(req, res, endless.crisisText(W), 'crises', { persist: false });
+    if (/^(?:politics|wars|diplomacy|the powers|alliances)[.!?]*$/i.test(cmd)) return sendCommand(req, res, politics.buildPoliticsText(W, state), 'politics', { persist: false });
     if (/^(?:legends|heroes|figures|legacy)[.!?]*$/i.test(cmd)) return sendCommand(req, res, legacy.buildLegendsText(W, state), 'legends', { persist: false });
     if (/^(?:titles|my titles|renown)[.!?]*$/i.test(cmd)) {
       const ts = endless.titlesFor(state, W);
@@ -87,6 +89,33 @@ module.exports = function createWorldCommands(h) {
       req.session.undoLocked = true; addTime(req, T.boss);
       return narrateAndRespond(req, res, input, events);
     }
+    // ---------------- politics ----------------
+    const enlistM = cmd.match(/^(?:i\s+)?(?:enlist with|join the side of|take the side of|fight for|swear (?:myself )?to|join)\s+(?:the\s+)?(wardens?|ember wardens|compact|free compact|remnant|veldrathi remnant|imperium|choir|ashen choir)\b/i);
+    if (enlistM) { const r = politics.enlist(state, W, enlistM[1]); return sendCommand(req, res, r.message, 'politics', { persist: r.success }); }
+    if (/^(?:i\s+)?(?:renounce (?:my )?allegiance|stay neutral|leave the war)[.!?]*$/i.test(cmd)) { const r = politics.renounce(state); return sendCommand(req, res, r.message, 'politics', { persist: r.success }); }
+    if (/^(?:i\s+)?(?:fight in the war|join the battle|go to the front|fight on the front)[.!?]*$/i.test(cmd)) {
+      const r = politics.startBattle(state, W);
+      if (!r.success) return sendCommand(req, res, r.message, 'politics', { persist: false });
+      startEncounter(state, r.enemy, `[WAR — a ${r.enemy.label} of the enemy side meets the player on the front line in ${REGIONS[state.character.region].label}.]`);
+      events.push({ type: 'combatStart', label: r.enemy.label, level: r.enemy.level });
+      req.session.undoLocked = true; addTime(req, 6);
+      return narrateAndRespond(req, res, input, events);
+    }
+    const peaceM = cmd.match(/^(?:i\s+)?(?:negotiate|broker|mediate|seek)\s+(?:a\s+)?(?:peace|truce)(.*)$/i);
+    if (peaceM) {
+      const r = politics.negotiate(state, W, peaceM[1]);
+      if (!r.success) return sendCommand(req, res, r.message, 'politics', { persist: false });
+      req.session.undoLocked = true;
+      return sendCommand(req, res, r.message, 'politics', { hours: r.hours });
+    }
+    const rulerM = cmd.match(/^(?:i\s+)?(declare war on|make peace with|ally with|form an alliance with)\s+(.+)$/i);
+    if (rulerM) {
+      const stance = /war/.test(rulerM[1]) ? 'war' : /peace/.test(rulerM[1]) ? 'truce' : 'alliance';
+      const r = politics.declare(state, W, rulerM[2], stance);
+      if (r.success) req.session.undoLocked = true;
+      return sendCommand(req, res, r.message, 'politics', { persist: r.success });
+    }
+
     const sagaCmd = endless.handleSagaCommand(state, W, input);
     if (sagaCmd) {
       if (sagaCmd.info || sagaCmd.started) return sendCommand(req, res, sagaCmd.message, 'saga', { persist: !!sagaCmd.started || /walk away/.test(sagaCmd.message) });

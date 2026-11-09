@@ -56,13 +56,15 @@ test('XP curve: exact round-trips from level 1 to 100,000, no cap, strictly incr
 
 test('XP pacing: high levels become campaign-sized achievements', () => {
   const campaignXP = XP.toBig(ch.getXPForLevel(95));            // what the whole original story yields
-  const sagaReward = (L) => BigInt(30 * L);                      // a typical saga at level L
+  // A typical saga's reward at level L (one-time deeds scale past level 200).
+  const sagaReward = (L) => BigInt(Math.round(12 * L * endless.deedFactor(L)));
   const sagasFor = (L) => Number(XP.levelCost(L) / sagaReward(L));
   assert.ok(sagasFor(30) < 1, 'level 30: well under one saga per level');
-  assert.ok(sagasFor(150) >= 1 && sagasFor(150) <= 3, `level 150: a couple of sagas (${sagasFor(150)})`);
+  assert.ok(sagasFor(150) >= 2 && sagasFor(150) <= 6, `level 150: a few sagas (${sagasFor(150)})`);
   assert.ok(sagasFor(200) >= 7, `level 200: a major arc (${sagasFor(200)} sagas)`);
   assert.ok(XP.levelCost(200) >= campaignXP, 'one level at 200 costs at least the whole original campaign');
-  assert.ok(XP.levelCost(500) > campaignXP * 100n, 'level 500: over a hundred campaigns per level');
+  assert.ok(XP.levelCost(500) > campaignXP * 100n, 'level 500: over a hundred campaigns of XP per level');
+  assert.ok(sagasFor(500) > sagasFor(300) && sagasFor(300) > sagasFor(200), 'each level keeps getting harder in deeds, too');
 });
 
 test('grantXP at extreme levels keeps state valid and serialisable', () => {
@@ -207,7 +209,8 @@ test('legends speak from their record; rumours cite real history', () => {
 test('rift depths are unbounded, gain affixes and phases, and reward each depth once', () => {
   assert.equal(endless.riftLevel(500), 1092);
   assert.ok(endless.riftAffixes(1).length === 0);
-  assert.ok(endless.riftAffixes(40).length >= 5);
+  assert.ok(endless.riftAffixes(40).length >= 3);
+  assert.ok(endless.riftAffixes(100).length >= 6, 'affixes keep accumulating');
   const { s } = hero(150, 'shattered_throne');
   s.campaign = { postgame: true, riftDepth: 49, flags: {}, choices: {}, completed: [], bossesDefeated: [] };
   const r = endless.startRift(s);
@@ -320,7 +323,8 @@ test('eras redraw the map; strong powers push borders; legends act on their own'
   const newcomer = hero(1).s; chronicle.attachWorld(newcomer, w); newcomer.characterId = 'c_new';
   chronicle.advanceTime(newcomer, 20 * 360 * 24);
   const held1 = Object.values(w.dominion).filter(x => x === 'choir').length;
-  assert.ok(held1 > held0, `the Sovereign's realm grows (${held0} → ${held1} regions)`);
+  assert.ok(w.history.filter(e => e.type === 'dominion').length > 5, 'borders move over twenty years');
+  assert.ok(held1 <= 20, `no power swallows the world: overreach and revolts bound it (${held0} → ${held1})`);
   assert.ok(w.history.some(e => e.type === 'dominion' && e.actor && e.actor.name === 'Aldren'), 'the ruling legend annexes land in their own name');
   const years = new Set(w.history.filter(e => e.type === 'dominion').map(e => e.date.split(' (')[0].split(', ')[1]));
   assert.ok(years.size > 5, 'events over twenty years carry their own dates');

@@ -38,7 +38,7 @@ const RIFT_AFFIXES = [
 
 function riftAffixes(depth) {
   const pool = RIFT_AFFIXES.filter(a => depth >= a.min);
-  const count = Math.min(pool.length, 1 + Math.floor(depth / 8));
+  const count = Math.min(pool.length, 1 + Math.floor(depth / 15));
   const chosen = [];
   let h = hashInt(`rift${depth}`);
   const list = [...pool];
@@ -48,12 +48,19 @@ function riftAffixes(depth) {
     h = Math.imul(h ^ 0x9e3779b9, 16777619) >>> 0;
   }
   // The newest affix unlocked at this depth is always present.
+  // While depths still unlock new affixes, the newest one is always in play.
   const newest = pool[pool.length - 1];
-  if (newest && !chosen.includes(newest)) chosen[chosen.length - 1] = newest;
+  if (depth <= 30 && newest && !chosen.includes(newest)) chosen[chosen.length - 1] = newest;
   return chosen;
 }
 
 function riftLevel(depth) { return 92 + depth * 2; }
+
+// Beyond level 200, one-time accomplishments (a new rift depth, a saga, a
+// crisis) are worth more and more, so a level costs a campaign's worth of
+// meaningful deeds rather than a hundred campaigns of repetition.
+// Repeatable kills are not scaled, so nothing here can be farmed.
+function deedFactor(level) { return level <= 200 ? 1 : Math.pow(level / 200, 2.2); }
 
 const RIFT_MIN_LEVEL = 90;
 
@@ -73,9 +80,13 @@ function startRift(state) {
     if (a.phase) enemy.phases.push({ ...a.phase, done: false });
     if (a.quickened && enemy.special) enemy.special = { ...enemy.special, every: 2 };
   }
-  // Each ten depths adds one more phase of the echo's own power.
-  for (let extra = 0; extra < Math.floor(depth / 10); extra++) enemy.phases.push({ at: 0.9 - extra * 0.07, effect: extra % 2 ? 'summon' : 'ward', rounds: 2, amount: 0.08, text: 'The echo remembers more of what it was.', done: false });
+  // Each ten depths adds one more phase of the echo's own power (at most
+  // five: deeper echoes get harder affixes, not endless stacked wards).
+  for (let extra = 0; extra < Math.min(5, Math.floor(depth / 10)); extra++) enemy.phases.push({ at: 0.9 - extra * 0.07, effect: extra % 2 ? 'summon' : 'ward', rounds: 2, amount: 0.08, text: 'The echo remembers more of what it was.', done: false });
   enemy.phases.sort((a, b) => b.at - a.at);
+  // Echoes fight with mechanics, not bloated health: long slogs are not challenge.
+  enemy.maxHP = enemy.currentHP = Math.round(enemy.maxHP * 0.8);
+  enemy.effectiveStr = Math.round(enemy.effectiveStr * 0.9);
   enemy.affixes = affixes.map(a => a.label);
   enemy.meta = { rift: depth };
   return { success: true, enemy, depth, affixes };
@@ -86,6 +97,10 @@ function onRiftCleared(state, depth) {
   const msg = campaign.onRiftCleared(state, depth);
   if (!msg) return null;
   const lines = [msg];
+  const lvl = getPlayerLevel(state.totalXP || 0);
+  const bonus = Math.round(8 * riftLevel(depth) * deedFactor(lvl));
+  const lu = grantXP(state, bonus);
+  lines.push(`A new depth conquered: +${bonus.toLocaleString('en-US')} XP.${lu ? ` Level ${lu.newLevel}!` : ''}`);
   if (depth % 5 === 0) {
     const level = Math.min(getPlayerLevel(state.totalXP || 0), riftLevel(depth));
     const tier = tierFor(level);
@@ -154,7 +169,7 @@ function generateSaga(state, world, { patron = null, starter = false } = {}) {
     title: starter ? `First Steps: ${theme.title}` : `${theme.title}${level > 100 ? ' (Ascendant)' : ''}`,
     patron: patron ? patron.name : null, starter,
     region, level: starter ? Math.min(sagaLevel, Math.max(1, level + 1)) : sagaLevel, step: 0, steps,
-    reward: starter ? { xp: 350, coin: 150 } : { xp: Math.round(30 * Math.max(level, sagaLevel) * (steps.length / 3)), coin: 150 * sagaLevel },
+    reward: starter ? { xp: 350, coin: 150 } : { xp: Math.round(12 * Math.max(level, sagaLevel) * (steps.length / 3) * deedFactor(level)), coin: 150 * sagaLevel },
     startedHour: chronicle.nowHour(world)
   };
 }
@@ -291,6 +306,9 @@ function onCrisisWon(state, world, crisisId) {
   chronicle.resolveCrisis(world, c, state);
   const coin = 120 * c.level;
   addCoin(state, coin);
+  const lvl = getPlayerLevel(state.totalXP || 0);
+  // Crises are sized to the world, not the hero; legends earn little from small ones.
+  grantXP(state, Math.round(40 * c.level * (c.level >= lvl - 10 ? deedFactor(lvl) : 0.1)));
   const owner = (REGIONS[c.region].npcs[0] || {}).faction || 'compact';
   world.factionPower[owner] = Math.min(100, (world.factionPower[owner] || 50) + 5);
   state.crisesResolved = (state.crisesResolved || 0) + 1;
@@ -384,7 +402,7 @@ function train(state, world, text) {
 }
 
 module.exports = {
-  RIFT_AFFIXES, RIFT_MIN_LEVEL, riftAffixes, riftLevel, startRift, onRiftCleared,
+  RIFT_AFFIXES, RIFT_MIN_LEVEL, deedFactor, riftAffixes, riftLevel, startRift, onRiftCleared,
   generateSaga, currentSaga, sagaObjective, handleSagaCommand, onSagaEvent, buildSagaFoe,
   activeCrises, crisisText, startCrisisFight, onCrisisWon,
   titlesFor, govern, foundOrder, train

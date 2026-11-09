@@ -413,7 +413,11 @@ function applyEnding(world, state, ending, { migrated = false } = {}) {
     seat: era.seat
   };
   addEvent(world, { type: 'ending', importance: 5, title: `The Hollow Sovereign falls — ${era.name} begins`, text: `${hero} stood before the Shattered Throne. ${era.realm[0].toUpperCase() + era.realm.slice(1)} now holds sway. ${era.threat}`, actor: actorOf(state) }, `ending:${world.id}`);
-  if (state.characterId) recordFigure(world, state, { title: heroRules ? world.realm.title.split(', ').slice(1).join(', ') : era.heroTitle, role: heroRules ? 'ruler' : era.heroRole, seat: era.seat || (state.campaign && state.campaign.startRegion) });
+  if (state.characterId) {
+    const fig = recordFigure(world, state, { title: heroRules ? world.realm.title.split(', ').slice(1).join(', ') : era.heroTitle, role: heroRules ? 'ruler' : era.heroRole, seat: era.seat || (state.campaign && state.campaign.startRegion) });
+    // The hero's cause: the power their ending raised up.
+    fig.faction = { rekindle: 'wardens', imperium: 'remnant', ascend: 'choir', shatter: 'compact' }[ending];
+  }
   if (migrated) addEvent(world, { type: 'note', title: 'The chronicle was compiled from older records' }, `migrated:${world.id}`);
   return era;
 }
@@ -548,7 +552,8 @@ function setDominion(world, regionKey, faction, why) {
   if (d[regionKey] === faction) return null;
   const from = d[regionKey];
   d[regionKey] = faction;
-  return addEvent(world, { type: 'dominion', importance: 3, title: `${FACTION_NAMES[faction] || faction} take${faction === 'lawless' ? '' : 's'} control of ${REGIONS[regionKey].label}`, text: `${FACTION_NAMES[from] || from} lose${from === 'lawless' ? '' : 's'} their hold. ${why || ''}`.trim(), region: regionKey });
+  const title = faction === 'lawless' ? `${REGIONS[regionKey].label} falls into lawlessness` : `${FACTION_NAMES[faction] || faction} take${faction === 'lawless' ? '' : 's'} control of ${REGIONS[regionKey].label}`;
+  return addEvent(world, { type: 'dominion', importance: 3, title, text: `${from === 'lawless' ? 'The lawless years end.' : `${FACTION_NAMES[from] || from} lose their hold.`} ${why || ''}`.trim(), region: regionKey });
 }
 
 // An era redraws the map: the victors hold the inner ring.
@@ -572,6 +577,8 @@ function shiftBorders(world) {
   const strongest = Object.entries(power).sort((a, b) => b[1] - a[1])[0];
   if (!strongest || strongest[1] < 70) return null;
   const [faction] = strongest;
+  // An empire this large can't hold more.
+  if (Object.values(world.dominion).filter(h => h === faction).length >= 20) return null;
   const frontier = [];
   for (const [k, holder] of Object.entries(world.dominion)) {
     if (holder !== faction) continue;
@@ -595,7 +602,8 @@ function legendsAct(world, activeCharacterId) {
     if (roll > 2) continue;                                     // legends do not act every year
     const faction = world.realm && world.realm.rulerId === f.characterId
       ? ({ ascend: 'choir', imperium: 'remnant', rekindle: 'wardens', shatter: 'compact' }[world.ending] || 'compact') : null;
-    if (f.role === 'ruler' && faction && (traits.includes('ambitious') || traits.includes('ruthless') || roll === 0)) {
+    const held = faction ? Object.values(world.dominion).filter(h => h === faction).length : 0;
+    if (f.role === 'ruler' && faction && held < 20 && (traits.includes('ambitious') || traits.includes('ruthless') || roll === 0)) {
       const seatNeighbours = Object.keys(world.dominion).filter(k => world.dominion[k] === faction).flatMap(k => REGIONS[k].adjacent || []).filter(n => world.dominion[n] !== faction);
       if (seatNeighbours.length) {
         const target = seatNeighbours[hashInt(f.characterId + 'annex' + nowDay(world)) % seatNeighbours.length];
@@ -701,6 +709,7 @@ function evolve(world, state) {
       out.push(...ageFigures(world, state && state.characterId));
       evolveSettlements(world);
       out.push(...legendsAct(world, state && state.characterId));
+      out.push(...require('./politics').yearlyTurn(world));
       const shift = shiftBorders(world);
       if (shift) out.push(shift);
     }

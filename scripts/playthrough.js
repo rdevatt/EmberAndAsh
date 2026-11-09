@@ -41,8 +41,8 @@ const STYLES = {
   cleric:    { attack: 'I pray, bless my faith, and let healing light cure and ward me as I strike', points: ['wis', 'vit', 'wis', 'int'], craft: 'I brew a remedy from herbs and mix a compound', recipe: 'brew 2 healing potions', weapon: 'staff', bg: TEMPLE_BG },
   druid:     { attack: 'I call on nature and the wild earth, roots and growth rising from the grove', points: ['wis', 'vit', 'wis', 'dex'], craft: 'I brew a remedy from herbs and mix a compound', recipe: 'brew 2 healing potions', weapon: 'staff', bg: '1' },
   wizard:    { attack: 'I cast a spell, tracing an arcane rune and invoking a bolt of magic', points: ['int', 'int', 'vit', 'wis'], craft: 'I study the old scroll and research its lore', recipe: 'make a spell tome', weapon: 'staff', bg: MAGE_BG },
-  sorcerer:  { attack: 'I unleash raw power, letting wild magic surge and overflow from within', points: ['cha', 'int', 'vit', 'cha'], craft: 'I study the old scroll and research its lore', recipe: 'make a spell tome', weapon: 'staff', bg: MAGE_BG },
-  warlock:   { attack: 'I invoke my dark pact and the eldritch power of my patron to drain and consume it', points: ['cha', 'int', 'vit', 'cha'], craft: 'I study the old scroll and research its lore', recipe: 'make a spell tome', weapon: 'staff', bg: MAGE_BG },
+  sorcerer:  { attack: 'I unleash raw power and cast a bolt of wild magic, letting it surge and overflow', points: ['cha', 'int', 'vit', 'cha'], craft: 'I study the old scroll and research its lore', recipe: 'make a spell tome', weapon: 'staff', bg: MAGE_BG },
+  warlock:   { attack: 'I call on my dark pact and cast the eldritch power of my patron to drain and consume it', points: ['cha', 'int', 'vit', 'cha'], craft: 'I study the old scroll and research its lore', recipe: 'make a spell tome', weapon: 'staff', bg: MAGE_BG },
   bard:      { attack: 'I sing a song of mockery and perform, my music inspiring and charming my allies', points: ['cha', 'cha', 'vit', 'dex'], craft: 'I sell and trade my goods at the market, haggling a deal', recipe: 'make leather armor', weapon: 'dagger', bg: '1' }
 };
 const CASTER = ['wizard', 'sorcerer', 'warlock', 'cleric', 'druid', 'bard', 'paladin'].includes(STYLE);
@@ -94,7 +94,7 @@ const inv = () => (last.character && last.character.inventory) || [];
 const count = name => inv().filter(i => (typeof i === 'string' ? i : i.name) === name).length;
 
 // ---------- combat ----------
-let genTrace = false;
+let genTrace = argv.includes('--trace-fights');
 async function fightToEnd() {
   let lastOut = '';
   if (genTrace) { const ss = sessionsState(); log(`  fight L${level()} hp ${ss.hp}/${ss.maxHp} weapon=${ss.gear && ss.gear.weapon ? ss.gear.weapon.name + '/' + ss.gear.weapon.tier : 'none'} armor=${ss.gear && ss.gear.armor ? ss.gear.armor.name : 'none'} vs ${ss.currentEnemy && ss.currentEnemy.label} L${ss.currentEnemy && ss.currentEnemy.level} in ${region()}`); }
@@ -105,13 +105,19 @@ async function fightToEnd() {
     else if (hpPct() < 0.35 && inv().some(i => /healing potion/.test(typeof i === 'string' ? i : i.name))) input = 'drink healing potion';
     else if (CASTER && last.character.mana < 12 && inv().some(i => /mana potion/.test(typeof i === 'string' ? i : i.name))) input = 'drink mana potion';
     else {
-      const heal = abilities.find(a => /heal|second wind|lay on|inner peace|regrowth/i.test(a.label));
-      const ward = abilities.find(a => /ward|sanctuary|divine shield/i.test(a.label));
       // What "inspect" would tell a player: don't use elements the enemy resists.
       const foe = last.rightPanel && last.rightPanel.enemy;
       const resisted = foe ? T.describeTraits({ label: foe.label }).strong : [];
+      const heal = abilities.find(a => /heal|second wind|lay on|inner peace|regrowth/i.test(a.label));
+      const ward = abilities.find(a => /ward|sanctuary|divine shield/i.test(a.label));
+      const power = a => { const d = T.ABILITIES[a.id] || {}; return d.kind === 'spell' ? (d.power || 1) : (d.dmgMult || 1) * (d.hits || 1); };
+      abilities.sort((x, y) => power(y) - power(x));
       const strike = abilities.find(a => !resisted.includes((T.ABILITIES[a.id] || {}).element) && !/heal|second wind|lay on|inner peace|regrowth|blood|ward|sanctuary|divine shield|power attack/i.test(a.label) && (a.cost.mana || 0) <= last.character.mana && (a.cost.stamina || 0) <= last.character.stamina);
+      const drain = abilities.find(a => (T.ABILITIES[a.id] || {}).lifesteal && (a.cost.mana || 0) <= last.character.mana);
+      const debuff = abilities.find(a => { const d = T.ABILITIES[a.id] || {}; return ((d.status && d.status.type === 'weaken') || (d.status2 && d.status2.type === 'weaken')) && (a.cost.mana || 0) <= last.character.mana && !resisted.includes(d.element); });
       if (heal && hpPct() < 0.5) input = `I use ${heal.label}`;
+      else if (drain && hpPct() < 0.7) input = `I use ${drain.label}`;
+      else if (debuff && !/weaken/.test(lastOut)) input = `I use ${debuff.label}`;
       else if (ward && hpPct() < 0.8 && !/ward \d/.test(lastOut)) input = `I use ${ward.label}`;
       else if (strike) input = `I use ${strike.label}`;
     }

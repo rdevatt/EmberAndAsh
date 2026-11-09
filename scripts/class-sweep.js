@@ -11,6 +11,8 @@ const argv = process.argv.slice(2); const arg = (k, d) => { const i = argv.index
 const N = parseInt(arg('--fights', '80'), 10);
 const regions = arg('--regions', '') ? arg('--regions').split(',') : Object.keys(REGIONS);
 const classes = arg('--classes', '') ? arg('--classes').split(',') : Object.keys(BUILDS);
+const CHAIN = parseInt(arg('--chain', '0'), 10);   // fights in a row, resting like the bot
+const CASTERS = ['wizard', 'sorcerer', 'warlock', 'cleric', 'druid', 'bard', 'paladin'];
 const killers = {};
 console.log('region'.padEnd(21) + 'lvl ' + classes.map(c => c.slice(0, 6).padEnd(7)).join(''));
 const totals = {};
@@ -20,9 +22,17 @@ for (const key of regions) {
   for (const cls of classes) {
     let w = 0;
     for (let i = 0; i < N; i++) {
-      const s = makePlayer(level, cls, { region: key });
-      const res = fight(s, cb.spawnEnemy(key, level));
-      if (res.win) w++; else { killers[cls] = killers[cls] || {}; killers[cls][res.label] = (killers[cls][res.label] || 0) + 1; }
+      const s = makePlayer(level, cls, { region: key, potions: CHAIN ? 3 : 0 });
+      let alive = true;
+      for (let f = 0; f < Math.max(1, CHAIN) && alive; f++) {
+        const res = fight(s, cb.spawnEnemy(key, level));
+        if (!res.win) { alive = false; killers[cls] = killers[cls] || {}; killers[cls][res.label] = (killers[cls][res.label] || 0) + 1; break; }
+        // Between fights: rest when hurt (or out of mana, for casters), otherwise one step of recovery.
+        const lowMana = CASTERS.includes(cls) && s.mana < s.maxMana * 0.35;
+        if (s.hp < s.maxHp * 0.6 || lowMana) { s.hp = s.maxHp; s.mana = s.maxMana; s.stamina = s.maxStamina; }
+        else { s.stamina = Math.min(s.maxStamina, s.stamina + Math.floor(s.maxStamina * 0.15)); s.mana = Math.min(s.maxMana, s.mana + Math.floor(s.maxMana * 0.1)); }
+      }
+      if (alive) w++;
     }
     const pct = Math.round(w / N * 100);
     totals[cls] = (totals[cls] || 0) + pct;

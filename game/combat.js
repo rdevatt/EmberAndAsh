@@ -499,6 +499,7 @@ function applyCombatRound(state, input) {
   }
 
   const stats        = getEffectiveStats(state);
+  if (state.combatClass === 'paladin') Object.defineProperty(stats, '__paladin', { value: true, enumerable: false });
   const weapon       = getActiveWeapon(state);
   const armor        = getActiveArmor(state);
   const bp           = BODY_PARTS[bodyPartKey] || BODY_PARTS.torso;
@@ -543,8 +544,13 @@ function applyCombatRound(state, input) {
   const staminaPct  = state.maxStamina > 0 ? state.stamina / state.maxStamina : 1;
   const staminaMod  = staminaPct < 0.15 ? -0.3 : staminaPct < 0.4 ? -0.15 : 0;
   // Accuracy: trained strength counts as well as agility, so STR builds stay viable.
-  const accuracy    = Math.max(stats.dex, Math.round(stats.str * 0.8));
-  const dexAdv      = (accuracy - enemy.effectiveDex) / 25;
+  // Accuracy follows the stat the fighter actually fights with.
+  const accuracy    = Math.max(stats.dex, Math.round(T.attackStat(stats, weapon, null) * 0.8));
+  // Differences in stats matter relative to how strong both sides are: at
+  // level 500 a 100-point gap is not the gulf it is at level 10.
+  const dexAdv      = (accuracy - enemy.effectiveDex) / (25 + playerLevel * 0.4);
+  // Punching above your weight: every level a foe has over you counts.
+  const levelGap    = Math.max(0, (enemy.level || 1) - playerLevel);
   const dmgMult     = T.playerDamageMultiplier(state, enemy);
   const D = require('./durability');
   const weaponBonus = (weapon ? Math.round((weapon.weaponBonus || 0) * D.durabilityFactor(weapon)) : 0) + (state.bonusWeaponDamage || 0);
@@ -553,7 +559,7 @@ function applyCombatRound(state, input) {
 
   const rollWeaponHit = (hitMod, critBonus, mult, element) => {
     const atk    = T.attackStat(stats, weapon, ability);
-    const chance = Math.min(0.95, Math.max(0.05, 0.60 + dexAdv + bp.hitMod + qualityMod + staminaMod + (hitMod || 0) - (env.hitPenalty || 0)));
+    const chance = Math.min(0.95, Math.max(0.05, 0.60 + dexAdv + bp.hitMod + qualityMod + staminaMod + (hitMod || 0) - (env.hitPenalty || 0) - levelGap * 0.01));
     const hit    = Math.random() < chance;
     const crit   = hit && (Math.random() < Math.min(critBonus >= 1 ? 1 : 0.4, stats.dex / 250 + bp.critBonus + (critBonus || 0)));
     const raw    = (Math.max(1, atk - 7) + weaponBonus + Math.floor(playerLevel / 2)) * bp.damageMod * (mult || 1) * (crit ? 2 : 1);
@@ -576,7 +582,9 @@ function applyCombatRound(state, input) {
   const applyHits = (roll, element, label) => {
     result.hitChance = Math.round(roll.chance * 100);
     if (!roll.hit) { result.playerLines.push(`▶ ${label ? `${label} misses` : 'You miss'} — ${result.hitChance}% hit chance`); return 0; }
-    const d = T.damageEnemy(enemy, roll.dmg, element);
+    const hadWard = enemy.ward > 0;
+    const d = T.damageEnemy(enemy, roll.dmg, element, roll.crit);
+    if (hadWard && enemy.wardShattered) { enemy.wardShattered = false; result.playerLines.push('  ◈ Your critical strike shatters its ward!'); }
     result.playerHit = true;
     result.playerCrit = result.playerCrit || roll.crit;
     result.playerDamage += d.dealt;
@@ -651,8 +659,10 @@ function applyCombatRound(state, input) {
         dealtTotal += applyHits(roll, a.element || 'physical', `✦ ${a.label}${hits > 1 ? ` (${h + 1}/${hits})` : ''}`);
       }
     } else if (a.kind === 'spell') {
-      const power = a.wild ? 0.5 + Math.random() * 1.9 : a.power;
-      dealtTotal += applyHits(rollSpellHit(power, a.element, castKey || 'int'), a.element, `✦ ${a.label}`);
+      const power = a.wild ? 0.5 + Math.random() * 1.4 : a.power;
+      // Wild magic: each surge comes out as a different element.
+      const element = a.element === 'chaos' ? ['fire', 'frost', 'shadow', 'arcane', 'holy'][Math.floor(Math.random() * 5)] : a.element;
+      dealtTotal += applyHits(rollSpellHit(power, element, castKey || 'int'), element, `✦ ${a.label}${a.element === 'chaos' ? ` (${element})` : ''}`);
     } else {
       result.playerLines.push(`✦ ${a.label}`);
     }
@@ -661,7 +671,7 @@ function applyCombatRound(state, input) {
       result.playerLines.push(r.immune ? `  ${enemy.label} is immune to ${a.status.type}` : `  ${enemy.label} is ${a.status.type === 'stun' ? 'stunned' : a.status.type === 'vulnerable' ? 'marked (takes +25% damage)' : a.status.type === 'weaken' ? 'weakened' : a.status.type + 'ed'}`);
     }
     if (a.status2 && dealtTotal > 0) T.addEffect(state, enemy, 'enemy', a.status2, dealtTotal);
-    if (a.buff) { T.addEffect(state, enemy, 'player', a.buff); result.playerLines.push(`  ${a.buff.type === 'rage' ? 'Fury fills you (+40% damage)' : 'You are inspired (+25% damage)'}`); }
+    if (a.buff) { T.addEffect(state, enemy, 'player', a.buff); result.playerLines.push(`  ${a.buff.type === 'rage' ? 'Fury fills you (+30% damage, blows hurt less)' : 'You are inspired (+25% damage)'}`); }
     if (a.selfStatus) T.addEffect(state, enemy, 'player', a.selfStatus);
     if (a.heal) { const b = state.hp; state.hp = Math.min(state.maxHp, state.hp + Math.round(state.maxHp * a.heal)); result.playerLines.push(`  ✚ HP +${state.hp - b}`); }
     if (a.lifesteal && dealtTotal) { const b = state.hp; state.hp = Math.min(state.maxHp, state.hp + Math.round(dealtTotal * a.lifesteal)); result.playerLines.push(`  ✚ You drain ${state.hp - b} HP`); }
@@ -693,12 +703,12 @@ function applyCombatRound(state, input) {
       const plan = T.planEnemyTurn(state, enemy);
       result.enemyLines.push(...plan.lines);
       if (!plan.windingUp) {
-        const hitChance = Math.min(0.8, Math.max(0.3, ((enemy.level || 1) < 5 ? 0.5 : 0.55) + (enemy.effectiveDex - stats.dex) / 40 + (plan.hitBonus || 0) - (armor && armor.armorLevel ? armor.armorLevel * 0.006 : 0)));
+        const hitChance = Math.min(0.8, Math.max(0.3, ((enemy.level || 1) < 5 ? 0.5 : 0.55) + (enemy.effectiveDex - stats.dex) / (40 + playerLevel * 0.6) + (plan.hitBonus || 0) - (armor && armor.armorLevel ? armor.armorLevel * 0.006 : 0)));
         const magicResist = Math.min(0.35, Math.max(0, (stats.wis - 10) * 0.01));
         const armorReduce = armor && armor.armorLevel ? Math.round(armor.armorLevel * 2 * D.durabilityFactor(armor)) : 0;
         const strike = (mult) => {
           if (evade || Math.random() >= hitChance) return 0;
-          let raw = (enemy.effectiveStr * 1.5 + (enemy.level || 1) * 0.5) * (Math.random() * 0.5 + 0.75) * mult * T.enemyDamageMultiplier(state, enemy) * exposed;
+          let raw = (enemy.effectiveStr * 1.5 + (enemy.level || 1) * 0.5) * (Math.random() * 0.5 + 0.75) * mult * T.enemyDamageMultiplier(state, enemy) * exposed * (1 + levelGap * 0.03);
           if (Math.random() < 0.05) raw *= 1.5;
           const physical = plan.element === 'physical' && !plan.ignoreArmor;
           let dmg = physical ? raw - armorReduce : raw * (1 - magicResist) - armorReduce * 0.4;

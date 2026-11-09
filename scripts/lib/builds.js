@@ -67,7 +67,15 @@ function choose(s, lastLog) {
   const strong = enemy ? T.describeTraits(enemy).strong : [];
   const weak = enemy ? T.describeTraits(enemy).weak : [];
   const attacks = ready.filter(a => !/heal|second wind|lay on|inner peace|regrowth|blood magic|ward|sanctuary|divine shield/i.test(a.label) && !strong.includes((T.ABILITIES[a.id] || {}).element));
-  attacks.sort((x, y) => (weak.includes((T.ABILITIES[y.id] || {}).element) ? 1 : 0) - (weak.includes((T.ABILITIES[x.id] || {}).element) ? 1 : 0));
+  // Strongest first, with a bonus for hitting a weakness.
+  const score = a => { const d = T.ABILITIES[a.id] || {}; const p = d.kind === 'spell' ? (d.power || 1) : (d.dmgMult || 1) * (d.hits || 1); return p * (weak.includes(d.element) ? 1.5 : 1); };
+  attacks.sort((x, y) => score(y) - score(x));
+  // Sustain when hurt; weaken a foe that isn't already weakened.
+  const drain = attacks.find(a => (T.ABILITIES[a.id] || {}).lifesteal);
+  if (drain && s.hp < s.maxHp * 0.7) return `I use ${drain.label} on it`;
+  const weakened = (s.statusEffects || []).some(e => e.target === 'enemy' && e.type === 'weaken');
+  const debuff = attacks.find(a => { const d = T.ABILITIES[a.id] || {}; return (d.status && d.status.type === 'weaken') || (d.status2 && d.status2.type === 'weaken'); });
+  if (debuff && !weakened) return `I use ${debuff.label} on it`;
   if (attacks.length) return `I use ${attacks[0].label} on it`;
   const blood = ready.find(a => /blood magic/i.test(a.label));
   if (blood && s.mana < s.maxMana * 0.2 && s.hp > s.maxHp * 0.6) return 'use Blood Magic';

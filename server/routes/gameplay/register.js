@@ -266,6 +266,10 @@ module.exports = function registerGameplayRoutes(app, deps) {
       const r = endless.onSagaEvent(state, W, { type: 'kill', meta });
       if (r) { events.push({ type: 'system', message: r.message }); if (r.levelUp) events.push(r.levelUp); }
     }
+    if (meta.war && W) {
+      const msg = require('../../../game/politics').onBattleWon(state, W, meta.war);
+      if (msg) events.push({ type: 'system', message: msg });
+    }
     if (meta.relic && W) {
       const r = legacy.claimRelic(W, state, meta.relic);
       events.push({ type: 'system', message: r.message });
@@ -596,6 +600,9 @@ module.exports = function registerGameplayRoutes(app, deps) {
           if (sg) events.push({ type: 'system', message: sg.message });
           const crisisHere = endless.activeCrises(W).find(c => c.region === result.to);
           if (crisisHere) events.push({ type: 'system', message: `⚠ ${crisisHere.title}: ${crisisHere.text} ("answer the call")` });
+          const pol = require('../../../game/politics');
+          const front = pol.activeWars(W).find(w => pol.fronts(W, w.a, w.b).includes(result.to));
+          if (front) events.push({ type: 'system', message: `⚔ ${REGIONS[result.to].label} is a front in the war between ${pol.NAMES[front.a]} and ${pol.NAMES[front.b]}. Prices are up; "politics" for more.` });
           const settlement = W.settlements[result.to];
           if (settlement && settlement.status !== 'thriving') events.push({ type: 'system', message: `${REGIONS[result.to].label} is ${settlement.status}.` });
         }

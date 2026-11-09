@@ -127,8 +127,13 @@ function calculateMaxHP(vit, level) {
   return vit * 5 + level * 3;
 }
 
-function calculateMaxMana(int_, wis, level) {
-  return int_ * 3 + wis * 2 + level * 2;
+// Mana comes from whichever mind the caster draws on: study (INT),
+// faith (WIS) or force of personality (CHA). Wizards and clerics are
+// unchanged; warlocks, sorcerers and bards (CHA casters) no longer run dry.
+function calculateMaxMana(int_, wis, level, cha = 0) {
+  const best = Math.max(int_, wis, cha);
+  const rest = int_ + wis + cha - best;
+  return Math.max(int_ * 3 + wis * 2, best * 3 + Math.round(rest * 0.6)) + level * 2;
 }
 
 function calculateMaxStamina(vit, dex, level) {
@@ -140,7 +145,7 @@ function recalculateResources(state) {
   const level = getPlayerLevel(state.totalXP || 0);
 
   const newMaxHp      = calculateMaxHP(s.vit, level);
-  const newMaxMana    = calculateMaxMana(s.int, s.wis, level);
+  const newMaxMana    = calculateMaxMana(s.int, s.wis, level, s.cha);
   const newMaxStamina = calculateMaxStamina(s.vit, s.dex, level);
 
   // Scale current values proportionally if max changed
