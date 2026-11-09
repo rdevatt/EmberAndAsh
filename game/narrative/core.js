@@ -311,9 +311,12 @@ function buildFullPrompt(state, playerInput) {
   // Reinforcement reminder placed right before player action
   const agencyReminder = '[REMEMBER: The player\'s words are their only words: quoted speech verbatim, described speech as one short line, otherwise silence. Do not invent their actions, thoughts, feelings, weapons or abilities.]';
 
+  // The turn's layers, kept apart: the player's words; the engine's resolution
+  // (the bracketed facts above); then the narration, which adds nothing.
+  const turn = `[THE PLAYER'S TURN — their exact words are below. The engine has already resolved what happened (the facts above are authoritative). Narrate the player doing ONLY what they wrote and its direct result, then the world's response. Add no other action, gesture, word, purchase or decision for them.]`;
   return contextBlock
-    ? `${contextBlock}\n\n${agencyReminder}\n\n[Player action]: ${playerInput}`
-    : `${agencyReminder}\n\n[Player action]: ${playerInput}`;
+    ? `${contextBlock}\n\n${agencyReminder}\n\n${turn}\n[Player action]: ${playerInput}`
+    : `${agencyReminder}\n\n${turn}\n[Player action]: ${playerInput}`;
 }
 
 
@@ -760,6 +763,27 @@ function buildRightPanelData(state) {
 // parses output for items/companions, appends 
 // event announcements, returns final output.
 // =============================================
+// What the engine accepted and decided this turn, for the action guard.
+function turnOutcome(state, input, events = [], hint = '') {
+  const h = String(hint || '');
+  const r = /\[COMBAT NARRATIVE/.test(h) ? (state.pendingCombatResult || {}) : null;
+  const has = (t) => events.some(e => e.type === t);
+  return {
+    combat: !!r,
+    attacked: !!(r && (r.playerHit || r.hitChance || r.abilityUsed || r.spellCast || (r.playerLines || []).some(l => /▶/.test(l)))),
+    weaponDrawn: !!(r ? !r.unarmed : state.weaponDrawn),
+    spellCast: !!(r && (r.spellCast || (r.abilityUsed && /spell|bolt|fire|frost|flame|blast|hex|surge|lance|whip|entangle|turn undead|sacred/i.test(r.abilityUsed)))),
+    killed: !!(r && !state.inCombat && !state.currentEnemy) || /BOSS DEFEATED/.test(h),
+    moved: has('travel') || /TRAVEL —/.test(h),
+    fled: /SUCCESSFULLY FLEES/.test(h),
+    spoke: !!require('../agency').playerLine(input),
+    bought: /\b(SHOP|PURCHASE|BOUGHT)\b/.test(h) || events.some(e => /bought|purchase/i.test(e.type || '')),
+    crime: has('crime') || has('villainy') || /\[CRIME —|VILLAIN ACT/.test(h),
+    intimate: has('intimacy') || /INTIMATE SCENE/.test(h),
+    rested: /REST|CAMP|SLEEP/.test(h)
+  };
+}
+
 async function processNarrative(state, playerInput, events = []) {
   state.actionCount = (state.actionCount || 0) + 1;
 
@@ -781,29 +805,61 @@ async function processNarrative(state, playerInput, events = []) {
   // Recent exchanges, compact: the player's words and what was narrated —
   // the full context is rebuilt each turn from the notes, not replayed.
   const history  = (state.conversationHistory || []).slice(-8);
-  let aiResult = await callGroq(prompt, null, history);
-  // A model sometimes repeats its last reply word for word. Ask once more,
-  // pointedly; if it repeats again, the game's own narrator tells it.
-  const head = (t) => String(t || '').replace(/\s+/g, ' ').trim().slice(0, 160).toLowerCase();
-  if (aiResult.success && state.lastAiNarrative && head(aiResult.text) === head(state.lastAiNarrative)) {
-    const retry = await callGroq(`${prompt}\n\n[Your last reply repeated the previous turn. Narrate ONLY this new action and its result, freshly, from where the story now stands.]`, null, history);
-    aiResult = retry.success && head(retry.text) !== head(state.lastAiNarrative) ? retry : { success: false, text: '', error: 'repeated' };
+  // The four layers of a turn: the player's words, what the engine accepted,
+  // what it decided happened, and the prose. The prose may describe the first
+  // three; it may not add to them.
+  const outcome = turnOutcome(state, playerInput, events, hintForFallback);
+  const guardLib = require('../action-guard');
+  const memory = require('./memory');
+  const recent = state.recentNarrations || [];
+  const stats = state.narrationStats || (state.narrationStats = { turns: 0, removedSentences: 0, regenerations: 0, fallbacks: 0, repeats: 0 });
+
+  // One AI draft, cleaned: notes off, the player's voice enforced, invented
+  // acts removed, repeats caught. Returns { ok, text, notes, why }.
+  const draft = async (extra) => {
+    const r = await callGroq(extra ? `${prompt}\n\n${extra}` : prompt, null, history);
+    if (!r.success) return { ok: false, result: r };
+    const parsed = memory.parseNotes(r.text);
+    let text = require('../agency').enforcePlayerVoice(parsed.text, playerInput);
+    const g = guardLib.guard(text, playerInput, outcome);
+    const rep = guardLib.repetition(g.text, recent);
+    return { ok: true, result: r, text: rep.text || g.text, raw: text, notes: parsed.notes, guard: g, repeated: rep.repeated, droppedParagraphs: rep.droppedParagraphs };
+  };
+
+  let aiResult;
+  let d = await draft(null);
+  if (d.ok) {
+    const tooMuchRemoved = d.guard.removed.length && (d.guard.ratio > 0.4 || d.text.length < 80);
+    if (d.repeated || tooMuchRemoved) {
+      stats.regenerations++;
+      if (d.repeated) stats.repeats++;
+      const fix = d.repeated
+        ? '[Your draft repeated an earlier reply. Narrate ONLY this new action and its result, freshly, from where the story now stands.]'
+        : guardLib.correction(d.guard.removed);
+      const d2 = await draft(fix);
+      const stillBad = !d2.ok || d2.repeated || (d2.guard.removed.length && (d2.guard.ratio > 0.4 || d2.text.length < 80));
+      d = stillBad ? { ok: false, result: d2.ok ? { success: false, error: 'agency' } : d2.result } : d2;
+    }
   }
-  if (!aiResult.success) {
-    // AI unavailable — keep the game playable with engine-driven prose.
-    aiResult.text = buildOfflineNarrative(state, playerInput, hintForFallback);
+  if (d.ok) {
+    stats.removedSentences += d.guard.removed.length;
+    aiResult = { ...d.result, success: true, text: d.text };
+    var narratorNotes = d.notes;
+    state.lastAiNarrative = d.text;
+    state.recentNarrations = [...recent, d.text.slice(0, 1500)].slice(-5);
+    if (d.guard.removed.length) state.lastGuardRemoved = d.guard.removed.map(x => x.kind);
+  } else {
+    aiResult = d.result || { success: false };
+    var narratorNotes = [];
+    if (aiResult.success === false && aiResult.error === 'agency') stats.fallbacks++;
+    // AI unavailable, or it would not narrate without acting for the player:
+    // the engine's own narrator tells the turn.
+    aiResult = { ...aiResult, success: false, text: buildOfflineNarrative(state, playerInput, hintForFallback) };
     if (aiResult.declined) {
       aiResult.text += '\n\n[The AI narrator declined to write this scene. The game\'s own narrator has told it instead; nothing about what happened has changed.]';
     }
   }
-
-  if (aiResult.success) state.lastAiNarrative = aiResult.text;
-  // The narrator's notes come off the reply before anyone sees it.
-  const memory = require('./memory');
-  let narratorNotes = [];
-  if (aiResult.success) { const parsed = memory.parseNotes(aiResult.text); aiResult.text = parsed.text; narratorNotes = parsed.notes; }
-  // The player's words are theirs alone, whatever the model wrote.
-  if (aiResult.success) aiResult.text = require('../agency').enforcePlayerVoice(aiResult.text, playerInput);
+  stats.turns++;
 
   // Store this exchange in history for next turn
   if (aiResult.success) {

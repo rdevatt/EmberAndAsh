@@ -41,7 +41,10 @@ test('ten thousand turns: bounded memory, flat prompts, nothing important forgot
   narrative.__setGroqClientForTests({ chat: { completions: { create: async (req) => {
     const user = req.messages[req.messages.length - 1].content;
     if (/Summarise these events/.test(user)) return { choices: [{ message: { content: `Rook kept moving through Ironport and beyond, turn ${turn}.` } }] };
-    let text = `The street goes on. Turn ${turn}.`;
+    // Varied prose, as a real narrator writes (a repeated reply is caught and retried).
+    const W = ['ash', 'rain', 'lantern', 'gull', 'cart', 'bell', 'smoke', 'river', 'crow', 'dust', 'harbour', 'forge', 'candle', 'wind', 'mud', 'tide'];
+    const P = (k) => W[(turn * 7 + k * 13 + Math.floor(turn / 3)) % W.length];
+    let text = `A ${P(1)} drifts over the ${P(2)} while a ${P(3)} rattles somewhere near the ${P(4)}. Beyond the ${P(5)}, the ${P(6)} and the ${P(7)} carry on as they did on day ${turn}.`;
     if (turn === 5) text += '\n\nNOTES:\nGorm | person | barkeep of the Salt Rat in Ironport';
     else if (turn === 7) text += '\n\nNOTES:\nGorm | person | promised to forge Rook a sword by spring';
     else text += `\n\nNOTES:\nStranger ${turn} | person | someone Rook passed on turn ${turn}`;

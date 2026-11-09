@@ -8,10 +8,10 @@ The completion brief has 15 sections. This file records what is done, what is in
 | --- | --- | --- | --- |
 | 1 | History audit of the database files; purge prepared (not published) | M1/M2 | `docs/SECURITY.md` §1; dry run 15 → 0 database blobs |
 | 2 | HTTP, auth and session hardening; authorisation tests; backups | M1/M2 | `tests/security.test.js` (9 tests); browser 58/58 under strict CSP |
+| 3 | Player agency: four-layer turns, action guard, repetition across replies | M3 | `tests/agency.test.js` (12); live: 7 invented sentences removed in 11 turns, 0 fallbacks |
 
 ## Next, in order
 
-3. Player agency: separate the submitted action, the engine's accepted action, the outcome and the narration. Check invented player actions, gestures, attacks, purchases and so on. Detect repetition across all recent replies.
 4. Permanent canonical world history (two-layer memory). Test it at 10,000+ turns, over generations, through save/load and with contradictions.
 5. Companion personal storylines (all 8) and NPC depth.
 6. Living world: campaigns, succession, economy, institutions, ruler gameplay, visible consequences.

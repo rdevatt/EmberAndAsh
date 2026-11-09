@@ -117,3 +117,72 @@ test('a quote the model re-capitalised is restored in place, not duplicated', ()
   assert.equal((out.match(/hey barkeep how about an ale/gi) || []).length, 1, 'once');
   assert.ok(out.includes('"hey barkeep how about an ale"'), 'exactly as the player wrote it');
 });
+
+// ---------------- the action guard ----------------
+const G = require('../game/action-guard');
+
+test('the narrator cannot act for the player: the bar, the sword, the walk-out', () => {
+  const r = G.guard('You settle onto a stool and order an ale. The barkeep pours it. You draw your sword and threaten him. You smile thinly. You walk away into the night. You see the regulars stiffen.', 'I sit at the bar and order an ale', {});
+  assert.match(r.text, /settle onto a stool and order an ale/, 'what the player did stays');
+  assert.match(r.text, /barkeep pours it/, 'the world stays');
+  assert.match(r.text, /You see the regulars stiffen/, 'perception is not a choice');
+  assert.doesNotMatch(r.text, /draw your sword|threaten|smile|walk away/);
+  assert.deepEqual(r.removed.map(x => x.kind).sort(), ['draw', 'gesture', 'leave']);
+});
+
+test('overlapping and ambiguous intentions are honoured exactly', () => {
+  const both = G.guard('You punch the guard square in the jaw and run for the gate. Your hand drifts to your dagger.', 'I punch the guard and run', { combat: true, attacked: true });
+  assert.match(both.text, /punch the guard square in the jaw and run for the gate/, 'both stated acts stay');
+  assert.doesNotMatch(both.text, /hand drifts to your dagger/, 'reaching for a weapon was not stated');
+  const look = G.guard('You run your eye over the blades. You buy a fine dagger for ten coins. You nod to the merchant.', "I look at the merchant's wares", {});
+  assert.match(look.text, /run your eye over the blades/, 'looking is looking');
+  assert.doesNotMatch(look.text, /buy|nod/, 'looking is not buying, or nodding');
+  const enter = G.guard('You step inside. You sit at a corner table.', 'I enter the tavern', {});
+  assert.doesNotMatch(enter.text, /sit at a corner table/, 'entering is not sitting down');
+  const quoted = G.guard('"If you draw that blade, you die," the guard warns.', 'I glare at the guard', {});
+  assert.match(quoted.text, /If you draw that blade/, 'an NPC\'s words are not the player\'s acts');
+  const talk = G.guard('You ask the smith about the road north. He shrugs.', 'I ask the smith about the road north', {});
+  assert.equal(talk.removed.length, 0);
+});
+
+test('the engine decides outcomes: no prose kills, spells or weapons it did not allow', () => {
+  const kill = G.guard('You kill the wolf with one blow.', 'I attack the wolf', { combat: true, attacked: true, killed: false });
+  assert.equal(kill.text, '', 'the wolf is alive: the engine says so');
+  const ok = G.guard('You bring the wolf down.', 'I attack the wolf', { combat: true, attacked: true, killed: true });
+  assert.equal(ok.removed.length, 0);
+  const spell = G.guard('You drive your fist into its ribs. You cast a spell of fire.', 'I fight back', { combat: true, attacked: true });
+  assert.doesNotMatch(spell.text, /cast/);
+  const sword = G.guard('You draw your sword and strike.', 'I attack it', { combat: true, attacked: true, weaponDrawn: false });
+  assert.doesNotMatch(sword.text, /draw your sword/, 'a sheathed weapon stays sheathed');
+  const drawn = G.guard('You draw your sword and strike.', 'I draw my sword and attack', { combat: true, attacked: true, weaponDrawn: true });
+  assert.equal(drawn.removed.length, 0);
+});
+
+test('repetition is caught across recent replies, not only by its opening', () => {
+  const a = 'The rain hammers the docks. Gulls wheel over the masts.\n\nThe harbourmaster counts crates under a dripping awning, muttering numbers that never add up.';
+  const b = 'Night has come early.\n\nThe harbourmaster counts crates under a dripping awning, muttering numbers that never add up.\n\nThe rain hammers the docks. Gulls wheel over the masts.';
+  const r = G.repetition(b, [a]);
+  assert.ok(r.droppedParagraphs >= 1, 'paragraphs repeated word for word are dropped');
+  assert.ok(r.repeated, 'and a reply that is mostly a rerun is flagged');
+  assert.equal(G.repetition('A wholly different scene unfolds by the river, with new people in it and new trouble.', [a]).repeated, false);
+});
+
+test('sixty turns with a narrator that keeps acting for the player: none of it survives', async () => {
+  process.env.NARRATIVE_OFFLINE = '0'; process.env.GROQ_API_KEY = 'test-key';
+  const inventions = ['You draw your blade.', 'You smile and nod.', 'You buy a round for the house.', 'You walk out without a word.', 'You kiss the barmaid.', 'You decide to leave town.'];
+  let n = 0;
+  narrative.__setGroqClientForTests({ chat: { completions: { create: async () => {
+    n++;
+    const words = ['river', 'lamp', 'crow', 'bell', 'mud', 'smoke', 'cart', 'gull', 'tide', 'ash'];
+    const w = (k) => words[(n * 3 + k) % words.length];
+    return { choices: [{ message: { content: `The ${w(1)} and the ${w(2)} shift in the half-light near the ${w(3)}; somewhere a ${w(4)} answers on turn ${n}. ${inventions[n % inventions.length]} The ${w(5)} goes on regardless.` } }] };
+  } } } });
+  const s = fighter(); s.inCombat = false; s.currentEnemy = null;
+  for (let t = 1; t <= 60; t++) {
+    s.actionCount = t;
+    const r = await narrative.processNarrative(s, t % 2 ? 'I sit by the fire and listen' : 'I watch the door', []);
+    assert.doesNotMatch(r.narrative, /draw your blade|smile and nod|buy a round|walk out|kiss the barmaid|decide to leave/, `turn ${t}: ${r.narrative}`);
+  }
+  assert.ok(s.narrationStats.removedSentences >= 50, 'the guard did the work');
+  process.env.NARRATIVE_OFFLINE = '1'; delete process.env.GROQ_API_KEY;
+});
