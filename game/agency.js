@@ -212,6 +212,7 @@ const PROMPT_RULES = `PLAYER AGENCY — ABSOLUTE:
 - SPEECH, described: if the player describes speaking without quotes (e.g. "asking for a drink"), you may voice it as ONE short line that says exactly that (e.g. "A drink, please."), nothing more.
 - SPEECH, none: if the player describes no speech, the character says nothing.
 - MANNER: for a general action ("I fight back"), you choose the manner, but only with what is in hand. If the facts say the character is unarmed, they fight with fists, feet, elbows and teeth. Never draw a weapon, cast a spell or use an ability the player did not name; the engine facts list exactly what was used.
+- ACTIONS: describe the player character doing ONLY what the player stated, and its direct physical result. Do not add movements, gestures, expressions, glances, decisions or further actions of your own — no "you turn", "you grip your weapon", "you scan the treeline", "you smile". Everything else is the world: the people, the place, what happens next around them.
 - The character's class or profession never decides what they do. Never write their thoughts, feelings or next decision.`;
 
 module.exports = {

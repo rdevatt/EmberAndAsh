@@ -128,9 +128,14 @@ INTIMATE SCENES:
 - Never escalate beyond what the instruction specifies
 - Never re-initiate after conclusion unless the player does
 
+STORY NOTES:
+- You will often be given STORY NOTES: established people, places, events and open threads. They are canon. Keep names, relationships and facts consistent with them; never contradict them. Use them only as the scene calls for; do not recite them.
+
 CREATION PHASES:
 - When given a creation prompt, output it exactly as provided, word for word
-- Do not add commentary, do not continue the story, do not roleplay`;
+- Do not add commentary, do not continue the story, do not roleplay
+
+${require('./memory').NOTES_INSTRUCTION}`;
 
 
 // =============================================
@@ -272,9 +277,6 @@ function buildSceneContext(state) {
     lines.push(`[Scene tone: ${state.sceneContext}]`);
   }
 
-  if (state.storySummary) {
-    lines.push(`[Story so far: ${state.storySummary}]`);
-  }
 
   return lines.join('\n');
 }
@@ -299,6 +301,7 @@ function buildFullPrompt(state, playerInput) {
     buildCharacterContext(state),
     buildCombatContext(state),
     buildSceneContext(state),
+    require('./memory').promptBlock(state, playerInput),
     state.character && state.character.region ? require('../content-prefs').narrationDirective(state) : '',
     buildPendingHint(state)
   ].filter(s => s && s.trim().length > 0);
@@ -369,7 +372,7 @@ async function callGroq(prompt, systemOverride = null, history = []) {
     const request = (model) => getGroqClient().chat.completions.create({
       model,
       max_tokens:  MAX_TOKENS,
-      temperature: 0.85,
+      temperature: 0.7,
       ...modelExtras(model),
       messages: [
         { role: 'system', content: systemOverride || SYSTEM_PROMPT },
@@ -433,6 +436,13 @@ function buildOfflineNarrative(state, playerInput, hint) {
   return require('./offline').buildOfflineNarrative(state, playerInput, hint);
 }
 
+
+// A chapter of play, summarised by the AI for the notes (falls back to the
+// engine's own event list when the AI is unavailable).
+async function summariseChapter(material) {
+  const r = await callGroq(`Summarise these events from a dark fantasy RPG in 3 sentences of plain prose. Keep every proper name exactly as written. No brackets, no lists, no NOTES.\n\n${material}`, 'You summarise game events faithfully and briefly. You never invent names or events.');
+  return r.success ? require('./memory').parseNotes(r.text).text.slice(0, 500) : null;
+}
 
 // =============================================
 // STORY SUMMARY UPDATER
@@ -768,7 +778,9 @@ async function processNarrative(state, playerInput, events = []) {
   // Build prompt and call Groq with rolling conversation history
   const hintForFallback = state.pendingContextHint || '';
   const prompt   = buildFullPrompt(state, playerInput);
-  const history  = (state.conversationHistory || []).slice(-20);
+  // Recent exchanges, compact: the player's words and what was narrated —
+  // the full context is rebuilt each turn from the notes, not replayed.
+  const history  = (state.conversationHistory || []).slice(-8);
   const aiResult = await callGroq(prompt, null, history);
   if (!aiResult.success) {
     // AI unavailable — keep the game playable with engine-driven prose.
@@ -778,16 +790,20 @@ async function processNarrative(state, playerInput, events = []) {
     }
   }
 
+  // The narrator's notes come off the reply before anyone sees it.
+  const memory = require('./memory');
+  let narratorNotes = [];
+  if (aiResult.success) { const parsed = memory.parseNotes(aiResult.text); aiResult.text = parsed.text; narratorNotes = parsed.notes; }
   // The player's words are theirs alone, whatever the model wrote.
   if (aiResult.success) aiResult.text = require('../agency').enforcePlayerVoice(aiResult.text, playerInput);
 
   // Store this exchange in history for next turn
   if (aiResult.success) {
     if (!state.conversationHistory) state.conversationHistory = [];
-    state.conversationHistory.push({ role: 'user',      content: prompt });
-    state.conversationHistory.push({ role: 'assistant', content: aiResult.text });
-    if (state.conversationHistory.length > 20) {
-      state.conversationHistory = state.conversationHistory.slice(-20);
+    state.conversationHistory.push({ role: 'user',      content: `[Player action]: ${playerInput}` });
+    state.conversationHistory.push({ role: 'assistant', content: aiResult.text.slice(0, 1200) });
+    if (state.conversationHistory.length > 8) {
+      state.conversationHistory = state.conversationHistory.slice(-8);
     }
   }
 
@@ -823,10 +839,10 @@ async function processNarrative(state, playerInput, events = []) {
   // Combine narrative + announcements
   const fullOutput = aiResult.text + announcements;
 
-  // Update story summary periodically
-  if (state.actionCount % SUMMARY_EVERY === 0) {
-    await updateStorySummary(state, aiResult.text);
-  }
+  // Remember this turn: engine events, the narrator's notes, the gist.
+  memory.record(state, { input: playerInput, narrative: aiResult.text, events, notes: narratorNotes });
+  const closed = await memory.maybeCloseChapter(state, isOfflineMode() ? null : summariseChapter);
+  if (closed) state.storySummary = closed.text;
 
   return {
     narrative:     aiResult.text,
