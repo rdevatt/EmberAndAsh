@@ -152,6 +152,17 @@ function generateBoardQuests(state) {
     hint:       `[QUEST ACTIVE — Clear: defeat the ${target2}. This is a single named target, harder than typical. Narrate as a notable encounter.]`
   });
 
+  // ---- What the world's state calls for: resistance work, rebuilding ----
+  for (const w of require('./world-life').boardQuests(state)) {
+    quests.push({
+      id: `q_${idCounter++}`, type: QUEST_TYPES.PATROL, tier, difficulty: 'normal',
+      label: w.label, desc: `${w.desc} Pay on completion: ${fmtCoin(calculateQuestReward(tier, 'normal').coin)}.`,
+      target: w.label, targetCount: 1, progress: 0, giver: w.giver, regionKey,
+      reward: calculateQuestReward(tier, 'normal'), factionReward: w.factionReward || null, rebuild: w.rebuild || null,
+      hint: `[QUEST ACTIVE — ${w.label}. ${w.desc} Narrate the work naturally; the engine decides when it is done.]`
+    });
+  }
+
   // ---- PATROL or RETRIEVE ----
   if (Math.random() < 0.5) {
     const ptpl = PATROL_TEMPLATES.filter(t => t.tier <= tier).pop() || PATROL_TEMPLATES[0];
@@ -564,6 +575,12 @@ function processQuestCompletions(state) {
       const reward = quest.reward || { coin:0, xp:0 };
       addCoin(state, reward.coin);
       const levelUp = grantXP(state, reward.xp);
+      if (quest.factionReward) require('./factions').changeStanding(state, quest.factionReward, quest.label);
+      if (quest.rebuild) {
+        const W = require('./chronicle').worldOf(state);
+        const d = W && require('./world-life').ensure(W).disasters.find(x => x.id === quest.rebuild && x.progress < 100);
+        if (d) { d.progress = Math.min(99, d.progress + 10); d.helpers[state.character.name] = (d.helpers[state.character.name] || 0) + 10; }
+      }
 
       // Track completion
       if (!state.completedQuests) state.completedQuests = [];

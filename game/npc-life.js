@@ -69,6 +69,11 @@ function concernsOf(world, state, regionKey, npc) {
   } catch { /* politics not set up for this world */ }
   const crisis = (world.crises || []).find(c => c.region === regionKey && c.status === 'active');
   if (crisis) out.push(`${crisis.title} frightens them`);
+  const L = world.life || {};
+  const dz = (L.disasters || []).find(d => d.region === regionKey && d.progress < 100);
+  if (dz) out.push(`${dz.title} — the rebuilding is ${dz.progress}% done`);
+  const mv = (L.movements || []).find(m => m.strength > 0 && m.regions.includes(regionKey));
+  if (mv) out.push(`${mv.name} are preaching here (${mv.creed})`);
   // Recent deaths and crimes among the people they knew.
   const ledger = (world.canon && world.canon.ledger) || [];
   const year = chronicle.dateOf(chronicle.nowHour(world)).year;

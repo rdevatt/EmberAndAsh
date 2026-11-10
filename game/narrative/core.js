@@ -272,6 +272,9 @@ function buildSceneContext(state) {
   if (state.currentNPC) {
     lines.push(`[Interacting with: ${state.currentNPC}]`);
   }
+  // How this place stands: size, prosperity, occupation, faiths, disasters, institutions, prices.
+  const place = require('../world-life').sceneLine(state);
+  if (place) lines.push(place);
   // The named people here: goals, worries, rivalries and views, from the world.
   if (!state.inCombat) {
     const people = require('../npc-life').sceneBlock(state, { focus: state.currentNPC, limit: state.currentNPC ? 2 : 1 });

@@ -679,8 +679,15 @@ function failCrisis(world, crisis) {
   crisis.status = 'failed';
   const r = REGIONS[crisis.region];
   const s = world.settlements[crisis.region] || { status: 'thriving' };
-  s.status = s.status === 'thriving' ? 'struggling' : s.status === 'struggling' ? 'ruined' : 'ruined';
-  s.since = nowDay(world);
+  // Each failure costs one step; a strong holder's garrison keeps a
+  // struggling town from falling into ruin; and a place already in ruins
+  // keeps the time it has spent rebuilding.
+  const holderPower = (world.factionPower || {})[dominionOf(world, crisis.region)] || 0;
+  const was = s.status;
+  if (was === 'thriving' || was === 'rebuilding') s.status = 'struggling';
+  else if (was === 'struggling') s.status = holderPower >= 60 ? 'struggling' : 'ruined';
+  else s.status = 'ruined';
+  if (s.status !== was || !s.since) s.since = nowDay(world);
   world.settlements[crisis.region] = s;
   const owner = (r.npcs && r.npcs[0] && r.npcs[0].faction) || 'compact';
   world.factionPower[owner] = Math.max(0, (world.factionPower[owner] || 50) - 5);
@@ -723,6 +730,7 @@ function evolve(world, state) {
       evolveSettlements(world);
       out.push(...legendsAct(world, state && state.characterId));
       out.push(...require('./politics').yearlyTurn(world));
+      out.push(...require('./world-life').yearly(world, state));
       const shift = shiftBorders(world);
       if (shift) out.push(shift);
     }

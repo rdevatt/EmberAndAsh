@@ -58,6 +58,8 @@ function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
 function leaderOf(world, faction) {
   const legend = (world.figures || []).find(f => f.status !== 'deceased' && (f.faction === faction || (world.realm && world.realm.rulerId === f.characterId && ENDING_FACTION[world.ending] === faction)));
   if (legend) return { name: legend.name, title: legend.title, traits: legend.personality || [], legend, level: (legend.snapshot && legend.snapshot.level) || 1 };
+  const ruler = require('./world-life').rulerOf(world, faction);
+  if (ruler) return { name: `${ruler.title} ${ruler.name}`, title: ruler.title, traits: [...(COUNCIL_TRAITS[faction] || ['dutiful']), ruler.trait].filter(Boolean), legend: null, level: 0, council: COUNCILS[faction] };
   return { name: COUNCILS[faction], traits: COUNCIL_TRAITS[faction] || ['dutiful'], legend: null, level: 0 };
 }
 

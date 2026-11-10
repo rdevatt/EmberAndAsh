@@ -91,7 +91,7 @@ function lineage(world, child, parent, year) {
 // ---------------------------------------------
 // Ingesting chronicle events
 // ---------------------------------------------
-const ALWAYS = new Set(['death', 'succession', 'founding', 'ending', 'war', 'politics', 'crime', 'relic', 'bond', 'revolt', 'governance', 'longevity', 'monument', 'marriage', 'birth', 'oath', 'companion', 'lineage', 'retirement']);
+const ALWAYS = new Set(['death', 'succession', 'founding', 'ending', 'war', 'politics', 'crime', 'relic', 'bond', 'revolt', 'governance', 'longevity', 'monument', 'marriage', 'birth', 'oath', 'companion', 'lineage', 'retirement', 'movement', 'disaster', 'rivalry']);
 
 function ingest(world, entry) {
   if (!world || !entry) return;
@@ -133,7 +133,7 @@ function ingest(world, entry) {
       c.choices.push({ y, by: actor || 'a hero', what: `${title}. ${entry.text || ''}`.slice(0, 260) });
       break;
     case 'succession':
-      c.reigns.push({ realm: (m = title.match(/The (.+?) passes to/)) ? m[1] : 'the realm', ruler: (m = title.match(/passes to (.+)$/)) ? m[1] : 'unknown', from: y, how: 'succession' });
+      if (/ passes to /.test(title)) c.reigns.push({ realm: (m = title.match(/The (.+?) passes to/)) ? m[1] : 'the realm', ruler: (m = title.match(/passes to (.+)$/)) ? m[1] : 'unknown', from: y, how: 'succession' });
       break;
     case 'founding':
       if ((m = title.match(/^(.+?) founds (.+)$/))) c.foundations.push({ name: m[2], founder: m[1], region: entry.region || null, y, kind: /school/i.test(m[2]) ? 'school' : /order/i.test(m[2]) ? 'order' : 'organisation', status: 'standing' });

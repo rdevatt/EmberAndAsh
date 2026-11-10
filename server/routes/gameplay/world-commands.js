@@ -67,7 +67,7 @@ module.exports = function createWorldCommands(h) {
       const a = chronicle.ageOf(state, W);
       return sendCommand(req, res, `${chronicle.formatDate(chronicle.nowHour(W))}\n${W.era.name}${W.realm ? ` — ${W.realm.title} rules` : ''}.\nYou are ${a} (${chronicle.ageBand(chronicle.bodyAge(state, W))}); natural span about ${Number.isFinite(chronicle.lifespan(state)) ? chronicle.lifespan(state) : '∞'} years.`, 'date', { persist: false });
     }
-    if (/^(?:crises|crisis|news|world news)[.!?]*$/i.test(cmd)) return sendCommand(req, res, endless.crisisText(W), 'crises', { persist: false });
+    if (/^(?:crises|crisis)[.!?]*$/i.test(cmd)) return sendCommand(req, res, endless.crisisText(W), 'crises', { persist: false });
     if (/^(?:politics|wars|diplomacy|the powers|alliances)[.!?]*$/i.test(cmd)) return sendCommand(req, res, politics.buildPoliticsText(W, state), 'politics', { persist: false });
     if (/^(?:legends|heroes|figures|legacy)[.!?]*$/i.test(cmd)) return sendCommand(req, res, legacy.buildLegendsText(W, state), 'legends', { persist: false });
     if (/^(?:titles|my titles|renown)[.!?]*$/i.test(cmd)) {
@@ -320,6 +320,18 @@ module.exports = function createWorldCommands(h) {
     // ---------------- companion stories ----------------
     if (/^(?:companion stories|stories|companion quests|my companions' stories)$/.test(cmd)) {
       return sendCommand(req, res, require('../../../game/companion-quests').listText(state), 'companionStories', { persist: false });
+    }
+
+    // ---------------- how this place stands; rebuilding ----------------
+    // News: how this place stands, the seats of power, and the world's crises.
+    if (W && /^(?:news|world news|local news|the news|how do things stand|how are things here|state of the realm|realm news)[.!?]*$/i.test(cmd)) {
+      return sendCommand(req, res, `${require('../../../game/world-life').newsText(state)}\n\n${endless.crisisText(W)}`, 'news', { persist: false });
+    }
+    if (W && /^(?:i\s+)?(?:help (?:to )?rebuild|help with the rebuilding|work on the rebuilding|(?:donate|give|pay)\s+\d[\d,]*(?:\s+(?:copper|coins?))?\s+(?:to|for)\s+(?:the\s+)?rebuild(?:ing)?)\b/.test(cmd)) {
+      const r = require('../../../game/world-life').helpRebuild(state, cmd);
+      if (!r.success) return sendCommand(req, res, r.message, 'rebuild', { persist: false });
+      req.session.undoLocked = true;
+      return sendCommand(req, res, r.message, 'rebuild', { hours: r.hours });
     }
 
     if (/^(?:deeds|my deeds|my crimes|what have i done|my sins|remember what i have done)$/.test(cmd)) {

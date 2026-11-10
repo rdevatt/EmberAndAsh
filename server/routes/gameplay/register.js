@@ -45,7 +45,8 @@ const HELP_TEXT = [
   'Quests:   check board · accept quest N · quests · abandon quest N',
   'Gear:     gear / backpack · equip <item> · unequip <item> · drop <item> · repair gear · reforge <item> (blacksmiths)',
   'Growth:   stats · spend point on <stat>   (offers: answer "yes" or "no")',
-  'Party:    companions · recruit <name> · hire a sellsword · dismiss <name>',
+  'Party:    companions · recruit <name> · hire a sellsword · dismiss <name> · companion stories · decide N',
+  'Place:    news (how this place stands, who rules, crises) · help rebuild · donate <coin> to rebuild',
   'Shop:     open shop · close shop (merchants: sell your own goods)'
 ].join('\n');
 
@@ -692,6 +693,8 @@ module.exports = function registerGameplayRoutes(app, deps) {
         worldCommands.pushCampaign(events, campaign.onEvent(state, { type: 'arrived', region: result.to }));
         const W = chronicle.worldOf(state);
         if (W) {
+          const occ = require('../../../game/world-life').occupationNote(W, result.to);
+          if (occ) events.push({ type: 'system', message: occ });
           const sg = endless.onSagaEvent(state, W, { type: 'arrived', region: result.to });
           if (sg) events.push({ type: 'system', message: sg.message });
           const crisisHere = endless.activeCrises(W).find(c => c.region === result.to);

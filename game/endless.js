@@ -353,10 +353,17 @@ function govern(state, world, policyText) {
   for (const [f, d] of Object.entries(p.power)) world.factionPower[f] = Math.min(100, (world.factionPower[f] || 50) + d);
   let restored = 0;
   if (p.settlements) for (const s of Object.values(world.settlements)) if (s.status !== 'thriving') { s.status = s.status === 'ruined' ? 'rebuilding' : 'thriving'; s.since = chronicle.nowDay(world); restored++; }
+  // The ruler's choice is law across the realm's lands for a few years.
+  const wl = require('./world-life');
+  const L = wl.ensure(world);
+  const faction = require('./politics').ENDING_FACTION[world.ending];
+  const decree = { prosperity: { text: 'the tolls are cut and the granaries opened', price: 0.9, fund: true }, order: { text: 'the roads are patrolled and the bandits hanged', price: 0.97 }, might: { text: 'a war levy is raised for fortresses', price: 1.12 } }[key];
+  L.decrees.push({ by: state.character.name, faction, text: decree.text, price: decree.price, fund: !!decree.fund, from: chronicle.nowDay(world), until: chronicle.nowDay(world) + 3 * 360 });
+  if (decree.fund) for (const d of L.disasters.filter(x => x.progress < 100 && chronicle.dominionOf(world, x.region) === faction)) d.progress = Math.min(99, d.progress + 30);
   const taxes = Math.round(2000 * getPlayerLevel(state.totalXP || 0) * p.coin);
   addCoin(state, taxes);
   chronicle.addEvent(world, { type: 'governance', title: `${state.character.name} governs ${world.realm.name} for ${p.label}`, text: p.text, actor: chronicle.actorOf(state) });
-  return { success: true, hours: 90 * 24, message: `${p.text} A season passes in council and court.${restored ? ` ${restored} settlement(s) recover.` : ''} Taxes: ${formatCoin(taxes)}.` };
+  return { success: true, hours: 90 * 24, message: `${p.text} A season passes in council and court.${restored ? ` ${restored} settlement(s) recover.` : ''} Your decree: ${decree.text} (prices ${decree.price < 1 ? 'down' : 'up'} ${Math.round(Math.abs(1 - decree.price) * 100)}% in your lands for three years). Taxes: ${formatCoin(taxes)}.` };
 }
 
 function foundOrder(state, world, name) {
@@ -388,7 +395,9 @@ function train(state, world, text) {
   if (!stat) return { success: false, message: 'Train what? strength, agility, endurance, magic, wisdom or leadership.' };
   if (state.inCombat) return { success: false, message: 'Not now.' };
   state.training = state.training || { total: 0, days: {} };
-  state.training.days[stat] = (state.training.days[stat] || 0) + days;
+  // Training under the masters of a standing institution goes faster.
+  const school = world && (world.organizations || []).find(o => o.seat === state.character.region && o.status !== 'closed' && (o.members || 0) >= 20);
+  state.training.days[stat] = (state.training.days[stat] || 0) + Math.round(days * (school ? 1.25 : 1));
   let gained = 0;
   while (state.training.days[stat] >= 360 && state.training.total < 10) {
     state.training.days[stat] -= 360; state.training.total++; state.stats[stat] = (state.stats[stat] || 10) + 1; gained++;
@@ -398,7 +407,7 @@ function train(state, world, text) {
   const lu = grantXP(state, xp);
   return {
     success: true, hours: days * 24, levelUp: lu,
-    message: `You spend ${n} ${m[2]}${n > 1 ? 's' : ''} in training.${gained ? ` ${stat.toUpperCase()} +${gained}.` : ` Progress toward ${stat.toUpperCase()}: ${state.training.days[stat]}/360 days.`}${state.training.total >= 10 ? ' (You have reached the limit of what training alone can give.)' : ''} +${xp} XP.`
+    message: `You spend ${n} ${m[2]}${n > 1 ? 's' : ''} in training${school ? ` under the masters of ${school.name}` : ''}.${gained ? ` ${stat.toUpperCase()} +${gained}.` : ` Progress toward ${stat.toUpperCase()}: ${state.training.days[stat]}/360 days.`}${state.training.total >= 10 ? ' (You have reached the limit of what training alone can give.)' : ''} +${xp} XP.`
   };
 }
 

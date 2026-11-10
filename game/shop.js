@@ -43,6 +43,7 @@ function getShopStock(state) {
     if (state.factions[holder] >= 50) mod *= 0.9; else if (state.factions[holder] <= -20) mod *= 1.25;
   }
   if (W) mod *= require('./politics').warPriceMult(W, regionKey);   // war drives prices up
+  if (W) mod *= require('./world-life').priceIndex(W, regionKey, state).mult;   // scarcity, levies, decrees, disasters
   mod = Math.round(mod * 100) / 100;
   const p = (x) => Math.max(1, Math.round(x * mod));
   const gearPrice = 150 * (tier + 1) * (tier + 1);
