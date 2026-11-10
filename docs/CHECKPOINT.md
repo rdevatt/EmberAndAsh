@@ -10,6 +10,9 @@ The completion brief has 15 sections. This file records what is done, what is in
 | 2 | HTTP, auth and session hardening; authorisation tests; backups | M1/M2 | `tests/security.test.js` (9 tests); browser 58/58 under strict CSP |
 | 4 | Permanent canon (two-layer memory): people, reigns, wars, territory, foundations, artifacts, oaths, choices, lineage, marriage | M4 | `tests/canon.test.js` (5): 300 years, contradictions, compaction, worlds, restart. Live multi-generation check is pending in the final live pass |
 | 3 | Player agency: four-layer turns, action guard, repetition across replies | M3 | `tests/agency.test.js` (12); live: 7 invented sentences removed in 11 turns, 0 fallbacks |
+| 13 | Comprehensive tests: AI failure modes (fake client, own deadline); accessibility audit; CI workflow (simulated in a clean clone, 3 × 229/229); 24-campaign matrix over all classes, seeds and endings with a next generation each; live two-generation canon check; flake hunts (12 and 6 repeated runs) | M13 | `tests/narration-failures.test.js` (6); `FINAL_TEST_REPORT.md` §1–5 |
+| 14 | Human-like acceptance tester (three personas, hostile input, journal, state audit); offline 1,800 actions and live 36 actions, no high or medium findings | M14 | `scripts/acceptance-tester.js`; report §6 |
+| 15 | Docs: `GAME_COMPLETION.md`, `LIVING_WORLD.md` (sections 24–31), `SECURITY.md`, `FINAL_TEST_REPORT.md`, `REMAINING_LIMITATIONS.md` | M15 | this commit |
 | 12 | UI: a Journal with nine pages (map with real travel and voyages, quests/adventures/sagas/companion stories, skills and paths with stat spending, trade, companions, politics and seats of power, chronicle, crafting, narrator status with no secrets); every button sends a real game command; keyboard (arrows, Home/End, Escape, focus return, "j"); mobile layout; Still toggle applies at once | M12 | `tests/journal.test.js` (2: protection, no secrets, every button a real command); browser 71/71 (13 new: all pages, keyboard, real travel, mobile fit and touch size, Still) |
 | 11 | Art: everyday weather from land, season and day (overcast, rain, storm, snow, dust; sun dims behind cloud); faction banners (one native, two at an occupied place's gates); disaster overlays that fade as rebuilding progresses; voyages at sea with the player on deck, storms and pirates; scaffolding, forge and inn sign; contract killings drawn as the crime; the Still toggle now also stops looping animation; every animated class stops under reduced motion and Still | M11 | `tests/art.test.js` (5): 768 combinations draw clean SVG; screenshots checked; browser 58/58. No external image provider (optional in the brief; not added) |
 | 10 | Mature settings preserved: settings untouched by the new systems; romance off blocks marriage; prompt carries the exact directive beside the new world blocks; contract killings with violence off carry no gore while the outcome is unchanged; a 16-year-old never gets marriage or intimacy even with the declaration | M10 | `tests/mature-regression.test.js` (3) plus the existing content suites (19) |
@@ -21,9 +24,7 @@ The completion brief has 15 sections. This file records what is done, what is in
 
 ## Next, in order
 
-13. Test suites: full campaigns across classes, endings, seeds, alignments and professions; live Groq; failure modes; CI.
-14. A human-like acceptance tester.
-15. Docs: `GAME_COMPLETION`, `LIVING_WORLD`, `SECURITY`, `FINAL_TEST_REPORT`, `REMAINING_LIMITATIONS`.
+All fifteen sections are done. What is left is listed in `REMAINING_LIMITATIONS.md`.
 
 ## Needs the owner
 

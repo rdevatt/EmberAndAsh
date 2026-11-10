@@ -1,6 +1,6 @@
-# Ember and Ash — The Living World (Phases 3–5) tracker
+# Ember and Ash — The Living World tracker
 
-Last updated: 2026-11-08. Branch `claude/ember-and-ash-completion` (committed locally, not pushed).
+Last updated: 2026-11-09. Branch `claude/ember-and-ash-completion` (committed locally, not pushed).
 
 The original ten-chapter campaign is now the opening chapter of a world's history. Phase 4 (sections 11–15) covers class balance, the political simulation, high-level validation, mature content and visual refinement. Phase 5 (sections 16–23) covers player agency, adult content, crime and justice, slavery (with slave fighters and revolts), 39 professions, the good-and-evil road, and the narrator's long memory with live AI narration. This document tracks what is implemented, how it was verified, its known limits, and what is next. Earlier systems are covered in [GAME_COMPLETION.md](GAME_COMPLETION.md).
 
@@ -15,7 +15,8 @@ Status key:
 
 | Check | Result |
 | --- | --- |
-| `npm test` (isolated temp DB, offline narration) | **147 / 147 pass**: 22 added in Phase 4 and 34 in Phase 5. Phase 5 covers player agency, explicit content, crime, slavery, professions, the road, slave fighters and revolts, and narrator memory. The memory tests include a 10,000-turn run |
+| `npm test` after the completion pass (sections 24–31) | **229 / 229 pass** in 28 files, stable in three clean-clone runs. See [FINAL_TEST_REPORT.md](FINAL_TEST_REPORT.md) |
+| `npm test` at the end of Phase 5 (isolated temp DB, offline narration) | **147 / 147 pass**: 22 added in Phase 4 and 34 in Phase 5. Phase 5 covers player agency, explicit content, crime, slavery, professions, the road, slave fighters and revolts, and narrator memory. The memory tests include a 10,000-turn run |
 | `scripts/ui-playtest.js`: desktop, reduced motion, mobile 390×844 | **58 / 58** checks. Phase 5 adds: your exact words narrated back, the Draw / Fight barehanded buttons, undressing drawn, a crime scene with the deeds ledger, and the road meter darkening after a murder. No console errors |
 | All 12 classes × 2 seeds, full campaign (`playthrough.js`, final Phase 5 code) | **24 / 24 finish**; 1,445–4,312 actions; wizard 2,099–2,202 (was ~11,400) |
 | Live AI narration (Groq, `qwen/qwen3.8-27b`) | 27 live turns across every kind of scene: talk, quoted and described speech, unarmed and armed combat, undressing, explicit consensual intimacy and "stop", work, murder, trial, travel, the slave market, rest. All narrated by the AI, with no leaked notes or engine text, at about 1.3 s per turn. A barkeep the model named Davin came back as Davin 336 turns later |
@@ -563,20 +564,86 @@ There are four new trades (miner, physician, thief, tailor), and 27 more are lis
 - **Live, with the real model:** 27 turns across every kind of scene, all narrated by the AI. Your quoted words were verbatim, described speech became one line, and fists were used when no weapon was drawn. The explicit consensual scene was written and "stop" was respected; murder, a trial, travel and the slave market were narrated. No notes or engine text leaked.
 - **Continuity:** a barkeep the model named Davin (knotted forearms, the room he kept) greeted you as Davin 336 turns later.
 
+## 24. Permanent canon — **Done + tested**
+
+`game/canon.js` keeps the world's important history forever, alongside the narrator's compact working memory:
+- people (birth, death and cause, successor, titles, parents, children);
+- reigns, wars, treaties, territory, foundations, artifacts, relations, oaths and great choices;
+- lineage and marriage.
+
+The ledger is capped at 12,000 rows; old minor rows fold into decade summaries, and anything of importance 4+ is kept word for word. The narrator is told the relevant canon for each scene as "authoritative", and notes that would raise the dead are refused. Tests: 300 years, contradiction, compaction, separate worlds, family lines through a restart. Live: two generations with no contradiction.
+
+## 25. Companion stories and NPC lives — **Done + tested**
+
+**Companion stories** (`game/companion-quests.js`): each of the eight companions has a multi-stage story with steps the engine checks (go, act, fight, choose). Outcomes are real and enter the canon:
+- abilities that change how they fight;
+- gear, faction standing, settlements, a ruler, oaths and debts;
+- betrayals, deaths and partings.
+
+Dead or estranged companions cannot be recruited again. Companions judge the player's deeds by their own values: a smuggler shrugs at theft, a priest will not forgive a murder.
+
+**NPC lives** (`game/npc-life.js`): NPCs have goals by trade and concerns drawn from the world (hard times, occupation, war, crises, recent deaths, faiths, disasters). Their view of the player reflects deeds, standing, infamy, the road and legend, and an heir knows who killed their predecessor. They have mutual rivalries and friendships, and they retire and hand on their work. The narrator is told the real holder of each role.
+
+## 26. The world's yearly life — **Done + tested**
+
+`game/world-life.js` runs once per in-game year:
+- **Seats of power:** each power has a seat that passes through heirs, elections, regencies for child rulers, and disputed claims, which weaken the power and can split off regions. Story rulers (Seraphine) are honoured.
+- **People and prices:** population follows logistic growth within each region's carrying capacity, and towns grow from hamlets to cities and dwindle again. Prices answer to ruin, occupation levies, decrees and disasters.
+- **Faiths, disasters and institutions:** seven faiths and schools of magic arise, spread, are suppressed and fade. Disasters strike and are rebuilt, faster with the player's help, and the helpers are named in the record. Founded orders grow into institutions, change masters and can close.
+- **Legends:** rivalries form between legends, and a former hero who rules issues decrees.
+- **Occupation:** occupied regions show patrols on arrival, a levy in prices, and resistance work on the board.
+- **The player as ruler:** governing is a decree with effects.
+- **News:** `news` shows how a place stands.
+
+## 27. Adventures from world state — **Done + tested**
+
+`game/adventures.js` builds eleven kinds of adventure, each from what is true in the world now: investigation, rescue, trade, exploration, construction, research or artifact, military, negotiation, intrigue, personal and historical mystery. Steps are checked by the engine: place, words, a named person, coin, materials, days of work, a persuasion roll with three tries, a fight, a choice. Each has a deadline and a failure that costs something, and the outcomes change the world.
+
+## 28. Trades in the world, class paths, pacing — **Done + tested**
+
+`game/trade-work.js` adds what a trade opens up:
+- commissions from named people;
+- voyages between five ports, with pay, storms and pirates;
+- inn ownership, with takings from the town's size and fortunes;
+- assassin contracts on named people and, at the top, rulers, with crime, warrants, heirs and succession;
+- smith masterworks and ranks up to grandmaster.
+
+Honest work grants XP calibrated to about one fight per shift.
+
+`game/specializations.js` gives each class two paths at level 20. The class audit confirmed every class can be earned by its own words. Bards' Vicious Mockery lost its cooldown, and druids gained Barkskin.
+
+## 29. Progression to 2,500 and exploits — **Done + tested**
+
+Milestone levels are exact and playable up to 2,500, and XP past 2^53 stays exact. Deaths are bounded and huge saves come back exact. Buy-and-sell never profits, and one-time rewards cannot be repeated. Played rift XP and post-game play from 96 to 138 and 142 are measured.
+
+## 30. Art and the Journal — **Done + tested**
+
+- **Art:** everyday weather; faction banners and occupation; disaster overlays that fade with rebuilding; voyages at sea; scaffolding, forge and inn; full stillness under reduced motion and the Still toggle.
+- **The Journal:** nine pages with real controls, keyboard navigation and a mobile layout, plus an accessibility audit in the browser test.
+
+## 31. Failure modes, acceptance, CI — **Done + tested**
+
+- **Failure modes:** every AI failure falls back to the game's own narrator, and our own deadline covers calls that never answer.
+- **Acceptance:** the human-like tester ran 1,800 offline and 36 live actions with no high or medium findings.
+- **Live check:** two generations in one world, with no contradiction.
+- **CI:** a workflow that runs offline on Node 20 and 22 (not yet pushed).
+
 ## Known limitations
 
-- **Invented player actions.** The AI narrator sometimes adds small actions you did not take ("you scan the room"). The prompt forbids it, and the live rate dropped after tightening it, but only speech is enforced by a filter. Actions are not filtered, because telling the narrator's description apart from an invented action is unreliable.
+- **Invented player actions.** The action guard (`game/action-guard.js`) now removes sentences that add player acts the input and the engine did not license. It covers 11 kinds of act; a turn that loses too much is retold once and otherwise told by the game's own narrator. It is a filter, not understanding: an unusual paraphrase can slip through, and a harmless sentence can occasionally be trimmed.
 - **Unnamed people.** If the model never names someone, there is nothing to remember except their role. The memory keeps the role ("the barkeep of Thornwick") and what you said to them.
 - **AI provider rules** still apply to explicit content. In live tests the current model wrote it; if a provider declines, the game says so and narrates offline.
 - **The art is simple vector illustration;** explicit scenes and nudity are drawn as small stylised figures.
 - **The adult declaration is self-attested,** not verified age assurance.
 - **Remaining class spread:** in the campaign, bards and druids still take up to about twice a rogue's actions (3,200–4,300 against 1,400–1,900).
-- **Politics are yearly and abstract,** and **high-level validation uses fixtures.**
+- **Politics and the world's life are yearly.** High-level validation now includes normal post-game play as well as fixtures (section 29).
+- **The current list of limitations is in [REMAINING_LIMITATIONS.md](REMAINING_LIMITATIONS.md).**
 - **One intermittent test failure** was seen in full runs under load and not reproduced since.
 
 ## Next implementation tasks
 
-1. **A post-check for invented player actions** in AI replies, comparing the "You …" sentences against the stated action, if it can be made reliable.
+1. ~~A post-check for invented player actions~~ — done (the action guard, completion pass).
+1b. **Havens for the Choir and the Remnant** in the late regions, so the Ascend and Remnant paths are not twice as long as the Wardens path (see REMAINING_LIMITATIONS.md).
 2. **Sieges and town defence** on war fronts.
 3. **Training slaves** into named companions with their own abilities.
 4. **An optional image-provider interface** (`EMBER_ART_PROVIDER`).
