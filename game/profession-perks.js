@@ -81,7 +81,7 @@ function rankFactor(state) { return 0.6 + 0.1 * Math.max(1, Math.min(5, state.pr
 function combatMods(state, enemy) {
   const out = { dmg: 1, weapon: 1, armor: 1, hit: 0, dodge: 0, crit: 0, potion: 1, regen: 0, hp: 1, loot: 1, spell: 1, weakness: 1 };
   const p = state && state.profession && PERKS[state.profession];
-  if (!p) return out;
+  if (!p) return state ? require('./specializations').apply(state, out, enemy, isPerson) : out;
   const f = rankFactor(state);
   const c = p.combat;
   const tags = (enemy && enemy.traits && enemy.traits.tags) || [];
@@ -107,7 +107,7 @@ function combatMods(state, enemy) {
   out.loot += (c.loot || 0) * f;
   out.spell += (c.spell || 0) * f;
   out.weakness += (c.weakness || 0) * f;
-  return out;
+  return require('./specializations').apply(state, out, enemy, isPerson);
 }
 
 // ---------------------------------------------
@@ -166,9 +166,12 @@ function work(state, hours) {
   state.coin = (state.coin || 0) + coin;
   const profXP = Math.round(hours * (4 + (state.professionLevel || 1)));
   state.profXP = (state.profXP || 0) + profXP;
+  // A peaceful career: honest work moves a life forward too, paid in time.
+  const xp = require('./trade-work').careerXP(state, hours);
+  const levelUp = require('./character').grantXP(state, xp);
   return {
-    success: true, hours,
-    message: [`You ${p.work.what} for ${hours} hours: ${coin} copper${gained.length ? ` and ${gained.join(', ')}` : ''}.`, ...lines].join('\n'),
+    success: true, hours, levelUp, xp,
+    message: [`You ${p.work.what} for ${hours} hours: ${coin} copper${gained.length ? ` and ${gained.join(', ')}` : ''}, +${xp} XP.`, ...lines].join('\n'),
     hint: `[WORK — the player spends ${hours} hours as a ${key}: they ${p.work.what}. Narrate the work and the people.]`,
     coin, gained, profXP
   };

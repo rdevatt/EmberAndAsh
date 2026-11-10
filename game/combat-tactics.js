@@ -128,7 +128,7 @@ const ABILITIES = {
   drain_life:    { cls: 'warlock', lvl: 3, label: 'Drain Life', names: ['drain life', 'drain'], kind: 'spell', cost: { mana: 14 }, power: 1.0, lifesteal: 0.9, element: 'eldritch', cd: 1 },
   hex:           { cls: 'warlock', lvl: 5, label: 'Hex', names: ['hex', 'curse'], kind: 'spell', cost: { mana: 16 }, power: 0.6, element: 'shadow', status: { type: 'vulnerable', remaining: 3 }, status2: { type: 'weaken', remaining: 3 }, cd: 5 },
 
-  mockery:       { cls: 'bard', lvl: 1, label: 'Vicious Mockery', names: ['vicious mockery', 'mockery', 'mock'], kind: 'spell', cost: { mana: 8 }, power: 1.35, element: 'sonic', status: { type: 'weaken', remaining: 2 }, cd: 1 },
+  mockery:       { cls: 'bard', lvl: 1, label: 'Vicious Mockery', names: ['vicious mockery', 'mockery', 'mock'], kind: 'spell', cost: { mana: 8 }, power: 1.3, element: 'sonic', status: { type: 'weaken', remaining: 1 }, cd: 0 },
   inspire:       { cls: 'bard', lvl: 3, label: 'Inspire', names: ['inspire', 'rally'], kind: 'support', cost: { mana: 12 }, heal: 0.1, buff: { type: 'inspire', remaining: 4 }, cd: 6 },
   discord:       { cls: 'bard', lvl: 5, label: 'Discord', names: ['discord', 'dissonance'], kind: 'spell', cost: { mana: 18 }, power: 1.0, element: 'sonic', status: { type: 'stun', remaining: 2 }, cd: 6 }
 };
@@ -338,6 +338,8 @@ function enemyDamageMultiplier(state, enemy) {
   if (hasEffect(state, 'player', 'rage')) m *= 0.85;
   // Paladin's Aura of Protection: conviction turns some of every blow.
   if (state.combatClass === 'paladin') m *= 0.85;
+  // Druid's Barkskin: the living world hardens around them.
+  if (state.combatClass === 'druid') m *= 0.87;
   return m;
 }
 

@@ -68,6 +68,50 @@ module.exports = function createWorldCommands(h) {
       return sendCommand(req, res, `${chronicle.formatDate(chronicle.nowHour(W))}\n${W.era.name}${W.realm ? ` — ${W.realm.title} rules` : ''}.\nYou are ${a} (${chronicle.ageBand(chronicle.bodyAge(state, W))}); natural span about ${Number.isFinite(chronicle.lifespan(state)) ? chronicle.lifespan(state) : '∞'} years.`, 'date', { persist: false });
     }
     if (/^(?:crises|crisis)[.!?]*$/i.test(cmd)) return sendCommand(req, res, endless.crisisText(W), 'crises', { persist: false });
+
+    // ---------------- class paths ----------------
+    if (/^(?:specializations?|specialisations?|paths|my path|class paths)[.!?]*$/i.test(cmd)) return sendCommand(req, res, require('../../../game/specializations').listText(state), 'specialization', { persist: false });
+    const specM = cmd.match(/^(?:i\s+)?(?:specialize|specialise|take the path of|choose the path of)\s+(?:in\s+|as\s+(?:a\s+|an\s+)?)?(.+?)[.!?]*$/i);
+    if (specM) {
+      const r = require('../../../game/specializations').choose(state, specM[1]);
+      if (r.success) req.session.undoLocked = true;
+      return sendCommand(req, res, r.message, 'specialization', { persist: r.success });
+    }
+
+    // ---------------- what a trade opens up ----------------
+    if (W && !state.inCombat) {
+      const tw = require('../../../game/trade-work');
+      const done = (r, type, hint) => {
+        if (!r.success) return sendCommand(req, res, r.message, type, { persist: false });
+        req.session.undoLocked = true;
+        if (r.hours) addTime(req, r.hours);
+        sys(events, r.message); if (r.levelUp) events.push(r.levelUp);
+        appendHint(state, `[${hint} — ${r.message.split('\n')[0]} Narrate exactly this; add nothing.]`);
+        return narrateAndRespond(req, res, input, events);
+      };
+      if (/^(?:opportunities|trade work|work opportunities|contracts|my trade|what work is there)[.!?]*$/i.test(cmd)) return sendCommand(req, res, tw.opportunities(state), 'opportunities', { persist: false });
+      if (/^(?:i\s+)?(?:take|accept) (?:the |a )?commission[.!?]*$/i.test(cmd)) return done(tw.takeCommission(state), 'commission', 'COMMISSION');
+      const voy = cmd.match(/^(?:i\s+)?(?:sign on (?:for|with) (?:a )?(?:voyage|ship|crew)|book passage|take (?:a )?ship|sail)\s+(?:to\s+)?(.+?)[.!?]*$/i);
+      if (voy) {
+        const r = tw.voyage(state, voy[1], { spawnEnemy });
+        if (!r.success) return sendCommand(req, res, r.message, 'voyage', { persist: false });
+        req.session.undoLocked = true; addTime(req, r.hours);
+        sys(events, r.message);
+        const ar = require('../../../game/adventures').onEvent(state, W, { type: 'arrived', region: r.to });
+        if (ar) sys(events, ar.message);
+        const occ = require('../../../game/world-life').occupationNote(W, r.to);
+        if (occ) sys(events, occ);
+        if (r.spawn) { startEncounter(state, r.spawn, `[PIRATES — a ${r.spawn.label} boards the ship. Narrate it.]`); events.push({ type: 'combatStart', label: r.spawn.label, level: r.spawn.level }); }
+        appendHint(state, `[VOYAGE — the player sailed from ${REGIONS[r.from].label} to ${REGIONS[r.to].label}. Narrate the voyage and landfall.]`);
+        return narrateAndRespond(req, res, input, events);
+      }
+      if (/^(?:i\s+)?buy (?:the |an |this )?inn[.!?]*$/i.test(cmd)) return done(tw.buyInn(state), 'inn', 'INN BOUGHT');
+      if (/^(?:i\s+)?(?:collect|take) (?:the )?(?:takings|money|coin)? ?(?:from )?(?:the |my )?inn(?:'s takings)?[.!?]*$/i.test(cmd)) return done(tw.collectInn(state), 'inn', 'INN TAKINGS');
+      const ctr = cmd.match(/^(?:i\s+)?(?:take|accept) (?:the )?contract\s+(\d)[.!?]*$/i);
+      if (ctr) return done(tw.takeContract(state, parseInt(ctr[1], 10)), 'contract', 'CONTRACT ACCEPTED');
+      if (/^(?:i\s+)?(?:carry out|fulfil|fulfill|complete|do) (?:the |my )?contract[.!?]*$/i.test(cmd)) return done(tw.carryOut(state, { removeCompanion }), 'contract', 'ASSASSINATION');
+      if (/^(?:i\s+)?(?:forge|make|craft) (?:a )?masterwork\b/i.test(cmd)) return done(tw.forgeMasterwork(state, cmd), 'masterwork', 'MASTERWORK');
+    }
     if (/^(?:politics|wars|diplomacy|the powers|alliances)[.!?]*$/i.test(cmd)) return sendCommand(req, res, politics.buildPoliticsText(W, state), 'politics', { persist: false });
     if (/^(?:legends|heroes|figures|legacy)[.!?]*$/i.test(cmd)) return sendCommand(req, res, legacy.buildLegendsText(W, state), 'legends', { persist: false });
     if (/^(?:titles|my titles|renown)[.!?]*$/i.test(cmd)) {
@@ -411,6 +455,7 @@ module.exports = function createWorldCommands(h) {
       if (!w.success) return sendCommand(req, res, w.message, 'work', { persist: false });
       addTime(req, w.hours);
       sys(events, w.message);
+      if (w.levelUp) events.push(w.levelUp);
       events.push({ type: 'work', profession: state.profession });
       appendHint(state, w.hint);
       return narrateAndRespond(req, res, input, events);

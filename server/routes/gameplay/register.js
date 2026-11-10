@@ -44,9 +44,10 @@ const HELP_TEXT = [
   'Trade:    shop · buy <item> · sell <item> · drink potion / drink mana potion',
   'Quests:   check board · accept quest N · quests · abandon quest N',
   'Gear:     gear / backpack · equip <item> · unequip <item> · drop <item> · repair gear · reforge <item> (blacksmiths)',
-  'Growth:   stats · spend point on <stat>   (offers: answer "yes" or "no")',
+  'Growth:   stats · spend point on <stat>   (offers: answer "yes" or "no") · paths · specialize in <path> (level 20)',
   'Party:    companions · recruit <name> · hire a sellsword · dismiss <name> · companion stories · decide N',
   'Place:    news (how this place stands, who rules, crises) · help rebuild · donate <coin> to rebuild',
+  'Trade:    opportunities (commissions; voyages; the inn; contracts; masterworks) · take the commission · sign on for a voyage to <port> · buy the inn · collect from the inn · take contract N · carry out the contract · forge a masterwork weapon',
   'Work:     adventures (work the world needs: mysteries, rescues, trade, building, research, war, peace, intrigue) · take adventure N · abandon adventure',
   'Shop:     open shop · close shop (merchants: sell your own goods)'
 ].join('\n');

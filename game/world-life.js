@@ -157,6 +157,22 @@ function dynastyYear(world, out) {
   }
 }
 
+// A ruler murdered: the seat passes at once, and if the killer is known
+// the court remembers who did it.
+function killRuler(world, f, killer = null) {
+  const L = ensure(world);
+  const d = L.dynasties[f];
+  if (!d) return null;
+  const out = [];
+  const age = ageAt(world, d.ruler.born);
+  require('./canon').person(world, d.ruler.name, { titles: [`${SEATS[f].title} of ${FN()[f]}`], cause: 'assassinated' });
+  out.push(chronicle.addEvent(world, { type: 'death', importance: 5, title: `${d.ruler.name} dies at ${age}`, text: `The ${SEATS[f].title} of ${FN()[f]} is assassinated${killer ? ` — by ${killer}, it is said` : '; no one knows by whom'}.` }, `ruler-death:${f}:${d.ruler.name}`));
+  const y = yearOf(world);
+  const heir = d.heir || newPerson(world, f, `${world.id}${f}${y}${d.line.length}murder`, 30 + hashInt(world.id + f + y) % 20);
+  succeed(world, f, d, heir, `${d.ruler.name} is murdered`, out);
+  return out.filter(Boolean);
+}
+
 // ---------------------------------------------
 // People and prosperity
 // ---------------------------------------------
@@ -367,9 +383,10 @@ function helpRebuild(state, text = '') {
   d.xpGiven = d.xpGiven || {};
   if ((d.xpGiven[name] || 0) < 12) {
     d.xpGiven[name] = (d.xpGiven[name] || 0) + 1;
-    const lu = ch.grantXP ? ch.grantXP(state, 40 + level * 6) : null;
-    lines.push(`+${40 + level * 6} XP`);
-    if (lu && lu.leveledUp) lines.push(`You reach level ${lu.newLevel}.`);
+    const xp = require('./trade-work').careerXP(state, 8) * 2;      // a good day's work, and a good deed
+    const lu = ch.grantXP(state, xp);
+    lines.push(`+${xp} XP`);
+    if (lu && lu.newLevel) lines.push(`You reach level ${lu.newLevel}.`);
   }
   if (first) {
     require('./morality').shift(state, 2, `helped rebuild ${label(k)}`);
@@ -394,7 +411,11 @@ function institutionsYear(world, out) {
     if (!o.master) o.master = o.founder;
     if (!o.rank) o.rank = rankOf(o.members || 0);
     const st = (world.settlements[o.seat] || {}).status;
-    const g = { thriving: 0.12, rebuilding: 0.04, struggling: -0.06, ruined: -0.2 }[st] ?? 0.07;
+    let g = { thriving: 0.12, rebuilding: 0.04, struggling: -0.06, ruined: -0.2 }[st] ?? 0.07;
+    // People follow a living legend, even through hard years.
+    const founder = (world.figures || []).find(f => f.characterId === o.founderId);
+    const founderLives = o.master === o.founder && (!founder || founder.status !== 'deceased') && st !== 'ruined';
+    if (founderLives) g = Math.max(g, 0.03);
     o.members = Math.max(0, Math.round((o.members || 0) * (1 + g) + (g > 0 ? 2 : 0)));
     const rank = rankOf(o.members);
     if (rank !== o.rank) {
@@ -563,4 +584,4 @@ function boardQuests(state) {
   return out;
 }
 
-module.exports = { SEATS, MOVEMENTS, DISASTERS, ensure, yearly, rulerOf, econ, sizeOf, priceIndex, occupiedBy, occupationNote, regionFacts, sceneLine, newsText, helpRebuild, boardQuests, strike, rankOf };
+module.exports = { killRuler, SEATS, MOVEMENTS, DISASTERS, ensure, yearly, rulerOf, econ, sizeOf, priceIndex, occupiedBy, occupationNote, regionFacts, sceneLine, newsText, helpRebuild, boardQuests, strike, rankOf };

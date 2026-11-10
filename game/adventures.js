@@ -310,7 +310,8 @@ function finish(state, world, a, seed) {
   a.id = `adv_${hashInt(seed)}`;
   a.step = 0;
   a.level = Math.max(1, lvl);
-  a.reward = { xp: Math.round(14 * Math.max(3, lvl) * Math.max(2, a.steps.length) * deed), coin: 60 * Math.max(3, lvl) };
+  // In line with sagas: about a dozen fights' worth for a few steps of work.
+  a.reward = { xp: Math.round(12 * Math.max(3, lvl) * (Math.max(3, a.steps.length) / 3) * deed), coin: 60 * Math.max(3, lvl) };
   // The first "go" is already done if you are there.
   if (a.steps[0] && a.steps[0].kind === 'go' && a.steps[0].region === state.character.region) a.steps.shift();
   return a;
