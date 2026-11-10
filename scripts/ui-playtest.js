@@ -183,11 +183,32 @@ async function reducedMotion(browser) {
   await context.close();
 }
 
+// Accessible names for every control, labels for every field, labelled
+// images and dialogs. Hidden legacy controls (aria-hidden) are skipped.
+function a11yAudit(page) {
+  return page.evaluate(() => {
+    const hidden = (el) => el.closest('[aria-hidden="true"]');
+    const name = (el) => (el.getAttribute('aria-label') || (el.getAttribute('aria-labelledby') && (document.getElementById(el.getAttribute('aria-labelledby')) || {}).textContent) || el.textContent || el.getAttribute('title') || el.value || '').trim();
+    const out = [];
+    for (const el of document.querySelectorAll('button, [role="button"], a[href]')) if (!hidden(el) && !name(el)) out.push(`button: ${el.outerHTML.slice(0, 60)}`);
+    for (const el of document.querySelectorAll('input:not([type="hidden"]), textarea, select')) {
+      if (hidden(el)) continue;
+      if (!(el.getAttribute('aria-label') || el.getAttribute('aria-labelledby') || (el.id && document.querySelector(`label[for="${el.id}"]`)) || el.closest('label'))) out.push(`field: #${el.id}`);
+    }
+    for (const el of document.querySelectorAll('svg')) if (!hidden(el) && !el.closest('button') && !(el.getAttribute('role') === 'img' && el.getAttribute('aria-label'))) out.push(`image: ${el.getAttribute('class')}`);
+    for (const el of document.querySelectorAll('.modal')) if (el.getAttribute('role') !== 'dialog' || !(el.getAttribute('aria-label') || el.getAttribute('aria-labelledby'))) out.push(`dialog: #${el.id}`);
+    if (!document.documentElement.lang) out.push('lang');
+    return out;
+  });
+}
+
 async function journal(browser) {
   const { page, errors } = await newPage(browser, { width: 1300, height: 860 });
   const h = helpers(page);
   await page.goto(URL);
   await createCharacter(page, h, 'Quill');
+  const issues = await a11yAudit(page);
+  check('accessibility: every control, field, image and dialog is named', issues.length === 0, issues.slice(0, 4).join(' | '));
   const loaded = (tab) => waitUntil(page, (t) => document.getElementById('journal-body').dataset.loaded === t, tab, 15000).then(() => true).catch(() => false);
   await page.click('#btn-journal');
   check('journal: opens on the map', await h.visible('#modal-journal') && await loaded('map'));

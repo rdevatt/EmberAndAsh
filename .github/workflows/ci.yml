@@ -1,0 +1,38 @@
+# Runs the whole test suite offline on every push and pull request.
+# No secrets are used: narration runs on the game's own narrator, and every
+# test uses its own temporary database (tests/helpers.js), never a real one.
+name: tests
+
+on:
+  push:
+    branches: [main, 'claude/**']
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      matrix:
+        node: [20, 22]
+    env:
+      NARRATIVE_OFFLINE: '1'
+      EMBER_NO_AUTOSTART: '1'
+      EMBER_REQUIRE_DB_PATH: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm test
+        env:
+          EMBER_DB_PATH: ${{ runner.temp }}/ci-dev.db
+      - name: No secrets or databases are tracked
+        run: |
+          ! git ls-files | grep -E '\.env$|\.db$|\.db-wal$|\.db-shm$'
+          ! git grep -nE 'gsk_[A-Za-z0-9]{20,}' -- . ':!*.md'

@@ -380,7 +380,13 @@ async function callGroq(prompt, systemOverride = null, history = []) {
     return { success: false, offline: true, text: '', error: aiHealth.reason, tokens: 0 };
   }
   try {
-    const request = (model) => getGroqClient().chat.completions.create({
+    // Our own deadline, in case a client or proxy never answers.
+    const deadline = parseInt(process.env.EMBER_AI_TIMEOUT_MS || '15000', 10) + 2000;
+    const withTimeout = (p) => new Promise((resolve, reject) => {
+      const t = setTimeout(() => reject(Object.assign(new Error(`AI request timed out after ${deadline} ms`), { status: 'timeout' })), deadline);
+      Promise.resolve(p).then(v => { clearTimeout(t); resolve(v); }, e => { clearTimeout(t); reject(e); });
+    });
+    const request = (model) => withTimeout(getGroqClient().chat.completions.create({
       model,
       max_tokens:  MAX_TOKENS,
       temperature: 0.7,
@@ -390,7 +396,7 @@ async function callGroq(prompt, systemOverride = null, history = []) {
         ...history,
         { role: 'user', content: prompt }
       ]
-    });
+    }));
     let response;
     try {
       response = await request(MODEL);
