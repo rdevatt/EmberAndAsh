@@ -266,6 +266,8 @@ registerStateRoutes(app, {
   isReady
 });
 
+require('./routes/journal')(app, { requireSession, isInCreation });
+
 const worldRoutes = require('./routes/world/register')(app, {
   db, worldStore, requireSession, setSession, persistSession, newCreationState,
   buildCharacterPanelData, buildProgressionPanelData, buildEconomyPanelData, buildRightPanelData, buildBoardDisplayData,

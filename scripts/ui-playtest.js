@@ -183,6 +183,69 @@ async function reducedMotion(browser) {
   await context.close();
 }
 
+async function journal(browser) {
+  const { page, errors } = await newPage(browser, { width: 1300, height: 860 });
+  const h = helpers(page);
+  await page.goto(URL);
+  await createCharacter(page, h, 'Quill');
+  const loaded = (tab) => waitUntil(page, (t) => document.getElementById('journal-body').dataset.loaded === t, tab, 15000).then(() => true).catch(() => false);
+  await page.click('#btn-journal');
+  check('journal: opens on the map', await h.visible('#modal-journal') && await loaded('map'));
+  let all = true;
+  for (const tab of ['quests', 'skills', 'trade', 'companions', 'politics', 'chronicle', 'crafting', 'ai', 'map']) {
+    await page.click(`#jtab-${tab}`);
+    if (!(await loaded(tab))) { all = false; check(`journal: ${tab} loads`, false); }
+  }
+  check('journal: all nine pages load', all);
+  await page.focus('#jtab-map');
+  await page.keyboard.press('ArrowRight');
+  check('journal: arrow keys move between pages', await loaded('quests') && await page.evaluate(() => document.activeElement.id) === 'jtab-quests');
+  await page.keyboard.press('End');
+  check('journal: End jumps to the last page', await loaded('ai'));
+  const aiText = await page.locator('#journal-body').innerText();
+  check('journal: the narrator page reports status, never a key', /narrator/i.test(aiText) && !/gsk_/.test(aiText), aiText.slice(0, 80));
+  await page.keyboard.press('Escape');
+  check('journal: Escape closes and focus returns', !(await h.visible('#modal-journal')) && await page.evaluate(() => document.activeElement.id) === 'btn-journal');
+  // A real control: travel from the map.
+  const before = await page.locator('#location-display').innerText();
+  await page.click('#btn-journal'); await loaded('map');
+  await page.click('#jtab-map'); await loaded('map');
+  const travel = page.locator('#journal-body .journal-cmd:not([disabled])', { hasText: 'Travel' }).first();
+  const hasRoad = await travel.count();
+  if (hasRoad) { await travel.click(); await h.idle(); }
+  const after = await page.locator('#location-display').innerText();
+  check('journal: the map\'s Travel button really travels', hasRoad && after !== before, `${before} → ${after}`);
+  // "j" opens it when not typing.
+  await page.locator('#story-output').click().catch(() => {});
+  await page.evaluate(() => document.activeElement && document.activeElement.blur());
+  await page.keyboard.press('j');
+  check('journal: the "j" key opens it', await h.visible('#modal-journal'));
+  await page.keyboard.press('Escape');
+  // The Still toggle stops looping animation in the scene.
+  await page.click('#btn-scene-still');
+  await page.waitForTimeout(200);
+  await h.send('look around');
+  const anims = await page.evaluate(() => [...document.querySelectorAll('#scene-holder *')].filter(el => getComputedStyle(el).animationName !== 'none').length);
+  check('still toggle: no running animations', anims === 0, `${anims} animated`);
+  await page.click('#btn-scene-still');
+  check('journal: no console errors', errors.length === 0, errors.slice(0, 3).join(' | '));
+  await page.context().close();
+  // On a phone.
+  const m = await newPage(browser, { width: 390, height: 844 });
+  const mh = helpers(m.page);
+  await m.page.goto(URL);
+  await createCharacter(m.page, mh, 'Moth');
+  await m.page.click('#btn-journal');
+  await waitUntil(m.page, () => document.getElementById('journal-body').dataset.loaded === 'map', null, 15000).catch(() => {});
+  const ov = await m.page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  const tabBox = await m.page.locator('#jtab-politics').boundingBox();
+  const boxW = await m.page.locator('.journal-box').boundingBox();
+  check('mobile: the journal fits the screen', ov <= 1 && boxW && boxW.width <= 390, `overflow ${ov}px, box ${boxW ? Math.round(boxW.width) : '?'}px`);
+  check('mobile: journal tabs are touch-sized', tabBox && tabBox.height >= 32, tabBox ? `${Math.round(tabBox.height)}px` : 'none');
+  check('mobile: journal no console errors', m.errors.length === 0, m.errors.slice(0, 3).join(' | '));
+  await m.page.context().close();
+}
+
 async function mobile(browser) {
   const { page, errors } = await newPage(browser, { width: 390, height: 844 });
   const h = helpers(page);
@@ -230,6 +293,7 @@ async function mobile(browser) {
   try {
     await desktop(browser);
     await reducedMotion(browser);
+    await journal(browser);
     await mobile(browser);
   } catch (e) {
     results.push(`FAIL  script error — ${e.message}`);

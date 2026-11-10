@@ -490,7 +490,9 @@ document.addEventListener('DOMContentLoaded', () => {
   bind('btn-scene-still', () => {
     let still = false;
     try { still = localStorage.getItem('ea-still') !== '1'; localStorage.setItem('ea-still', still ? '1' : '0'); } catch (e) { /* ignore */ }
-    const b = document.getElementById('btn-scene-still'); if (b) b.textContent = still ? 'Animate' : 'Still';
+    const b = document.getElementById('btn-scene-still'); if (b) { b.textContent = still ? 'Animate' : 'Still'; b.setAttribute('aria-pressed', still ? 'true' : 'false'); }
+    // Stop (or restart) the scene's looping animation at once, not on the next turn.
+    const holder = document.getElementById('scene-holder'); if (holder) holder.classList.toggle('ea-still-mode', still || !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches));
   });
   bind('btn-saves', () => setTimeout(loadWorldsList, 50));
 });

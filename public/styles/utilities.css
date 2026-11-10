@@ -518,3 +518,28 @@ button.retry-btn:not(.story-btn):hover {
 .road-marker { position: absolute; top: -3px; width: 4px; height: 14px; margin-left: -2px; background: #fff; border: 1px solid #000; border-radius: 2px; left: 50%; transition: left 0.6s ease; }
 .road-label { margin-top: 2px; }
 @media (prefers-reduced-motion: reduce) { .road-marker { transition: none; } }
+
+/* ---------- Journal ---------- */
+.journal-box { max-width: 760px; width: calc(100vw - 32px); max-height: calc(100vh - 32px); display: flex; flex-direction: column; }
+.journal-tabs { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0 10px; }
+.journal-tab { background: transparent; border: 1px solid var(--border, #4a3a2a); color: inherit; padding: 6px 10px; cursor: pointer; font: inherit; min-height: 36px; }
+.journal-tab.selected, .journal-tab[aria-selected="true"] { background: var(--accent, #8a5a2a); color: #fff; }
+.journal-tab:focus-visible, .journal-cmd:focus-visible { outline: 2px solid #f0c060; outline-offset: 2px; }
+.journal-tab, .journal-cmd { font-size: 0.82em; }
+.journal-body { font-size: 0.88em; overflow-y: auto; flex: 1 1 auto; min-height: 120px; max-height: 60vh; padding-right: 4px; }
+.journal-section { margin-bottom: 12px; }
+.journal-section h3 { font-size: 0.95em; margin: 0 0 4px; letter-spacing: 0.05em; }
+.journal-list { list-style: none; margin: 0; padding: 0; }
+.journal-list li { padding: 3px 0; border-bottom: 1px solid rgba(255,255,255,0.06); display: flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: space-between; }
+.journal-steps li.done { opacity: 0.6; text-decoration: line-through; }
+.journal-steps li.current { font-weight: bold; }
+.journal-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; align-items: center; }
+.journal-cmd { background: transparent; border: 1px solid var(--accent, #8a5a2a); color: inherit; padding: 4px 10px; cursor: pointer; font: inherit; min-height: 32px; }
+.journal-cmd[disabled] { opacity: 0.4; cursor: not-allowed; }
+.journal-error { color: #e07060; }
+.journal-note { color: #f0c060; }
+@media (max-width: 768px) {
+  .journal-box { width: calc(100vw - 16px); max-height: calc(100vh - 16px); padding: 10px; }
+  .journal-tab { flex: 1 1 30%; padding: 6px 4px; }
+  .journal-body { max-height: 62vh; }
+}

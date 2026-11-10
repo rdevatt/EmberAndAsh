@@ -19,6 +19,7 @@
       <span id="location-display">—</span>
     </div>
     <div id="header-right">
+      <button class="header-btn" id="btn-journal"  title="Journal: map, quests, skills, trade, companions, politics, chronicle, crafting, narrator" aria-haspopup="dialog">JOURNAL</button>
       <button class="header-btn" id="btn-saves"    title="Save Slots">SAVES</button>
       <button class="header-btn" id="btn-save"     title="Quick Save">SAVE</button>
       <button class="header-btn" id="btn-settings" title="Settings">⚙</button>
@@ -520,6 +521,25 @@
   <!-- =============================================
        SAVES MODAL
   ============================================= -->
+  <div id="modal-journal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="journal-title">
+    <div class="modal-box modal-box-wide journal-box">
+      <div class="modal-title" id="journal-title">JOURNAL</div>
+      <div class="journal-tabs" role="tablist" aria-label="Journal pages">
+        <button class="journal-tab" role="tab" data-tab="map" id="jtab-map" aria-controls="journal-body" aria-selected="true">Map</button>
+        <button class="journal-tab" role="tab" data-tab="quests" id="jtab-quests" aria-controls="journal-body" aria-selected="false" tabindex="-1">Quests</button>
+        <button class="journal-tab" role="tab" data-tab="skills" id="jtab-skills" aria-controls="journal-body" aria-selected="false" tabindex="-1">Skills</button>
+        <button class="journal-tab" role="tab" data-tab="trade" id="jtab-trade" aria-controls="journal-body" aria-selected="false" tabindex="-1">Trade</button>
+        <button class="journal-tab" role="tab" data-tab="companions" id="jtab-companions" aria-controls="journal-body" aria-selected="false" tabindex="-1">Companions</button>
+        <button class="journal-tab" role="tab" data-tab="politics" id="jtab-politics" aria-controls="journal-body" aria-selected="false" tabindex="-1">Politics</button>
+        <button class="journal-tab" role="tab" data-tab="chronicle" id="jtab-chronicle" aria-controls="journal-body" aria-selected="false" tabindex="-1">Chronicle</button>
+        <button class="journal-tab" role="tab" data-tab="crafting" id="jtab-crafting" aria-controls="journal-body" aria-selected="false" tabindex="-1">Crafting</button>
+        <button class="journal-tab" role="tab" data-tab="ai" id="jtab-ai" aria-controls="journal-body" aria-selected="false" tabindex="-1">Narrator</button>
+      </div>
+      <div id="journal-body" class="journal-body" role="tabpanel" tabindex="0" aria-live="polite">Loading…</div>
+      <div class="modal-btns"><button class="modal-btn secondary" id="btn-close-journal">CLOSE</button></div>
+    </div>
+  </div>
+
   <div id="modal-saves" class="modal hidden">
     <div class="modal-box modal-box-wide">
       <div class="modal-title">SAVE SLOTS</div>
@@ -606,5 +626,6 @@
   <script src="game/core.js"></script>
   <script src="game/ui.js"></script>
   <script src="game/creation.js"></script>
+  <script src="game/journal.js"></script>
 </body>
 </html>
