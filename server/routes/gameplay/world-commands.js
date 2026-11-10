@@ -119,6 +119,59 @@ module.exports = function createWorldCommands(h) {
       return sendCommand(req, res, r.message, 'politics', { persist: r.success });
     }
 
+    // ---------------- adventures built from the world's state ----------------
+    if (W) {
+      const adv = require('../../../game/adventures');
+      if (/^(?:adventures|my adventure|adventure status|look for work|what needs doing|work the world needs)[.!?]*$/i.test(cmd)) {
+        if (adv.current(state)) return sendCommand(req, res, adv.statusText(state, W), 'adventure', { persist: false });
+        if (!REGIONS[state.character.region].settlement) return sendCommand(req, res, 'There is no one out here to ask. Find a settlement.', 'adventure', { persist: false });
+        state.adventureOffers = adv.offers(state, W);
+        return sendCommand(req, res, adv.offerText(state.adventureOffers), 'adventure');
+      }
+      const takeM = cmd.match(/^(?:take|accept)\s+adventure\s+(\d)$/i);
+      if (takeM) {
+        const r = adv.take(state, W, parseInt(takeM[1], 10));
+        if (!r.success) return sendCommand(req, res, r.message, 'adventure', { persist: false });
+        req.session.undoLocked = true;
+        sys(events, r.message);
+        appendHint(state, `[ADVENTURE ACCEPTED — ${state.adventure.title}. ${state.adventure.intro} Narrate the commission briefly.]`);
+        return narrateAndRespond(req, res, input, events);
+      }
+      if (/^(?:abandon|give up)\s+(?:the\s+)?adventure$/i.test(cmd)) {
+        const r = adv.abandon(state, W);
+        req.session.undoLocked = true;
+        return sendCommand(req, res, r.message, 'adventure');
+      }
+      const advDecide = cmd.match(/^(adventure\s+)?(?:decide|choose)\s+(\d)$/i);
+      const campStep = campaign.getCurrentStep(state);
+      if (advDecide && state.pendingAdventureChoice && !state.inCombat && (advDecide[1] || (!state.pendingCompanionChoice && !(campStep && campStep.step.type === 'choice')))) {
+        const r = adv.decide(state, W, parseInt(advDecide[2], 10), { spawnEnemy });
+        if (r && !r.success) return sendCommand(req, res, r.message, 'adventure', { persist: false });
+        if (r) {
+          req.session.undoLocked = true; addTime(req, r.hours || 1);
+          sys(events, r.message); if (r.levelUp) events.push(r.levelUp);
+          appendHint(state, `[ADVENTURE — the player decided. ${r.message.split('\n')[0]} Narrate it and its consequence; do not add rewards.]`);
+          return narrateAndRespond(req, res, input, events);
+        }
+      }
+      if (adv.current(state) && !state.inCombat) {
+        const r = adv.handle(state, W, input, { spawnEnemy });
+        if (r && r.spawn) {
+          startEncounter(state, r.spawn, `[ADVENTURE FOE — ${r.spawn.label} (Lv${r.spawn.level}). Narrate its appearance.]`);
+          events.push({ type: 'combatStart', label: r.spawn.label, level: r.spawn.level });
+          req.session.undoLocked = true; addTime(req, 1);
+          return narrateAndRespond(req, res, input, events);
+        }
+        if (r) {
+          if (r.hours) addTime(req, r.hours);
+          req.session.undoLocked = true;
+          sys(events, r.message); if (r.levelUp) events.push(r.levelUp);
+          appendHint(state, `[ADVENTURE — ${state.adventure.title}: ${r.message.split('\n')[0]} Narrate exactly this outcome; add nothing the engine did not decide.]`);
+          return narrateAndRespond(req, res, input, events);
+        }
+      }
+    }
+
     const sagaCmd = endless.handleSagaCommand(state, W, input);
     if (sagaCmd) {
       if (sagaCmd.info || sagaCmd.started) return sendCommand(req, res, sagaCmd.message, 'saga', { persist: !!sagaCmd.started || /walk away/.test(sagaCmd.message) });

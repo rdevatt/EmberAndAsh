@@ -91,7 +91,7 @@ function lineage(world, child, parent, year) {
 // ---------------------------------------------
 // Ingesting chronicle events
 // ---------------------------------------------
-const ALWAYS = new Set(['death', 'succession', 'founding', 'ending', 'war', 'politics', 'crime', 'relic', 'bond', 'revolt', 'governance', 'longevity', 'monument', 'marriage', 'birth', 'oath', 'companion', 'lineage', 'retirement', 'movement', 'disaster', 'rivalry']);
+const ALWAYS = new Set(['death', 'succession', 'founding', 'ending', 'war', 'politics', 'crime', 'relic', 'bond', 'revolt', 'governance', 'longevity', 'monument', 'marriage', 'birth', 'oath', 'companion', 'lineage', 'retirement', 'movement', 'disaster', 'rivalry', 'adventure']);
 
 function ingest(world, entry) {
   if (!world || !entry) return;

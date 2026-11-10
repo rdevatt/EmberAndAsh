@@ -164,8 +164,9 @@ function econ(world, k) {
   const L = ensure(world);
   if (!L.economy[k]) {
     const r = REGIONS[k];
-    const pop = r && r.settlement ? 400 + hashInt(world.id + k) % 3200 : 20 + hashInt(world.id + k) % 160;
-    L.economy[k] = { pop, cap: pop * 4 };       // what the land and trade here can feed
+    const pop = r && r.settlement ? 150 + hashInt(world.id + k) % 3400 : 20 + hashInt(world.id + k) % 160;
+    // What the land and trade here can feed: some places are meant to stay small.
+    L.economy[k] = { pop, cap: Math.round(pop * (1.5 + (hashInt(k + 'cap') % 46) / 10)) };
   }
   if (!L.economy[k].cap) L.economy[k].cap = L.economy[k].pop * 4;
   return L.economy[k];

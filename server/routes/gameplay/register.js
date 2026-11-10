@@ -47,6 +47,7 @@ const HELP_TEXT = [
   'Growth:   stats · spend point on <stat>   (offers: answer "yes" or "no")',
   'Party:    companions · recruit <name> · hire a sellsword · dismiss <name> · companion stories · decide N',
   'Place:    news (how this place stands, who rules, crises) · help rebuild · donate <coin> to rebuild',
+  'Work:     adventures (work the world needs: mysteries, rescues, trade, building, research, war, peace, intrigue) · take adventure N · abandon adventure',
   'Shop:     open shop · close shop (merchants: sell your own goods)'
 ].join('\n');
 
@@ -282,6 +283,10 @@ module.exports = function registerGameplayRoutes(app, deps) {
       const r = endless.onSagaEvent(state, W, { type: 'kill', meta });
       if (r) { events.push({ type: 'system', message: r.message }); if (r.levelUp) events.push(r.levelUp); }
     }
+    if (meta.adventure && W) {
+      const r = require('../../../game/adventures').onEvent(state, W, { type: 'kill', meta });
+      if (r) { events.push({ type: 'system', message: r.message }); if (r.levelUp) events.push(r.levelUp); }
+    }
     if (meta.companionStory) {
       // A companion story's foe falls: the story moves on, or settles.
       const cq = require('../../../game/companion-quests');
@@ -410,6 +415,9 @@ module.exports = function registerGameplayRoutes(app, deps) {
     // Companion stories: offered when trust is earned; advanced by what the
     // player does and where they go; a story's foe comes to them.
     if (state.character && state.character.region && !isInCreation(state)) {
+      const Wd = chronicle.worldOf(state);
+      const late = Wd ? require('../../../game/adventures').checkDeadline(state, Wd) : null;
+      if (late) events.push({ type: 'system', message: late.message });
       const cq = require('../../../game/companion-quests');
       for (const o of cq.offerStories(state)) events.push({ type: 'system', message: o.message });
       if (!state.inCombat) for (const r of cq.advance(state, { type: 'input', input })) events.push({ type: 'system', message: r.message });
@@ -457,6 +465,7 @@ module.exports = function registerGameplayRoutes(app, deps) {
       const dead = isDead(state);
       if (fleeing && fleeing.meta && fleeing.meta.rebellion && (fleeResult.success || dead)) events.push({ type: 'system', message: slavery.endRebellion(state, false) });
       if (fleeing && fleeing.meta && fleeing.meta.companionStory && (fleeResult.success || dead)) storyFightLost(state, fleeing.meta.companionStory, events);
+      if (fleeing && fleeing.meta && fleeing.meta.adventure && (fleeResult.success || dead) && chronicle.worldOf(state)) { const r = require('../../../game/adventures').onEvent(state, chronicle.worldOf(state), { type: 'fightLost', meta: fleeing.meta }); if (r) events.push({ type: 'system', message: r.message }); }
       if (fleeResult.success || dead) slavery.afterFight(state, false);
       if (dead) applyDeath(state, events);
       return narrateAndRespond(req, res, input, events);
@@ -476,6 +485,7 @@ module.exports = function registerGameplayRoutes(app, deps) {
       if (state.buffs) delete state.buffs.next;
       if (enemyBefore && enemyBefore.meta && enemyBefore.meta.rebellion) events.push({ type: 'system', message: slavery.endRebellion(state, !!combatResult.enemyKilled && !fell) });
       if (fell && enemyBefore && enemyBefore.meta && enemyBefore.meta.companionStory) storyFightLost(state, enemyBefore.meta.companionStory, events);
+      if (fell && enemyBefore && enemyBefore.meta && enemyBefore.meta.adventure && chronicle.worldOf(state)) { const r = require('../../../game/adventures').onEvent(state, chronicle.worldOf(state), { type: 'fightLost', meta: enemyBefore.meta }); if (r) events.push({ type: 'system', message: r.message }); }
     }
     if (fell) applyDeath(state, events);
 
@@ -693,6 +703,8 @@ module.exports = function registerGameplayRoutes(app, deps) {
         worldCommands.pushCampaign(events, campaign.onEvent(state, { type: 'arrived', region: result.to }));
         const W = chronicle.worldOf(state);
         if (W) {
+          const ar = require('../../../game/adventures').onEvent(state, W, { type: 'arrived', region: result.to });
+          if (ar) { events.push({ type: 'system', message: ar.message }); if (ar.levelUp) events.push(ar.levelUp); }
           const occ = require('../../../game/world-life').occupationNote(W, result.to);
           if (occ) events.push({ type: 'system', message: occ });
           const sg = endless.onSagaEvent(state, W, { type: 'arrived', region: result.to });
