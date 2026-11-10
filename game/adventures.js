@@ -93,7 +93,8 @@ const KINDS = {
   },
 
   trade(state, world, seed) {
-    const struggling = settlements().filter(k => ['struggling', 'ruined'].includes((world.settlements[k] || {}).status));
+    // A cart hauled to somewhere else: never the town you are standing in.
+    const struggling = settlements().filter(k => k !== state.character.region && ['struggling', 'ruined'].includes((world.settlements[k] || {}).status));
     if (!struggling.length) return null;
     const region = pick(fitting(state, struggling), seed);
     const cost = 60 * lvlOf(state) + 200;

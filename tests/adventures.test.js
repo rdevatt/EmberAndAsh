@@ -146,8 +146,9 @@ test('steps are enforced: the right place, the right words, coin, materials, and
   for (let i = 0; i < 3; i++) r = adv.handle(s, w, 'persuade the councils');
   assert.ok(r.failed, r.message);
   assert.match(r.message, /The talks are over/);
-  assert.ok(s.factions.wardens < (before.wardens || 0), 'the failure costs standing');
-  assert.equal(politics.relation(w, 'wardens', 'remnant').state, 'war', 'and the war goes on');
+  const [fa, fb] = Object.keys(neg.fail.standing);
+  assert.ok((s.factions[fa] || 0) < (before[fa] || 0) && (s.factions[fb] || 0) < (before[fb] || 0), 'the failure costs standing with both sides');
+  assert.equal(politics.relation(w, fa, fb).state, 'war', 'and the war goes on');
 });
 
 test('deadlines: a rescue left too long ends in a death the world remembers', () => {
@@ -174,8 +175,8 @@ test('consequences change the world: a truce, a throne, a held front, a new well
     return a;
   };
   s.stats.cha = 60;
-  run('negotiation');
-  assert.equal(politics.relation(w, 'wardens', 'remnant').state, 'truce');
+  const neg = run('negotiation');
+  assert.equal(politics.relation(w, neg.success.relation.a, neg.success.relation.b).state, 'truce', 'the war it was about ends');
   run('intrigue', 2);
   assert.equal(wl.rulerOf(w, 'remnant').name, 'Cassia Aurel', 'the letters put the claimant on the throne');
   assert.ok(w.canon.reigns.some(r => r.ruler === 'Cassia Aurel'));
