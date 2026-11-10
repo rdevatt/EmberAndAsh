@@ -60,7 +60,7 @@ const labelToKey = {};
 for (const [k, r] of Object.entries(REGIONS)) labelToKey[r.label] = k;
 const tierFor = lvl => { let t = 0; for (const q of GEAR_QUALITIES) if (lvl >= q.levelReq) t = q.tier; return t; };
 
-const stats = { actions: 0, deaths: 0, kills: 0, bosses: [], chapters: [], regions: new Set(), crafted: 0, recruited: [], quests: 0, landmarks: 0, levelAt: {}, errors: [] };
+const stats = { actions: 0, deaths: 0, kills: 0, bosses: [], chapters: [], regions: new Set(), crafted: 0, recruited: [], quests: 0, landmarks: 0, levelAt: {}, errors: [], hired: 0 };
 let c, last = {};
 let serverSessions = null;
 // Read-only peek at the live state for bookkeeping (saga step details).
@@ -302,6 +302,14 @@ async function storyStep() {
   if (ch.id >= 3 && !stats.recruited.includes('maren')) {
     const r = await act('recruit Maren');
     if (/joins you/.test(r.output || '')) { stats.recruited.push('maren'); log('  Maren joined'); }
+    // As a player would on a path Maren will not walk: hire a blade in town,
+    // and renew the contract when it runs out.
+    else if (!(stats.hiredUntil > stats.actions) && stats.actions - (stats.lastHireTry || -99) >= 20) {
+      stats.lastHireTry = stats.actions;
+      const hr = await act('hire a sellsword');
+      if (/signs on for/.test(hr.output || '')) { stats.hiredUntil = stats.actions + 60; stats.hired = (stats.hired || 0) + 1; }
+      else if (/already have a sellsword/.test(hr.output || '')) stats.hiredUntil = stats.actions + 20;
+    }
   }
   return 'story';
 }
@@ -452,7 +460,7 @@ function findNpcName(id) {
     finalLevel: final.character && final.character.level, deaths: stats.deaths, kills: stats.kills,
     bounties: stats.quests, landmarks: stats.landmarks, crafted: stats.crafted,
     regionsVisited: stats.regions.size, chapters: stats.chapters, bosses: stats.bosses,
-    companions: (final.party || []).map(p => p.name), factions: final.factions,
+    companions: (final.party || []).map(p => p.name), sellswordsHired: stats.hired, factions: final.factions,
     class: final.character && final.character.combatClass, profession: final.character && final.character.profession,
     rift, serverErrors: stats.errors.slice(0, 10)
   };

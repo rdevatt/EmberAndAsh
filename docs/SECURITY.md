@@ -101,6 +101,12 @@ The database files that were tracked before `86f43fa` are still in history (15 b
 - **Archived characters and worlds** carry an owner key (`player:<id>` or `guest:<session>`). Resume, list and archive check it, so another player's character ID gives 404, and other players' worlds never appear.
 - **Worlds** attach only through server-held state; no route accepts a client-supplied world or state.
 - `tests/security.test.js` checks each of these with a second account and a guest. It also covers login fixation, remember-me hashing and migration, revocation, rate limiting, forged IDs and body limits.
+- **The journal** (`GET /api/journal/:tab`, added in this pass) is read-only and session-protected:
+  - It builds nine pages from the session's own state only.
+  - It answers 401 without a session, 409 during character creation, and 404 for anything but the nine page names (including path tricks).
+  - Its buttons send ordinary commands through `/api/action`, so the journal can do nothing the game would not allow.
+  - The narrator page reports whether a key is configured (yes or no), never the key.
+  - `tests/journal.test.js` checks every page for keys, password hashes, tokens and session IDs.
 
 ## 5. Rendering
 
@@ -108,6 +114,8 @@ The database files that were tracked before `86f43fa` are still in history (15 b
 - **Escaping in attributes:** the attribute escaper now escapes quotes as well (it is used inside `title` and `data-` attributes).
 - **SVG art** escapes names in its labels.
 - **The strict CSP** is a second line of defence: even an injected `<script>` would not run.
+- **The journal client** builds every element with DOM methods (`textContent`), never with HTML strings from the server.
+- **Hostile input:** the acceptance tester sends script tags, SQL fragments, prompt-injection text, 600-character strings and emoji through the real API. No errors, leaks or broken output were found in 1,800 offline and 36 live actions.
 
 ## 6. Backups (`scripts/db-backup.js`)
 
@@ -120,6 +128,10 @@ The database files that were tracked before `86f43fa` are still in history (15 b
 
 - **Temporary databases only.** All tests, bots and simulations use temporary databases (`tests/helpers.js` sets `EMBER_DB_PATH` to a temp file; `db/database.js` refuses the real path under `node --test` or `EMBER_REQUIRE_DB_PATH=1`). The real `data/emberandash.db` is not opened in development.
 - **No secrets in output.** Secrets are never printed, logged or committed. Live AI tests read the key from `.env` without echoing it.
+- **AI calls have our own deadline.** A provider call that never answers is abandoned after `EMBER_AI_TIMEOUT_MS` + 2 s, and the turn is told by the game's own narrator. This does not rely on the SDK's timeout (tested).
+- **CI** (`.github/workflows/ci.yml`, not yet pushed):
+  - It runs the suite offline on Node 20 and 22 with temporary databases and no secrets.
+  - It fails if a `.env` or database file is tracked, or if a Groq key pattern appears in tracked code.
 
 ## 8. Manual steps for the owner
 
