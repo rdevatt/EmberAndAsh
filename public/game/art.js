@@ -377,7 +377,59 @@
     if (w === 'blight' || w === 'corruption') for (let i = 0; i < 24; i++) s += `<circle cx="${(n(i) + i * 17) % 400}" cy="${(i * 31) % 200}" r="1.5" fill="${w === 'blight' ? '#a070c0' : '#c0d8d0'}" opacity="0.7" class="ea-fall" style="animation-delay:${(i % 6) * 0.5}s"/>`;
     if (w === 'heat') s += `<rect width="400" height="200" fill="#ff8040" opacity="0.08"/>`;
     if (w === 'void') s += `<rect width="400" height="200" fill="#5a2a8a" opacity="0.12" class="ea-pulse"/>`;
+    // Everyday weather: overcast, rain, storm, snow, dust.
+    if (w === 'overcast' || w === 'rain' || w === 'storm') s += `<rect width="400" height="200" fill="#5a6270" opacity="${w === 'storm' ? 0.34 : w === 'rain' ? 0.2 : 0.12}" class="ea-overcast"/>`;
+    if (w === 'rain' || w === 'storm') {
+      s += '<g class="ea-rain">';
+      for (let i = 0; i < (w === 'storm' ? 60 : 38); i++) { const x = (n(i) + i * 11) % 420 - 10, y = (i * 23) % 200; s += `<line x1="${x}" y1="${y}" x2="${x - 4}" y2="${y + 10}" stroke="#b8c8dc" stroke-width="0.9" opacity="0.7" class="ea-fall" style="animation-duration:${0.9 + (i % 5) * 0.12}s;animation-delay:${(i % 9) * 0.1}s"/>`; }
+      s += '</g>';
+    }
+    if (w === 'storm') s += '<path d="M260 8 l-14 34 h10 l-12 30 l26 -40 h-10 l12 -24z" fill="#f4f0c0" opacity="0.85" class="ea-lightning ea-pulse"/>';
+    if (w === 'snow') { s += '<g class="ea-snow">'; for (let i = 0; i < 44; i++) s += `<circle cx="${(n(i) + i * 13) % 400}" cy="${(i * 29) % 200}" r="${1 + (i % 3) * 0.5}" fill="#fff" opacity="0.9" class="ea-fall" style="animation-duration:${4 + (i % 4)}s;animation-delay:${(i % 7) * 0.4}s"/>`; s += '</g>'; }
+    if (w === 'dust') s += '<rect width="400" height="200" fill="#c8a060" opacity="0.22" class="ea-drift ea-dust"/>';
     return s;
+  }
+
+  // Colours of the four powers, for banners over the places they hold.
+  const FACTION_COLOURS = { wardens: ['#b8402a', '#f0b040'], compact: ['#2f6a3a', '#e8e0c0'], remnant: ['#c89a28', '#7a1a1a'], choir: ['#5a5a6a', '#d8d8e0'] };
+  function banner(b) {
+    if (!b || !FACTION_COLOURS[b.faction]) return '';
+    const [field, mark] = FACTION_COLOURS[b.faction];
+    // An occupier's banner hangs at every gate; a native one flies alone.
+    const poles = b.occupied ? [352, 30] : [360];
+    return poles.map(x => `<g class="ea-banner" data-faction="${esc(b.faction)}" data-occupied="${b.occupied ? 1 : 0}" transform="translate(${x} 70)"><rect x="-1" y="0" width="2" height="80" fill="#3a3028"/><path d="M1 4 h22 v26 l-11 -6 l-11 6z" fill="${field}" class="ea-flap"/><circle cx="12" cy="14" r="4" fill="${mark}"/></g>`).join('');
+  }
+
+  // A disaster that has not been rebuilt from, drawn over the land.
+  function disasterLayer(d, seed) {
+    if (!d) return '';
+    const left = Math.max(0.2, 1 - (d.progress || 0) / 100);
+    let s = `<g class="ea-disaster" data-kind="${esc(d.kind)}" opacity="${(0.4 + left * 0.6).toFixed(2)}">`;
+    if (d.kind === 'flood') s += '<rect x="-400" y="150" width="1200" height="50" fill="#4a6a8a" opacity="0.7"/><path d="M-400 150 q20 -5 40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0" stroke="#a8c8e8" fill="none" class="ea-drift"/>';
+    if (d.kind === 'fire') for (let i = 0; i < 4; i++) s += `<g transform="translate(${30 + i * 90} 120)"><rect x="-12" y="0" width="24" height="26" fill="#2a2420"/><path d="M-14 0 l5 -8 l4 4 l5 -8 l14 12z" fill="#1a1410"/><path d="M-2 -6 q-10 -18 4 -34 q12 -16 2 -36" stroke="#4a4a4a" stroke-width="${7 + i}" fill="none" opacity="0.38" stroke-linecap="round" class="ea-drift"/><circle cx="${-6 + i * 3}" cy="18" r="1.6" fill="#f08a2a" class="ea-flicker"/></g>`;
+    if (d.kind === 'plague') s += '<rect x="-400" width="1200" height="200" fill="#8aa070" opacity="0.18"/><g transform="translate(40 140)"><rect x="0" y="0" width="16" height="12" fill="#2a2420"/><path d="M8 0 v-10 M3 -6 h10" stroke="#e8e0d0" stroke-width="2"/></g>';
+    if (d.kind === 'quake') s += '<path d="M20 160 l20 6 l-8 10 l26 4 l-6 8 l30 2 M240 150 l16 10 l-10 6 l24 8" stroke="#1a1410" stroke-width="2.2" fill="none"/><path d="M300 140 l10 -30 l8 30" stroke="#2a2420" stroke-width="3"/>';
+    if (d.kind === 'famine') for (let i = 0; i < 9; i++) s += `<path d="M${20 + i * 40} 168 l2 -14 l-5 -6 M${22 + i * 40} 154 l4 -5" stroke="#8a7040" stroke-width="1.4" fill="none"/>`;
+    return s + '</g>';
+  }
+
+  // Work the player is doing: scaffolding for the rebuilding, a forge for a masterwork, the inn's sign.
+  function workLayer(sc) {
+    let s = '';
+    if (sc.rebuilding) s += '<g class="ea-scaffold" transform="translate(196 92)"><rect x="0" y="20" width="64" height="58" fill="#7a6048" opacity="0.6"/><path d="M0 0 v78 M32 0 v78 M64 0 v78 M0 20 h64 M0 46 h64 M0 0 l32 20 M32 0 l32 20" stroke="#5a4028" stroke-width="2.4" fill="none"/><rect x="-8" y="72" width="24" height="6" fill="#9a8a70"/></g>';
+    if (sc.forge) s += '<g class="ea-forge" transform="translate(186 140)"><path d="M0 0 h34 l-6 8 h-22z" fill="#3a3a42"/><rect x="12" y="8" width="10" height="20" fill="#2a2a30"/><g class="ea-flicker"><circle cx="30" cy="-6" r="1.6" fill="#ffd060"/><circle cx="24" cy="-11" r="1.2" fill="#ffb040"/><circle cx="36" cy="-12" r="1" fill="#fff0a0"/></g></g>';
+    if (sc.ownInn) s += '<g class="ea-inn-sign" transform="translate(40 96)"><rect x="0" y="0" width="2" height="54" fill="#3a2818"/><path d="M2 4 h20" stroke="#3a2818" stroke-width="2"/><rect x="8" y="8" width="20" height="14" fill="#c8a060" stroke="#5a3a20"/><path d="M12 15 h12 M15 12 v6" stroke="#5a3a20" stroke-width="1.6"/></g>';
+    return s;
+  }
+
+  // At sea: water to the horizon and the ship under the player's feet.
+  function seaLayer(v) {
+    let s = '<g class="ea-sea"><rect x="-400" y="132" width="1200" height="68" fill="#2a4a6a"/>';
+    for (let i = 0; i < 10; i++) s += `<path d="M${-380 + i * 120} ${142 + (i % 3) * 16} q15 -6 30 0 t30 0" stroke="#7aa0c8" fill="none" class="ea-drift" style="animation-duration:${6 + i % 4}s"/>`;
+    // The deck sits at the player's feet (y≈170); hull below, mast and sail behind them.
+    s += '<g class="ea-ship" transform="translate(20 170)"><rect x="128" y="-120" width="4" height="120" fill="#3a2818"/><path d="M132 -116 q46 40 0 92z" fill="#e8e0c8" stroke="#a89878"/><path d="M-6 0 h190 l-26 26 h-140z" fill="#5a3a22" stroke="#2a1a10"/><path d="M-6 0 h190" stroke="#8a6040" stroke-width="2"/><path d="M180 0 l18 -16" stroke="#3a2818" stroke-width="3"/></g>';
+    if (v && v.pirates) s += '<g class="ea-pirates" transform="translate(300 148)"><path d="M0 0 h90 l-14 18 h-62z" fill="#2a1a14"/><rect x="44" y="-56" width="3" height="56" fill="#1a1410"/><path d="M47 -52 q26 20 0 42z" fill="#1a1a1a"/><circle cx="56" cy="-34" r="4" fill="#e8e8e8"/></g>';
+    return s + '</g>';
   }
 
   /**
@@ -468,17 +520,25 @@
     out.push('<g class="ea-backdrop">');
     out.push(`<rect width="400" height="200" fill="url(#sky${seed})"/>`);
     if (sc.timeOfDay === 'night') { for (let i = 0; i < 26; i++) out.push(`<circle cx="${(seed >> (i % 20)) % 400}" cy="${(i * 37) % 110}" r="0.8" fill="#fff" opacity="0.8"/>`); out.push('<circle cx="330" cy="30" r="12" fill="#e8e8d8"/>'); }
-    else out.push(`<circle cx="${sc.timeOfDay === 'dawn' ? 40 : sc.timeOfDay === 'dusk' ? 360 : 300}" cy="${sc.timeOfDay === 'dawn' || sc.timeOfDay === 'dusk' ? 120 : 34}" r="14" fill="${sc.timeOfDay === 'dusk' || sc.timeOfDay === 'dawn' ? '#f0a060' : '#fff4c0'}" opacity="0.9"/>`);
+    else {
+      // Behind cloud the sun is a pale smudge, or gone.
+      const wx = sc.voyage && sc.voyage.storm ? 'storm' : sc.weather;
+      const sunOp = wx === 'storm' || wx === 'snow' ? 0 : wx === 'rain' ? 0.18 : wx === 'overcast' || wx === 'fog' || wx === 'dust' ? 0.35 : 0.9;
+      if (sunOp) out.push(`<circle cx="${sc.timeOfDay === 'dawn' ? 40 : sc.timeOfDay === 'dusk' ? 360 : 300}" cy="${sc.timeOfDay === 'dawn' || sc.timeOfDay === 'dusk' ? 120 : 34}" r="14" fill="${sc.timeOfDay === 'dusk' || sc.timeOfDay === 'dawn' ? '#f0a060' : '#fff4c0'}" opacity="${sunOp}" class="ea-sun"/>`);
+    }
     if (sc.timeOfDay !== 'night' && !['void', 'throne'].includes(sc.biome)) {
       // A few clouds, placed by region so each place keeps its own sky.
       const cloud = sc.timeOfDay === 'dusk' || sc.timeOfDay === 'dawn' ? '#f0c8b0' : '#ffffff';
       for (let i = 0; i < 3; i++) { const cx = (seed >> (i * 5)) % 360 + 20, cy = 18 + ((seed >> (i * 3 + 2)) % 40), w = 26 + ((seed >> i) % 22); out.push(`<g opacity="${sc.weather === 'fog' ? 0.25 : 0.55}" class="ea-drift" style="animation-duration:${14 + i * 5}s"><ellipse cx="${cx}" cy="${cy}" rx="${w}" ry="${w * 0.28}" fill="${cloud}"/><ellipse cx="${cx + w * 0.35}" cy="${cy - 5}" rx="${w * 0.5}" ry="${w * 0.3}" fill="${cloud}"/></g>`); }
     }
     if (era) out.push(`<rect width="400" height="200" fill="${era}" opacity="0.12"/>`);
-    out.push(`<g class="ea-bg">${biomeLayers(sc.biome, sc.season, seed)}</g>`);
-    if (sc.settlementStatus === 'ruined') out.push('<path d="M20 150 l10 -30 l8 30 M60 150 l6 -18 l8 18" stroke="#2a2420" stroke-width="3"/><circle cx="40" cy="110" r="10" fill="#555" opacity="0.4" class="ea-drift"/>');
+    out.push(`<g class="ea-bg">${sc.voyage ? seaLayer(sc.voyage) : biomeLayers(sc.biome, sc.season, seed)}</g>`);
+    if (!sc.voyage) out.push(banner(sc.banner));
+    if (!sc.voyage) out.push(disasterLayer(sc.disaster, seed));
+    if (!sc.voyage) out.push(workLayer(sc));
+    if (sc.settlementStatus === 'ruined' && !sc.voyage) out.push('<path d="M20 150 l10 -30 l8 30 M60 150 l6 -18 l8 18" stroke="#2a2420" stroke-width="3"/><circle cx="40" cy="110" r="10" fill="#555" opacity="0.4" class="ea-drift"/>');
     // Horror off softens the dread in void, blight and throne scenery.
-    out.push(`<g class="ea-weather"${(sc.content || {}).horror === 'off' ? ' opacity="0.35"' : ''}>${weatherLayer(sc.weather, seed)}</g>`);
+    out.push(`<g class="ea-weather" data-weather="${esc(sc.voyage && sc.voyage.storm ? 'storm' : sc.weather || 'clear')}"${(sc.content || {}).horror === 'off' ? ' opacity="0.35"' : ''}>${weatherLayer(sc.voyage && sc.voyage.storm ? 'storm' : sc.weather, seed)}</g>`);
     out.push(horrorLayer(sc, seed));
     out.push('</g>');
     // campfire / inn for rest
@@ -530,7 +590,7 @@
       if (sc.enemy) out.push(`<g class="ea-actor ea-enemy${sc.enemy.dead ? ' ea-dead' : ''}" transform="translate(290 ${sc.enemy.boss ? 50 : 82})">${enemyArt(sc.enemy)}</g>`);
       else if (sc.npc) out.push(`<g class="ea-actor ea-npc" transform="translate(290 80) scale(-1 1)">${figure({ appearance: sc.npc.appearance, gender: sc.npc.gender, age: sc.npc.age || 40, armor: { kind: 'clothes' }, weapon: { kind: 'none' }, crown: sc.npc.crown, nude: sc.npc.nude }, sc.npc.pose || 'idle', fopts)}</g>`);
     }
-    out.push(`<g class="ea-fore">${foreground(sc.biome, sc.season, seed)}</g>`);
+    if (!sc.voyage) out.push(`<g class="ea-fore">${foreground(sc.biome, sc.season, seed)}</g>`);
     out.push('<g class="ea-fx"></g>');
     if (sc.mood === 'prison') {
       out.push('<rect x="-400" width="1200" height="200" fill="#000" opacity="0.5"/>');
@@ -544,5 +604,5 @@
     return out.join('');
   }
 
-  return { portrait, figure, enemyArt, scene, esc, hash, mix };
+  return { portrait, figure, enemyArt, scene, esc, hash, mix, weatherLayer, banner, disasterLayer };
 }));

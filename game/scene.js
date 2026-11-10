@@ -28,6 +28,26 @@ const BIOMES = {
   eternal_breach: 'void', the_crucible: 'volcanic', the_core_wastes: 'void', shattered_throne: 'throne'
 };
 
+// Weather that changes with the place, the season and the day — the same
+// for everyone in that place on that day. A region's hazard (fog, cold,
+// blight…) always shows; otherwise the sky is clear, overcast, raining,
+// stormy, snowing or dusty as its land and season allow.
+const WET = ['farmland', 'moor', 'coast', 'swamp', 'forest', 'silverwood', 'town', 'city', 'hills', 'battlefield', 'castle', 'ruins'];
+const COLD = ['snow', 'mountain', 'moor'];
+const DRY = ['desert', 'plains', 'saltflat', 'ashland'];
+function weatherOf(regionKey, biome, season, day) {
+  const h = hashInt(`${regionKey}:${day}`) % 100;
+  if (['void', 'throne', 'volcanic', 'whitecity', 'blight'].includes(biome)) return h < 15 ? 'overcast' : null;
+  if (COLD.includes(biome) && (season === 'winter' || biome === 'snow')) return h < 45 ? 'snow' : h < 60 ? 'overcast' : null;
+  if (season === 'winter' && WET.includes(biome) && h < 18) return 'snow';
+  if (DRY.includes(biome)) return h < 14 ? 'dust' : h < 22 ? 'overcast' : null;
+  if (WET.includes(biome)) {
+    const wet = season === 'autumn' || season === 'spring' ? 40 : season === 'winter' ? 30 : 22;
+    return h < wet * 0.25 ? 'storm' : h < wet ? 'rain' : h < wet + 15 ? 'overcast' : null;
+  }
+  return null;
+}
+
 function hashInt(s) { let h = 2166136261; for (const ch of String(s)) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); } return h >>> 0; }
 
 function enemyShape(enemy) {
@@ -130,7 +150,7 @@ function buildScene(state, ctx = {}) {
   const scene = {
     region: state.character.region, regionLabel: region.label, biome: BIOMES[state.character.region] || 'plains',
     timeOfDay: date.timeOfDay, season: date.season, year: date.year,
-    weather: region.hazard ? region.hazard.key : null,
+    weather: region.hazard ? region.hazard.key : weatherOf(state.character.region, BIOMES[state.character.region] || 'plains', date.season, world ? chronicle.nowDay(world) : 0),
     settlement: !!region.settlement && !state.inCombat,
     settlementStatus: world && world.settlements[state.character.region] ? world.settlements[state.character.region].status : 'thriving',
     era: world && world.ending ? world.ending : null,
@@ -143,6 +163,18 @@ function buildScene(state, ctx = {}) {
     wounds: state.maxHp ? (state.hp / state.maxHp < 0.25 ? 2 : state.hp / state.maxHp < 0.5 ? 1 : 0) : 0
   };
   scene.player.wounds = scene.wounds;
+  // Who holds this place, and whether it is occupied; disasters and
+  // rebuilding; an inn the player owns.
+  if (world) {
+    try {
+      const wl = require('./world-life');
+      const holder = chronicle.dominionOf(world, state.character.region);
+      if (holder && holder !== 'lawless') scene.banner = { faction: holder, occupied: !!wl.occupiedBy(world, state.character.region) };
+      const dz = wl.ensure(world).disasters.find(d => d.region === state.character.region && d.progress < 100);
+      if (dz) scene.disaster = { kind: dz.kind, progress: dz.progress };
+    } catch (e) { /* world-life not set up */ }
+  }
+  if (state.inn && state.inn.region === state.character.region) scene.ownInn = true;
   // Undressed is a fact of the story; how it is drawn follows content.nudity.
   scene.player.nude = !!state.undressed;
   scene.player.drawn = !!state.weaponDrawn;
@@ -159,6 +191,10 @@ function buildScene(state, ctx = {}) {
     else if (e.type === 'questComplete' || e.type === 'chapterComplete') scene.events.push({ type: 'triumph', label: e.quest ? e.quest.label : `Chapter ${e.chapter}` });
     else if (e.type === 'combatStart') scene.events.push({ type: 'encounter', boss: !!e.boss });
     else if (e.type === 'itemCrafted') scene.events.push({ type: 'craft' });
+    else if (e.type === 'voyage') { scene.events.push({ type: 'voyage', storm: !!e.storm, pirates: !!e.pirates }); scene.voyage = { storm: !!e.storm, pirates: !!e.pirates }; }
+    else if (e.type === 'rebuild') { scene.events.push({ type: 'rebuild' }); scene.rebuilding = true; scene.playerPose = 'idle'; }
+    else if (e.type === 'masterwork') { scene.events.push({ type: 'craft', masterwork: true }); scene.forge = true; }
+    else if (e.type === 'inn') { scene.events.push({ type: 'inn' }); scene.ownInn = true; }
     else if (e.type === 'intimacy') {
       scene.events.push({ type: 'intimacy', style: e.style, pose: e.pose || 'lying' });
       scene.mood = 'intimate'; scene.playerPose = 'rest';
@@ -195,4 +231,4 @@ function buildScene(state, ctx = {}) {
   return scene;
 }
 
-module.exports = { buildScene, BIOMES, enemyShape, combatEvents };
+module.exports = { buildScene, BIOMES, enemyShape, combatEvents, weatherOf };

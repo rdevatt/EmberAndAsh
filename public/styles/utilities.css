@@ -478,8 +478,9 @@ button.retry-btn:not(.story-btn):hover {
 @keyframes ea-flee { from { translate: 0 0; } to { translate: 60px 0; opacity: 0.4; } }
 .ea-flap { animation: ea-flap 0.9s ease-in-out infinite alternate; transform-box: fill-box; transform-origin: center bottom; }
 @keyframes ea-flap { from { scale: 1 1; } to { scale: 1 0.8; } }
+.ea-still-mode .ea-actor, .ea-still-mode .ea-float, .ea-still-mode .ea-fall, .ea-still-mode .ea-drift, .ea-still-mode .ea-flap, .ea-still-mode .ea-rock, .ea-still-mode .ea-bob, .ea-still-mode .ea-flee, .ea-still-mode .ea-pulse, .ea-still-mode .ea-glow, .ea-still-mode .ea-flicker, .ea-still-mode .ea-projectile, .ea-still-mode .ea-slide, .ea-still-mode .ea-shake, .ea-still-mode .ea-lunge, .ea-still-mode .ea-splatter, .ea-still-mode .ea-spark, .ea-still-mode .ea-eyes, .ea-still-mode .ea-fadeout, .ea-still-mode .ea-appear, .ea-still-mode .ea-enemy-lunge, .ea-still-mode .ea-walk { animation: none !important; transition: none !important; }
 @media (prefers-reduced-motion: reduce) {
-  .ea-actor, .ea-float, .ea-fall, .ea-drift, .ea-flap, .ea-rock, .ea-bob, .ea-flee, .ea-pulse, .ea-glow, .ea-flicker, .ea-projectile, .ea-slide, .ea-shake, .ea-lunge { animation: none !important; transition: none !important; }
+  .ea-actor, .ea-float, .ea-fall, .ea-drift, .ea-flap, .ea-rock, .ea-bob, .ea-flee, .ea-pulse, .ea-glow, .ea-flicker, .ea-projectile, .ea-slide, .ea-shake, .ea-lunge, .ea-appear, .ea-enemy-lunge, .ea-walk { animation: none !important; transition: none !important; }
 }
 @media (max-width: 768px) {
   #scene-holder { max-height: 170px; }

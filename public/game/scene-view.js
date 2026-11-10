@@ -115,6 +115,8 @@
     holder.innerHTML = window.EmberArt.scene(first);
     holder.dataset.region = scene.region || '';
     holder.dataset.mood = scene.mood || '';
+    holder.classList.toggle('ea-still-mode', still);
+    holder.dataset.weather = scene.voyage && scene.voyage.storm ? 'storm' : scene.weather || 'clear';
     holder.dataset.enemyDead = scene.enemy ? String(!!scene.enemy.dead) : 'none';
     if (caption) caption.textContent = `${scene.regionLabel || ''} · ${scene.season || ''} ${scene.timeOfDay || ''}${scene.year ? ` · ${scene.year} E.R.` : ''}`;
     const svg = holder.querySelector('svg');

@@ -97,6 +97,7 @@ module.exports = function createWorldCommands(h) {
         if (!r.success) return sendCommand(req, res, r.message, 'voyage', { persist: false });
         req.session.undoLocked = true; addTime(req, r.hours);
         sys(events, r.message);
+        events.push({ type: 'voyage', from: r.from, to: r.to, storm: /storm/.test(r.message), pirates: !!r.spawn });
         const ar = require('../../../game/adventures').onEvent(state, W, { type: 'arrived', region: r.to });
         if (ar) sys(events, ar.message);
         const occ = require('../../../game/world-life').occupationNote(W, r.to);
@@ -105,12 +106,17 @@ module.exports = function createWorldCommands(h) {
         appendHint(state, `[VOYAGE — the player sailed from ${REGIONS[r.from].label} to ${REGIONS[r.to].label}. Narrate the voyage and landfall.]`);
         return narrateAndRespond(req, res, input, events);
       }
-      if (/^(?:i\s+)?buy (?:the |an |this )?inn[.!?]*$/i.test(cmd)) return done(tw.buyInn(state), 'inn', 'INN BOUGHT');
-      if (/^(?:i\s+)?(?:collect|take) (?:the )?(?:takings|money|coin)? ?(?:from )?(?:the |my )?inn(?:'s takings)?[.!?]*$/i.test(cmd)) return done(tw.collectInn(state), 'inn', 'INN TAKINGS');
+      if (/^(?:i\s+)?buy (?:the |an |this )?inn[.!?]*$/i.test(cmd)) { const r = tw.buyInn(state); if (r.success) events.push({ type: 'inn' }); return done(r, 'inn', 'INN BOUGHT'); }
+      if (/^(?:i\s+)?(?:collect|take) (?:the )?(?:takings|money|coin)? ?(?:from )?(?:the |my )?inn(?:'s takings)?[.!?]*$/i.test(cmd)) { const r = tw.collectInn(state); if (r.success) events.push({ type: 'inn' }); return done(r, 'inn', 'INN TAKINGS'); }
       const ctr = cmd.match(/^(?:i\s+)?(?:take|accept) (?:the )?contract\s+(\d)[.!?]*$/i);
       if (ctr) return done(tw.takeContract(state, parseInt(ctr[1], 10)), 'contract', 'CONTRACT ACCEPTED');
-      if (/^(?:i\s+)?(?:carry out|fulfil|fulfill|complete|do) (?:the |my )?contract[.!?]*$/i.test(cmd)) return done(tw.carryOut(state, { removeCompanion }), 'contract', 'ASSASSINATION');
-      if (/^(?:i\s+)?(?:forge|make|craft) (?:a )?masterwork\b/i.test(cmd)) return done(tw.forgeMasterwork(state, cmd), 'masterwork', 'MASTERWORK');
+      if (/^(?:i\s+)?(?:carry out|fulfil|fulfill|complete|do) (?:the |my )?contract[.!?]*$/i.test(cmd)) {
+        const target = state.contract && state.contract.target;
+        const r = tw.carryOut(state, { removeCompanion });
+        if (r.success) events.push({ type: 'crime', crime: 'murder', victim: target, known: !!r.seen });
+        return done(r, 'contract', 'ASSASSINATION');
+      }
+      if (/^(?:i\s+)?(?:forge|make|craft) (?:a )?masterwork\b/i.test(cmd)) { const r = tw.forgeMasterwork(state, cmd); if (r.success) events.push({ type: 'masterwork' }); return done(r, 'masterwork', 'MASTERWORK'); }
     }
     if (/^(?:politics|wars|diplomacy|the powers|alliances)[.!?]*$/i.test(cmd)) return sendCommand(req, res, politics.buildPoliticsText(W, state), 'politics', { persist: false });
     if (/^(?:legends|heroes|figures|legacy)[.!?]*$/i.test(cmd)) return sendCommand(req, res, legacy.buildLegendsText(W, state), 'legends', { persist: false });
@@ -428,7 +434,11 @@ module.exports = function createWorldCommands(h) {
       const r = require('../../../game/world-life').helpRebuild(state, cmd);
       if (!r.success) return sendCommand(req, res, r.message, 'rebuild', { persist: false });
       req.session.undoLocked = true;
-      return sendCommand(req, res, r.message, 'rebuild', { hours: r.hours });
+      addTime(req, r.hours);
+      sys(events, r.message);
+      events.push({ type: 'rebuild' });
+      appendHint(state, `[REBUILDING — ${r.message.split('\n')[0]} Narrate the work and the people doing it; add nothing.]`);
+      return narrateAndRespond(req, res, input, events);
     }
 
     if (/^(?:deeds|my deeds|my crimes|what have i done|my sins|remember what i have done)$/.test(cmd)) {
