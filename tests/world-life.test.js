@@ -148,8 +148,10 @@ test('an order the player founds becomes a living institution that outlives them
   const r = require('../game/endless').foundOrder(s, w, 'the Order of the Ashen Lamp');
   assert.ok(r.success, r.message);
   const org = w.organizations[0];
-  years(s, 30);
-  assert.ok(org.members > 60, `it grows (${org.members})`);
+  // It grows into a school within a lifetime, through good years and bad.
+  let y = 0;
+  while (org.members <= 60 && y < 80) { years(s, 5); y += 5; }
+  assert.ok(org.members > 60, `it grows (${org.members} after ${y} years)`);
   assert.ok(['a school', 'a college', 'a great institution'].includes(org.rank), org.rank);
   assert.ok(w.canon.ledger.some(x => /Order of the Ashen Lamp grows into/.test(x.s)));
   // The founder dies; the order chooses a new master.

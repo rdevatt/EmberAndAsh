@@ -637,7 +637,18 @@ module.exports = function registerGameplayRoutes(app, deps) {
       }
 
       if (['check stats', 'status', 'character sheet', 'view stats', 'my stats', 'stats'].includes(cmd)) {
-        return sendCommand(req, res, null, 'stats', { persist: false });
+        // A character sheet in words, for phones (where the panel is a tab away) and screen readers.
+        const lvl = getPlayerLevel(state.totalXP || 0);
+        const XPm = require('../../../game/character/xp');
+        const spec = state.specialization && require('../../../game/specializations').available(state);
+        const sheet = [
+          `${state.character.name} — level ${lvl} (${XPm.formatXP(XPm.fromBig(XPm.toBig(require('../../../game/character').getXPForLevel(lvl + 1)) - XPm.toBig(state.totalXP || 0)))} XP to the next)`,
+          `${state.combatClass ? `${state.combatClass[0].toUpperCase()}${state.combatClass.slice(1)} (class level ${state.classLevel || 1})${spec ? `, ${spec[state.specialization].label}` : ''}` : 'No class yet'} · ${state.profession ? `${state.profession.replace('_', ' ')} (trade level ${state.professionLevel || 1})` : 'no trade yet'}`,
+          `HP ${Math.round(state.hp)}/${state.maxHp} · Mana ${Math.round(state.mana)}/${state.maxMana} · Stamina ${Math.round(state.stamina)}/${state.maxStamina}`,
+          ['str', 'dex', 'vit', 'int', 'wis', 'cha'].map(k => `${k.toUpperCase()} ${(state.stats || {})[k] || 0}`).join(' · ') + ((state.freePoints || 0) > 0 ? ` — ${state.freePoints} point(s) to spend ("spend point on <stat>")` : ''),
+          `Coin: ${formatCoin(state.coin || 0)}`
+        ].join('\n');
+        return sendCommand(req, res, sheet, 'stats', { persist: false });
       }
 
       if (['check gear', 'gear', 'inventory', 'check inventory', 'my inventory', 'equipment', 'my gear', 'inv', 'i'].includes(cmd)) {

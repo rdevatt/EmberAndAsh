@@ -117,8 +117,10 @@ function yearlyTurn(world) {
       const npc = (REGIONS[target].npcs || [])[hashInt(`${year}${target}`) % Math.max(1, (REGIONS[target].npcs || []).length)];
       if (npc && hashInt(`${year}${npc.id}war`) % 3 === 0) {
         const rec = chronicle.npcRecord(world, npc);
-        events.push(chronicle.addEvent(world, { type: 'death', importance: 3, title: `${rec.name} is killed in the fighting at ${REGIONS[target].label}`, region: target }));
-        rec.born = chronicle.nowDay(world) - 999 * chronicle.DAYS_PER_YEAR;   // succession at the next reckoning
+        // Someone takes up the work at once (never a 999-year-old placeholder).
+        const heir = `${chronicle.HEIR_NAMES[hashInt(npc.id + 'war' + rec.generation) % chronicle.HEIR_NAMES.length]} ${String(rec.name).split(' ').slice(-1)[0]}`;
+        events.push(chronicle.addEvent(world, { type: 'death', importance: 3, title: `${rec.name} is killed in the fighting at ${REGIONS[target].label}`, text: `${heir} takes up the work.`, region: target }));
+        world.npcs[npc.id] = { born: chronicle.nowDay(world) - (22 + hashInt(heir) % 15) * chronicle.DAYS_PER_YEAR, generation: rec.generation + 1, name: heir, predecessor: rec.name };
       }
     }
     world.factionPower[loser] = Math.max(5, (world.factionPower[loser] || 50) - 4);
