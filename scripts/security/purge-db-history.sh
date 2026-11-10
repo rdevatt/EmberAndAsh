@@ -69,10 +69,11 @@ git for-each-ref --format='   %(refname:short) %(objectname:short)' refs/heads r
 if [ "$PUSH" = "1" ]; then
   echo "== force-pushing (authorised)"
   # Branches and tags only: GitHub's refs/pull/* are read-only and would fail a --mirror push.
-  git push --force --prune origin 'refs/heads/*:refs/heads/*' 'refs/tags/*:refs/tags/*'
+  # (A mirror clone refuses refspecs unless its mirror setting is overridden.)
+  git -c remote.origin.mirror=false push --force origin 'refs/heads/*:refs/heads/*' 'refs/tags/*:refs/tags/*'
   echo "   done. Every other clone must re-clone or hard-reset."
 else
   echo "== not pushed. To publish (only with authorisation):"
-  echo "   cd $WORK/mirror.git && git push --force --prune origin 'refs/heads/*:refs/heads/*' 'refs/tags/*:refs/tags/*'"
+  echo "   cd $WORK/mirror.git && git -c remote.origin.mirror=false push --force origin 'refs/heads/*:refs/heads/*' 'refs/tags/*:refs/tags/*'"
   echo "   then in your working copy: git fetch origin && git reset --hard origin/<branch>"
 fi
